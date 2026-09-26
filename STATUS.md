@@ -878,3 +878,28 @@ overlay sends writes to its upper directory and never to the lower one, and
 the deck itself is discarded by the next build. The right remedy was
 `git config --global --add safe.directory`, which touches no file, and that is
 what is in place.
+
+## The build host was running yesterday's build tooling (2026-09-26)
+
+`/turnkey/buildtasks-keel`, the checkout `keel-release` calls, sits two merges
+behind: it has neither the make status capture nor `layer_audit_packages` of
+buildtasks PR 4, nor the signing identity fix of PR 5. So the rebuild running
+tonight is driven by exactly the bt-layer that published a broken layer this
+afternoon, and it carries one local commit that the fork already has under
+another hash.
+
+It is being left alone while a build is in progress, because a running bash
+script is read as it executes. Two consequences, both handled:
+
+- Nothing from this rebuild is published until the layers are audited by hand
+  against what `layer_audit_packages` would have refused: a dpkg status with a
+  package that is not installed, and the build time `systemctl` and `service`
+  shims that a finished layer must not carry. The script is `/root/audit-
+  layers.sh` on the host.
+- The checkout is reset to `origin/19.x` as soon as the build ends, so the
+  next release runs the audited builder. The local commit is a duplicate of
+  b3d6232 on the branch, so nothing is lost.
+
+The lesson is the same one as the recipes: what runs on the build host has to
+be a checkout that someone keeps current, or it quietly becomes a fork of its
+own.
