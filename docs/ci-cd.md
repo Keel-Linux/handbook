@@ -236,7 +236,11 @@ host (docs/build-host.md). What that cost, and how it was settled on
   step with `if: always()` destroys both. When the manifest is not on the
   mirror the job passes with a notice and an "Appliance test skipped"
   section in the job summary, so a repository whose layer was never
-  published does not fail forever.
+  published does not fail forever. Only a 404 is a skip: a name that does
+  not resolve, a refused connection or a 5xx fails the job, because a skip
+  on an outage is a green check that tested nothing. That distinction was
+  added after a rehearsal on the runner skipped for the wrong reason
+  (`.github` pull request #4).
 - `keel` comes from a checkout of `keel-linux/keel` at `main`, not from a
   package: decision 0005 is open, nothing is signed and
   `archive.keellinux.org` has no keel package, so there is nothing to
@@ -254,6 +258,13 @@ host (docs/build-host.md). What that cost, and how it was settled on
   `/home/runner/actions-runner/_work` and a scratch tree under
   `/var/tmp/keel-ci`. No blanket sudo. Both are written by
   `keel-provision` (docs/releases-host.md section 7).
+- Address family for the mirror: the probe and `keel pull` let the resolver
+  choose rather than forcing IPv6. The mirror is served by the same VM the
+  runner runs on, and that VM resolves its own public names to itself
+  (`resolvectl query mirror.keellinux.org` answers `127.0.1.1`, `Data from:
+  synthetic`), so there is no AAAA record there to force and `curl -6` cannot
+  resolve the name at all. The transfer never leaves the machine. Anywhere
+  the name has an AAAA record, which is everywhere else, it goes over IPv6.
 - Container networking: `lxcbr0`, whose dnsmasq advertises the ULA prefix
   `fc42:5009:ba4b:5ab0::/64` with `ra-only`, so a container has a global
   scope IPv6 address about five seconds after `lxc-start` and the host can
@@ -263,12 +274,16 @@ host (docs/build-host.md). What that cost, and how it was settled on
 
 ### What one real run does, measured by hand on the runner
 
-`core`, as the `runner` user, exactly the sequence the workflow runs:
-`keel pull` from the mirror 3 s (the mirror is the same host), `keel verify`
-exit 8, assemble 13 s, container started and a global IPv6 address in 5 s,
-first boot finished 5 s later, `keel diff` 8 same and 0 drift and 1 unknown
-(`instance.fqdn`, which inspect cannot read offline, exit 13). 23 s in total,
-then the container and the scratch tree removed.
+`core`, as the `runner` user, replaying every step of the workflow from a
+clean clone of `master`: clone, keel checkout, manifest 200, published parent
+`none` matching the caller, `keel pull` 3 s (the mirror is the same host),
+`keel verify` exit 9 (every layer matches; the packages half is not
+implemented, and `core` no longer carries a `.hash` file, so it is 9 rather
+than 8), assemble 13 s, container started with a global IPv6 address in 5 s,
+first boot finished 5 s later, `keel diff` 6 same, 0 drift, 2 unknown
+(`instance.fqdn` and the IPv6 method, neither readable from an offline root),
+exit 13. **30 seconds for the whole job**, then `keel-ci-cleanup` removed the
+container and the scratch tree.
 
 `nodebb`: `keel pull` of the three layers, 598 MB, 7 s; `keel verify` exit 8;
 assemble 43 s; container up with an address in 5 s; then the first boot stops

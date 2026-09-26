@@ -355,11 +355,19 @@ checks would have nowhere to run from; the bridge is the right choice for a
 throwaway CI container and it adds no MAC to the public segment. `apparmor`
 4.1.0 is installed, which `lxc-start` needs for the generated profile.
 
-Verified by hand on 2026-09-26 as the `runner` user, the whole sequence the
-workflow runs, against `core`: `keel pull` from the mirror 3 s (the mirror is
-this same host), `keel verify` exit 8 while nothing is signed, assemble 13 s,
-container started with a global IPv6 address in 5 s, first boot finished 5 s
-later, `keel diff` 8 same and 0 drift, 23 s in total. Against `nodebb`:
+One thing to know about this host: it resolves its own public names to
+itself. `resolvectl query mirror.keellinux.org` answers `127.0.1.1`, `Data
+from: synthetic`, so there is no AAAA record to force and `curl -6
+https://mirror.keellinux.org/...` fails with "Could not resolve host" while a
+plain `curl` succeeds over the loopback. Anything on this VM that fetches from
+the project's own names has to let the resolver choose; the appliance workflow
+does, and its transfer therefore never leaves the machine.
+
+Verified by hand on 2026-09-26 as the `runner` user, every step of the
+workflow replayed from a clean clone, against `core`: `keel pull` 3 s (the
+mirror is this same host), `keel verify` exit 9, assemble 13 s, container
+started with a global IPv6 address in 5 s, first boot finished 5 s later,
+`keel diff` 6 same and 0 drift, 30 s for the whole job. Against `nodebb`:
 `keel pull` of the three layers, 598 MB, 7 s, assemble 43 s, container up in
 5 s, then a real failure of the published layer (docs/ci-cd.md section 7).
 Both containers and both scratch trees were removed with `keel-ci-cleanup`;
