@@ -510,3 +510,63 @@ directory on one workstation, with no history and no copy. It is now
 `Keel-Linux/handbook`, private, because it records host addresses, the sudo
 policy of the CI runner and the recovery procedures. README.md says which
 documents are promoted to the public site.
+
+## The spec vocabulary says what it means (2026-09-26)
+
+The first real appliance boot left four drift findings (5 same, 4 drift, 1
+unknown, 6 not declared, 3 not compared, exit 14 on `forum2`). All four were
+right about the file and wrong about the machine: the appliance was doing
+what the description asked and the vocabulary could not say so. A drift
+report that cries wolf teaches the operator to ignore it, so they are
+defects in the contract, not cosmetics. Fixed in keel PRs 13, 14, 15 and 16,
+with the three part justification for each in docs/decisions/0009.
+
+What the vocabulary now says:
+
+- **`network.interfaces.<name>.ipv6.method`** keeps both `auto` and `dhcp`,
+  and they mean different things: an address formed from a router
+  advertisement, an address from a DHCPv6 lease. ifupdown writes `inet6
+  dhcp` for both, so the file settles nothing and inspect asks the machine: a
+  lease file under `/var/lib/dhcpcd` or `/var/lib/dhcp` means `dhcp`, a
+  global address marked `mngtmpaddr` means `auto`, neither is reported as not
+  inferred with everything that was checked. `ip -6 addr show` runs on the
+  live root only; lease files are read under `--root` too.
+- **`tls.acme`** may declare `challenge` and `domains` while `enabled` is
+  false, and diff does not compare them: it compares the switch and nothing
+  else it governs. That is what lets an operator prepare a certificate
+  configuration and turn it on later as a one word change. The switch itself
+  is still compared, so ACME running behind the spec's back is drift.
+  `enabled` is now validated as a boolean, because `"false"` as a string is
+  truthy. The rule is a table, not a special case.
+- **`security.updates` is now `security.updates_at_first_boot`**, values
+  unchanged. It controls whether `95secupdates` installs the pending security
+  updates during the first boot, and nothing else; the appliance keeps its
+  updates current through cron-apt whichever value was set. diff does not
+  compare it, for the same reason `app` and `preseed` are not compared: the
+  machine keeps no record of the value. inspect still writes one, from the
+  conf while it is there and otherwise from the appliance's update posture,
+  saying which. The old name still loads with a warning naming the new one,
+  so specs already on disk keep working (`keel.spec.compat`, one table).
+- **`instance.fqdn`** is written, not only read: `keel spec apply --system`
+  puts the entry in `/etc/hosts` that no upstream hook writes, at the
+  declared static IPv6 address when there is one and `127.0.1.1` otherwise,
+  replacing the `127.0.1.1 <short name>` line 09hostname leaves rather than
+  appending after it. Whether there is anything to write is decided by the
+  same reader inspect uses, so what apply writes is what diff calls same.
+  Without `--system`, apply warns that the entry was not written.
+
+Proved on `forum2`, the container that produced the findings, with the
+library of the four pull requests installed: 6 same, 0 drift, 1 unknown, 5
+not declared, 6 not compared, exit 13 straight after the install, then 7
+same, 0 drift, 0 unknown, exit 0 after `keel spec apply --system` wrote
+`/etc/hosts` and `hostname -f` answered `forum2.keellinux.org`. The second
+apply changed nothing. `eth1`, which has no address and no lease, is now
+reported as not inferred instead of as `dhcp`, which is the "no evidence"
+case working as designed. Coverage 100 percent of lines and branches against
+the committed gate of 95.
+
+Two hand-offs, both in the inithooks repository and both in decision 0009:
+the first boot chain still does not call `keel spec apply --system`, so the
+`/etc/hosts` entry is not written at first boot yet, and the hook that calls
+it must run after `09hostname`; and `libinithooks/declarative.py` is a second
+implementation of this vocabulary that knows none of these four changes.
