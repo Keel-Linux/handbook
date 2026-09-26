@@ -711,3 +711,138 @@ Where protection is not possible: a private repository cannot require a check
 on this plan, so `apt` and `handbook` run their gates on every pull request
 without being able to enforce them. `apt` becomes public with the key
 rotation.
+
+## The first boot writes the name it declares (2026-09-26)
+
+`keel spec apply --system` converged `instance.fqdn`, `users` and `locale`,
+and no boot ever called it, so a booted appliance still drifted from its own
+description on the fully qualified name. That was the open hand-off of
+decision 0009. It is closed: keel PRs 17, 18, 19, 20, 22 and 23, keel 0.2.1.
+
+**The shape: a flag, `keel spec apply --system-only`.** The two phases run at
+two moments of a boot, the conf before every hook and the system phase after
+`09hostname`, so each needs its own way to be asked for. `--system-only`
+runs the second and nothing else: the conf is neither read nor written and no
+secret is resolved. That last part is the point of the flag, not a side
+effect. Phase 1 resolves `secrets`, and a `generate: true` secret gets a
+fresh value each time it is resolved, so a boot that ran phase 1 at hook 00
+and again at hook 10 would hand the appliance a root password generated after
+`30rootpass` had already set and shown the first one, and nobody would know
+it. A flag rather than a subcommand because it selects which phases one run
+of `apply` carries out, with the same spec, `--root` and `--dry-run`: a
+subcommand would give one code path two names and confconsole two call sites
+for one converge. It is mutually exclusive with `--system`, so asking for
+both is a usage error and not a precedence rule to remember. On a machine
+whose conf phase never ran it converges the same fields and exits the same
+way, because its inputs are the spec and the machine, and it says on its
+first line that the conf was not read or written: the run cannot tell a conf
+that was never written from one `98finalize` blanked after a good boot, so it
+claims neither.
+
+**The hook: `firstboot.d/10keel-system`, shipped by the keel package.** The
+package that owns the `keel` command owns the hook that runs it, so inithooks
+keeps no dependency on keel and an image without keel has no hook there
+(`debian/keel.install`). Position 10 is the only one that works: earlier and
+the `sed` in `09hostname` edits or loses the entry, later and the certificate
+at 15 and the fence at 29 and 30 are made on a name the appliance does not
+carry. It is a no-op with exit 0 under `_TURNKEY_INIT`, with no description
+(`INITHOOKS_DECL`, then `/etc/keel/instance.yaml`, then
+`/etc/inithooks.yaml`, the order `00declarative` searches), and when the
+description declares nothing the phase converges. It logs every line through
+the inithooks log as the other hooks do, and exits 0 whatever `keel`
+returned, with the failure and its code in the log: an appliance that cannot
+converge one field must still finish booting, and the drift is then visible
+in `keel diff`.
+
+**What `keel diff` reports for a converged field: the ordinary verdicts.**
+`instance.fqdn` stays compared and is never added to the not compared table.
+Exit 0 after a boot is earned by writing the field, not by excusing it from
+the comparison, and the comparison is the only signal that the converge
+happened: `not compared` would read the same on an appliance that applied its
+description, on an image too old to carry the hook, and on a machine somebody
+edited afterwards. Where there is no trace the field is `unknown` and the
+reason now names the command that writes it.
+
+**Two defects found while proving it, both about `/etc/hosts`.** They are the
+decision 0009 class again, a report saying all is well while the machine says
+otherwise.
+
+1. With a static IPv6 address declared, the phase wrote the entry at that
+   address and left the `127.0.1.1 <short name>` line. A resolver answers
+   from the first line that carries the name, so `hostname -f` answered the
+   short name. A line that names the host and nothing else, without a fully
+   qualified name, is now replaced wherever it stands. Debian's convention
+   agrees: `127.0.1.1` is for a machine whose address is not permanent.
+2. The reader walked past that short line and reported the name from a later
+   line, so `inspect` reported a name the machine did not answer, `diff`
+   called it `same`, and `apply` called the file settled and converged
+   nothing. `fqdn_in_hosts` now stops at the first line that names the host,
+   the way a resolver does, and the settled test asks whether the file the
+   write would produce is the file that is there, because an entry can be
+   present and shadowed.
+
+A line that names the host beside another name (`127.0.0.1 localhost blog`)
+is still kept, since rewriting a line that belongs to another name is not
+this phase's business, and the plan now says on every run that such a line
+answers first and has to be edited by hand.
+
+**Measured:** 549 tests, 100 percent of lines and branches against the
+committed gate of 95, plus 14 bats tests for the hook. The hook is shell, so
+`tests/hook.bats` replaces `keel` with a script on `PATH` that records its
+arguments; `tests/test_hook_bats.py` runs that suite from pytest so the
+repository keeps one required check and a broken hook fails the same gate as
+a broken module (`bats` and `shellcheck` are installed by the workflow, and
+the test fails rather than skips in CI).
+
+**Proved on `hooktest`**, a container built for this and destroyed
+afterwards, from the published `core` layer
+(`https://mirror.keellinux.org/layers`, 326,418,793 bytes, `keel pull` plus
+`keel assemble`, 18 s), adapted the way `forum2` was, with
+`inithooks 2.3.6+keel4` and `keel 0.2.0` built from the merged master of each
+repository and installed as packages. The description declared
+`hooktest.keellinux.org` with `managed_by: host` and `ipv6.method: auto`.
+Nothing was applied by hand: `lxc-start`, then `/usr/lib/inithooks/run`.
+
+| | before the boot | after |
+| --- | --- | --- |
+| `/etc/hostname` | `core` | `hooktest` |
+| `/etc/hosts` | `127.0.1.1 core` | `127.0.1.1 hooktest.keellinux.org hooktest` |
+| `hostname -f` | fails | `hooktest.keellinux.org` |
+| `keel diff` | 5 same, 1 drift, 1 unknown, exit 14 | 7 same, 0 drift, 0 unknown, 5 not declared, 3 not compared, exit 0 |
+
+The hook's own lines, from `/var/log/inithooks.log`:
+
+```
+INFO: [00declarative] /etc/keel/instance.yaml applied to /etc/inithooks.conf
+INFO: [10keel-system] apply --system-only: /etc/inithooks.conf not read or written
+INFO: [10keel-system] instance.fqdn: write /etc/hosts with '127.0.1.1 hooktest.keellinux.org hooktest' (mode 0644): done
+INFO: [10keel-system] apply --system-only: 1 change(s), 0 failed
+```
+
+The runner ran the chain twice on this container, which proved idempotence on
+a real machine for free: the second pass reported `unchanged (/etc/hosts maps
+hooktest to hooktest.keellinux.org)` and `0 change(s), 0 failed`, after
+`98finalize` had blanked the conf, which is the case the `--system-only`
+notice is worded for.
+
+Both defects were proved on the same container. With the shadowed file in
+place `hostname -f` answered `hooktest`, `keel diff` reported the field
+`unknown` and named the remedy, and one `apply --system-only` turned the file
+into `127.0.0.1 localhost` plus `2001:db8:1::10 hooktest.keellinux.org
+hooktest`, after which `hostname -f` answered the fully qualified name and a
+second run changed nothing.
+
+**Notes for the next container build:** `rm -rf` of a rootfs that has booted
+fails on `/var/spool/postfix/dev/{random,urandom}`, which postfix's chroot
+makes immutable; `chattr -i` first. `fab-chroot` needs `TERM` in the
+environment and dies with a `KeyError` without it, which matters over `ssh`
+without a tty. A conffile the container patch edited (`/etc/default/inithooks`,
+`REDIRECT_OUTPUT=true`) makes `dpkg -i` of the inithooks package stop at the
+prompt; `--force-confold` keeps the container's version, which is the right
+one, and the new search order needs no `INITHOOKS_DECL` line.
+
+**Left open:** the appliance layers still carry keel 0.1.0 and upstream
+inithooks, so the chain reaches an appliance only when `core` is rebuilt with
+`keel 0.2.1` and `inithooks 2.3.6+keel4`; and
+`inithooks/libinithooks/declarative.py` is still a second implementation of
+the spec vocabulary (decision 0009).
