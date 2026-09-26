@@ -1,0 +1,504 @@
+#!/bin/sh
+# Keel Linux public services host: idempotent provisioning.
+# Runs as root on the VM. Every step checks its result.
+set -eu
+
+CERT_DIR=/var/lib/dehydrated/certs/keellinux.org
+NAMES="keellinux.org www.keellinux.org archive.keellinux.org mirror.keellinux.org releases.keellinux.org forum.keellinux.org"
+BUILD_HOST_MIRROR='http://[2804:710:d0:5:bb3f:380a:f07b:7951]:8080'
+
+# The static public address of this VM. Every name resolves to it, and the
+# forum appliance trusts it as the proxy that terminates TLS, so outgoing
+# proxy connections are bound to it (see the keel-forum site below).
+PUBLIC_IPV6=2804:710:d0:5::13
+
+# IPv6 address of the forum appliance container on the build host. Empty
+# serves the placeholder page instead of the reverse proxy.
+FORUM_CONTAINER=2804:710:d0:5:7f14:2160:4aa0:6cfa
+
+log() { printf '== %s\n' "$*"; }
+
+# ---------------------------------------------------------------- firewall
+log firewall
+cat > /etc/nftables.conf << 'NFT'
+#!/usr/sbin/nft -f
+# Keel Linux public services host. Inbound: SSH, HTTP, HTTPS on IPv6 and IPv4.
+flush ruleset
+
+table inet filter {
+	chain input {
+		type filter hook input priority filter; policy drop;
+		iif "lo" accept
+		ct state established,related accept
+		ct state invalid drop
+		meta l4proto ipv6-icmp accept
+		meta l4proto icmp accept
+		udp dport 546 accept comment "DHCPv6 client"
+		udp dport 68 accept comment "DHCPv4 client"
+		tcp dport { 22, 80, 443 } accept
+		iifname "lxcbr0" accept comment "LXC containers of the CI runner"
+	}
+	chain forward {
+		type filter hook forward priority filter; policy drop;
+		iifname "lxcbr0" accept
+		oifname "lxcbr0" ct state established,related accept
+	}
+	chain output {
+		type filter hook output priority filter; policy accept;
+	}
+}
+NFT
+nft -c -f /etc/nftables.conf
+systemctl enable --now nftables >/dev/null 2>&1
+systemctl restart nftables
+nft list ruleset | grep -q 'tcp dport { 22, 80, 443 } accept' && log "firewall active"
+
+# ---------------------------------------------------------------- users
+log users
+id site >/dev/null 2>&1 || useradd -r -m -d /var/lib/keel-site -s /usr/sbin/nologin site
+id runner >/dev/null 2>&1 || useradd -m -s /bin/bash runner
+cat > /etc/sudoers.d/runner << 'SUDO'
+# The GitHub Actions runner (docs/releases-host.md section 7). No blanket
+# sudo: the package tool, the LXC commands the appliance gate uses, and the
+# two root entry points of that gate, which check their own arguments.
+runner ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/lxc-create, /usr/bin/lxc-start, /usr/bin/lxc-stop, /usr/bin/lxc-destroy, /usr/bin/lxc-attach, /usr/bin/lxc-ls, /usr/bin/lxc-info, /usr/bin/lxc-wait, /usr/local/sbin/keel-ci-boot-test, /usr/local/sbin/keel-ci-cleanup
+SUDO
+chmod 0440 /etc/sudoers.d/runner
+visudo -c -f /etc/sudoers.d/runner >/dev/null
+
+# ---------------------------------------------------------- appliance gate
+# Root entry points of test-appliance.yml (keel-linux/.github). Assembling a
+# rootfs and starting a container need root; the runner user reaches them
+# through these two commands only, and each checks where it is allowed to
+# act before doing anything.
+log appliance-gate
+install -d -m 0755 /var/tmp/keel-ci
+cat > /usr/local/sbin/keel-ci-boot-test << 'GATE'
+#!/bin/sh
+# keel-ci-boot-test WORKSPACE SCRATCH APPLIANCE [tests/boot-test.sh options]
+# Runs the appliance repository's own boot test as root, with the keel
+# checkout of the same job first in PATH.
+set -eu
+WORK_ROOT=/home/runner/actions-runner/_work
+SCRATCH_ROOT=/var/tmp/keel-ci
+workspace=${1:?usage: keel-ci-boot-test WORKSPACE SCRATCH APPLIANCE [options]}
+scratch=${2:?usage: keel-ci-boot-test WORKSPACE SCRATCH APPLIANCE [options]}
+appliance=${3:?usage: keel-ci-boot-test WORKSPACE SCRATCH APPLIANCE [options]}
+shift 3
+for path in "$workspace" "$scratch"; do
+	case "$path" in
+		*..*) echo "keel-ci-boot-test: '..' is not allowed in a path" >&2; exit 2 ;;
+	esac
+done
+case "$workspace" in
+	"$WORK_ROOT"/*) ;;
+	*) echo "keel-ci-boot-test: the workspace must be under $WORK_ROOT" >&2; exit 2 ;;
+esac
+case "$scratch" in
+	"$SCRATCH_ROOT"/*) ;;
+	*) echo "keel-ci-boot-test: the scratch directory must be under $SCRATCH_ROOT" >&2; exit 2 ;;
+esac
+case "$appliance" in
+	''|*[!a-z0-9-]*) echo "keel-ci-boot-test: '$appliance' is not an appliance name" >&2; exit 2 ;;
+esac
+[ -x "$workspace/tests/boot-test.sh" ] || {
+	echo "keel-ci-boot-test: $workspace/tests/boot-test.sh is missing or not executable" >&2
+	exit 2
+}
+PATH="$workspace/.keel/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+TERM=dumb
+export PATH TERM
+exec "$workspace/tests/boot-test.sh" "$appliance" "$@"
+GATE
+chmod 0755 /usr/local/sbin/keel-ci-boot-test
+cat > /usr/local/sbin/keel-ci-cleanup << 'CLEAN'
+#!/bin/sh
+# keel-ci-cleanup NAME SCRATCH: stop the boot test container and remove the
+# scratch tree of one run. Safe to call twice and after a failure.
+set -u
+SCRATCH_ROOT=/var/tmp/keel-ci
+name=${1:?usage: keel-ci-cleanup NAME SCRATCH}
+scratch=${2:?usage: keel-ci-cleanup NAME SCRATCH}
+case "$name" in
+	''|*[!a-z0-9.-]*) echo "keel-ci-cleanup: '$name' is not a container name" >&2; exit 2 ;;
+esac
+case "$scratch" in
+	*..*) echo "keel-ci-cleanup: '..' is not allowed in a path" >&2; exit 2 ;;
+esac
+case "$scratch" in
+	"$SCRATCH_ROOT"/*) ;;
+	*) echo "keel-ci-cleanup: the scratch directory must be under $SCRATCH_ROOT" >&2; exit 2 ;;
+esac
+lxc-stop -P "$scratch/lxc" -n "$name" -k >/dev/null 2>&1 || true
+lxc-destroy -P "$scratch/lxc" -n "$name" -f >/dev/null 2>&1 || true
+rm -rf "$scratch"
+echo "keel-ci-cleanup: $name stopped, $scratch removed"
+CLEAN
+chmod 0755 /usr/local/sbin/keel-ci-cleanup
+
+# ---------------------------------------------------------------- trees
+log trees
+install -d -m 0755 /srv/archive /srv/mirror/layers /srv/releases/pve /srv/releases/meta /srv/forum /var/lib/dehydrated/acme-challenges
+rm -rf /srv/apex
+
+cat > /srv/archive/README.txt << 'TXT'
+Keel Linux APT archive (archive.keellinux.org)
+
+The signed repository (dists/, pool/, keel-archive-keyring.asc) appears here
+after the signing subkey rotation. Nothing unsigned is served from this host.
+Until then the X-Keel-Distribution header of every response reads
+"staging, unsigned".
+TXT
+cat > /srv/releases/README.txt << 'TXT'
+Keel Linux release metadata (releases.keellinux.org)
+
+/pve/   Proxmox VE template index: aplinfo.dat, aplinfo.dat.gz, aplinfo.dat.asc
+/meta/  signed release manifests
+
+Both directories stay empty until the signing subkey rotation. Nothing
+unsigned is served from this host. The X-Keel-Distribution header of every
+response reads "staging, unsigned" until the first signed publication.
+TXT
+cp /srv/releases/README.txt /srv/releases/pve/README.txt
+cp /srv/releases/README.txt /srv/releases/meta/README.txt
+cat > /srv/mirror/README.txt << 'TXT'
+Keel Linux image mirror (mirror.keellinux.org)
+
+/layers/  appliance layers: <name>.tar.zst with .sha256, .hash and .manifest
+/images/  assembled templates and ISOs (appears with the first release)
+
+Layers here are staging builds and unsigned until the signing subkey rotation;
+the X-Keel-Distribution header of every response says so.
+TXT
+
+# ---------------------------------------------------------------- site checkout
+log site
+if [ ! -d /srv/site/.git ]; then
+	rm -rf /srv/site
+	install -d -m 0755 -o site -g site /srv/site
+	sudo -u site git clone -q https://github.com/keel-linux/keel-linux.github.io.git /srv/site
+fi
+chown -R site:site /srv/site
+cat > /etc/systemd/system/keel-site-pull.service << 'UNIT'
+[Unit]
+Description=Update the institutional site checkout in /srv/site
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=site
+Group=site
+ExecStart=/usr/bin/git -C /srv/site pull -q --ff-only
+UNIT
+cat > /etc/systemd/system/keel-site-pull.timer << 'UNIT'
+[Unit]
+Description=Pull the institutional site every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+RandomizedDelaySec=1min
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+# ---------------------------------------------------------------- forum placeholder
+cat > /srv/forum/index.html << 'HTML'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keel Linux forum</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a;background:#fff}
+a{color:#0b5fa5}
+</style>
+</head>
+<body>
+<h1>Keel Linux forum</h1>
+<p>The community forum is coming soon.</p>
+<p>Until then: the project site at <a href="https://www.keellinux.org/">www.keellinux.org</a>
+and the source at <a href="https://github.com/keel-linux">github.com/keel-linux</a>.</p>
+</body>
+</html>
+HTML
+
+# ---------------------------------------------------------------- layer sync script
+cat > /usr/local/sbin/keel-sync-layers << 'SYNC'
+#!/bin/sh
+# Superseded on 2026-09-26. The build host is no longer a public server:
+# its mirror listens on the loopback only (docs/build-host.md), so this
+# script's source no longer exists and pulling by hand is not how content
+# reaches /srv any more.
+#
+# A release is staged on the build host and published here by
+#
+#   /srv/keel-apt/apt/bin/keel-release <appliance>       (on the build host)
+#   bin/keel-publish-mirror <date>                       (from a workstation)
+#
+# which pulls over a loopback forward, checks every file against the
+# release MANIFEST before installing it, and verifies the public names
+# afterwards. Left in place so that anything still calling it says why it
+# stopped instead of quietly fetching nothing.
+echo "keel-sync-layers: superseded by keel-publish-mirror; see docs/build-host.md" >&2
+exit 3
+SYNC
+chmod 0755 /usr/local/sbin/keel-sync-layers
+
+# ---------------------------------------------------------------- dehydrated
+log dehydrated
+cat > /etc/dehydrated/conf.d/keel.sh << 'CONF'
+CONTACT_EMAIL=admin@keellinux.org
+IP_VERSION=6
+HOOK=/etc/dehydrated/hook.sh
+KEY_ALGO=secp384r1
+CONF
+cat > /etc/dehydrated/hook.sh << 'HOOK'
+#!/bin/sh
+# dehydrated hook: reload nginx after a certificate is deployed.
+case "${1:-}" in
+	deploy_cert) systemctl reload nginx ;;
+esac
+exit 0
+HOOK
+chmod 0755 /etc/dehydrated/hook.sh
+echo "$NAMES" > /etc/dehydrated/domains.txt
+cat > /etc/systemd/system/dehydrated.service << 'UNIT'
+[Unit]
+Description=Renew ACME certificates with dehydrated
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/dehydrated --cron
+UNIT
+cat > /etc/systemd/system/dehydrated.timer << 'UNIT'
+[Unit]
+Description=Daily certificate renewal check
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+# ---------------------------------------------------------------- nginx
+log nginx
+rm -f /etc/nginx/sites-enabled/default
+cat > /etc/nginx/conf.d/keel-distribution.conf << 'NG'
+# Distribution status of archive, mirror and releases. Flipping the value
+# below is the one edit that changes the X-Keel-Distribution header and the
+# /STATUS page on all three hosts; then: nginx -t && systemctl reload nginx.
+map "" $keel_distribution {
+	default "staging, unsigned";
+}
+NG
+cat > /etc/nginx/snippets/keel-acme.conf << 'NG'
+location ^~ /.well-known/acme-challenge/ {
+	alias /var/lib/dehydrated/acme-challenges/;
+	default_type text/plain;
+}
+NG
+cat > /etc/nginx/snippets/keel-tls.conf << 'NG'
+ssl_certificate /var/lib/dehydrated/certs/keellinux.org/fullchain.pem;
+ssl_certificate_key /var/lib/dehydrated/certs/keellinux.org/privkey.pem;
+ssl_trusted_certificate /var/lib/dehydrated/certs/keellinux.org/chain.pem;
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+ssl_prefer_server_ciphers off;
+ssl_session_timeout 1d;
+ssl_session_cache shared:keel:10m;
+ssl_session_tickets off;
+ssl_stapling on;
+ssl_stapling_verify on;
+NG
+cat > /etc/nginx/snippets/keel-distribution.conf << 'NG'
+add_header X-Keel-Distribution $keel_distribution always;
+autoindex on;
+autoindex_exact_size on;
+autoindex_localtime off;
+location = /STATUS {
+	default_type text/plain;
+	return 200 "$keel_distribution\n";
+}
+NG
+
+# HTTP: ACME challenges on every name and on bare addresses; the rest goes to HTTPS.
+cat > /etc/nginx/sites-available/keel-http << NG
+server {
+	listen [::]:80 default_server;
+	listen 0.0.0.0:80 default_server;
+	server_name $NAMES;
+	include snippets/keel-acme.conf;
+	location / {
+		return 301 https://\$host\$request_uri;
+	}
+}
+NG
+ln -sfn /etc/nginx/sites-available/keel-http /etc/nginx/sites-enabled/keel-http
+
+if [ -s "$CERT_DIR/fullchain.pem" ]; then
+	log "certificate present: writing HTTPS sites"
+	cat > /etc/nginx/sites-available/keel-archive << 'NG'
+server {
+	listen [::]:443 ssl;
+	listen 0.0.0.0:443 ssl;
+	http2 on;
+	server_name archive.keellinux.org;
+	root /srv/archive;
+	include snippets/keel-tls.conf;
+	include snippets/keel-distribution.conf;
+	location / {
+		try_files $uri $uri/ =404;
+	}
+}
+NG
+	cat > /etc/nginx/sites-available/keel-mirror << 'NG'
+server {
+	listen [::]:443 ssl;
+	listen 0.0.0.0:443 ssl;
+	http2 on;
+	server_name mirror.keellinux.org;
+	root /srv/mirror;
+	include snippets/keel-tls.conf;
+	include snippets/keel-distribution.conf;
+	location / {
+		try_files $uri $uri/ =404;
+	}
+}
+NG
+	cat > /etc/nginx/sites-available/keel-releases << 'NG'
+server {
+	listen [::]:443 ssl;
+	listen 0.0.0.0:443 ssl;
+	http2 on;
+	server_name releases.keellinux.org;
+	root /srv/releases;
+	include snippets/keel-tls.conf;
+	include snippets/keel-distribution.conf;
+	location / {
+		try_files $uri $uri/ =404;
+	}
+}
+NG
+	cat > /etc/nginx/sites-available/keel-www << 'NG'
+# Institutional site on the apex and on www; also the default server for
+# HTTPS requests to bare addresses or unknown names.
+server {
+	listen [::]:443 ssl default_server;
+	listen 0.0.0.0:443 ssl default_server;
+	http2 on;
+	server_name keellinux.org www.keellinux.org;
+	root /srv/site;
+	index index.html;
+	include snippets/keel-tls.conf;
+	location ~ /\. {
+		deny all;
+	}
+	location / {
+		try_files $uri $uri/ $uri.html =404;
+	}
+}
+NG
+	rm -f /etc/nginx/sites-enabled/keel-apex /etc/nginx/sites-available/keel-apex
+	if [ -n "$FORUM_CONTAINER" ]; then
+		cat > /etc/nginx/sites-available/keel-forum << NG
+# Community forum: reverse proxy to the NodeBB appliance container over
+# IPv6. Written by keel-provision from FORUM_CONTAINER; clear that variable
+# to go back to the placeholder page.
+server {
+	listen [::]:443 ssl;
+	listen 0.0.0.0:443 ssl;
+	http2 on;
+	server_name forum.keellinux.org;
+	include snippets/keel-tls.conf;
+
+	# NodeBB needs the WebSocket upgrade headers and the original Host.
+	location / {
+		# Bind the outgoing connection to the static address, because
+		# that is the one the appliance trusts as its TLS terminating
+		# proxy (app.options.trusted_proxy in its instance spec) and the
+		# one DNS points at. Without this the kernel picks the source
+		# address by itself and normally chooses the SLAAC address of
+		# this VM, the appliance does not
+		# recognise it, refuses to believe X-Forwarded-Proto: https and
+		# answers 307 to https, which comes straight back here: a
+		# redirect loop. No brackets around the literal: nginx rejects
+		# a bracketed address in proxy_bind.
+		proxy_bind $PUBLIC_IPV6;
+		proxy_pass http://[$FORUM_CONTAINER]:80;
+		proxy_http_version 1.1;
+		proxy_set_header Host \$host;
+		proxy_set_header X-Real-IP \$remote_addr;
+		proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto https;
+		proxy_set_header Upgrade \$http_upgrade;
+		proxy_set_header Connection "upgrade";
+		proxy_read_timeout 300s;
+	}
+}
+NG
+	else
+		cat > /etc/nginx/sites-available/keel-forum << 'NG'
+# Community forum (NodeBB appliance in a container). No container address is
+# configured, so this serves the placeholder page. Set FORUM_CONTAINER in
+# keel-provision to the container's IPv6 address and run it again.
+server {
+	listen [::]:443 ssl;
+	listen 0.0.0.0:443 ssl;
+	http2 on;
+	server_name forum.keellinux.org;
+	include snippets/keel-tls.conf;
+
+	root /srv/forum;
+	index index.html;
+	location / {
+		try_files $uri $uri/ =404;
+	}
+}
+NG
+	fi
+	if openssl x509 -in "$CERT_DIR/cert.pem" -noout -checkhost forum.keellinux.org | grep -q "does match"; then
+		ln -sfn /etc/nginx/sites-available/keel-forum /etc/nginx/sites-enabled/keel-forum
+	else
+		log "certificate does not cover forum.keellinux.org yet: forum served over HTTP only"
+		rm -f /etc/nginx/sites-enabled/keel-forum
+		cat >> /etc/nginx/sites-available/keel-http << 'NG'
+server {
+	listen [::]:80;
+	listen 0.0.0.0:80;
+	server_name forum.keellinux.org;
+	root /srv/forum;
+	index index.html;
+	include snippets/keel-acme.conf;
+	location / {
+		try_files $uri $uri/ =404;
+	}
+}
+NG
+	fi
+	for s in keel-archive keel-mirror keel-releases keel-www; do
+		ln -sfn /etc/nginx/sites-available/$s /etc/nginx/sites-enabled/$s
+	done
+else
+	log "no certificate yet: HTTP only (ACME path), HTTPS sites not enabled"
+	for s in keel-archive keel-mirror keel-releases keel-www keel-forum; do
+		rm -f /etc/nginx/sites-enabled/$s
+	done
+	# Without a certificate nothing can be redirected to; serve 404 for the rest.
+	sed -i 's|return 301 https://\$host\$request_uri;|return 404;|' /etc/nginx/sites-available/keel-http
+fi
+
+nginx -t 2>&1 | tail -1; nginx -t >/dev/null 2>&1
+systemctl enable --now nginx >/dev/null 2>&1
+systemctl reload nginx
+systemctl daemon-reload
+systemctl enable --now keel-site-pull.timer dehydrated.timer >/dev/null 2>&1
+log "units: $(systemctl is-active nginx nftables keel-site-pull.timer dehydrated.timer | tr '\n' ' ')"

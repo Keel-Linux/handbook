@@ -1,0 +1,99 @@
+# Organization plan: the complete fork under the guidelines
+
+Date: 2026-09-26. Guidelines: docs/decisions/0006. Milestones: BRIEF.md
+section 9. Coverage: docs/coverage-baseline.md.
+
+## 1. Inventory and roles
+
+| Repository | Role | Upstream | Tests today | Our branches | Owner of the gate |
+| --- | --- | --- | --- | --- | --- |
+| keel | library and CLI (new code) | none | 206, 100 percent | main | 95 percent, active |
+| .github | org profile, reusable workflows | none | n/a | main | n/a |
+| tkldev | build host appliance and setup | turnkeylinux-apps/tkldev | 63 bats on branch | fix/build-missing-bootstrap, docs/coverage-baseline | baseline then 90 |
+| fab | build tool | turnkeylinux/fab | 19 make checks on branch | feat/source-date-epoch, docs/coverage-baseline | baseline then 90 |
+| buildtasks | build tasks (bt-*) | turnkeylinux/buildtasks | 40 paths on branch | feat/bt-layer | baseline then 90 |
+| common | shared plans, overlays, conf | turnkeylinux/common (19.x) | 7 bats on branch | fix/postfix-local-fatal, docs/coverage-baseline | baseline then 90 |
+| inithooks | first boot | turnkeylinux/inithooks | 68 bats + 146 pytest on branches | 4 branches + docs/coverage-baseline | baseline then 90 |
+| confconsole | operator console | turnkeylinux/confconsole | none | none yet | baseline then 90 |
+| webmin | web admin packaging | turnkeylinux/webmin | none | none yet | baseline then 90 |
+| turnkey-chroot | chroot helper | turnkeylinux/turnkey-chroot | 40 pytest, 100 percent | fix/umount-in-lxc | 95 percent, active |
+| tklbam, tklbam-profiles, tklbam-python-boto, turnkey-pylib | backup (deferred, 0002) | turnkeylinux/* | profile lint on branch | fix/moodle-dataroot | baseline, last |
+| cdroots | ISO boot files | turnkeylinux/cdroots | none | none | baseline |
+| bootstrap | Debian bootstrap builder (debootstrap + fab) | turnkeylinux/bootstrap | none | none | baseline; forked 2026-09-26 after the M0 run showed it missing |
+| keel-core | base appliance | turnkeylinux-apps/core | none | none yet | build + boot test |
+| keel-lamp, keel-lapp, keel-nginx-php-fastcgi | stacks | turnkeylinux-apps/* | none | none yet | build + boot test |
+| keel-wordpress, keel-moodle, keel-odoo, keel-redis, keel-ejabberd | apps | turnkeylinux-apps/* | none | none yet | build + boot test |
+| keel-ojs, keel-mastodon, keel-pdns-recursor, keel-coturn, keel-nat64 | apps, to create | none | none | maintainer's existing work | build + boot test |
+
+"Build + boot test" for appliances means: the recipe builds on the runner
+(bt-layer or make), the result boots in an LXC container, its first boot
+completes headless from an instance spec, and its main service answers over
+IPv6. Coverage of an appliance recipe is that test passing; conf.d scripts we
+touch also get the 0004 treatment.
+
+## 2. Automation, in order
+
+1. **Reusable workflows in `.github`**: `test-python.yml` (pytest under
+   coverage, `coverage report --fail-under=<input>`), `test-shell.yml` (bats
+   under kcov, threshold script), `test-appliance.yml` (self-hosted runner
+   label `keel-lxc`: bt-layer build, `keel assemble`, container boot, HTTP
+   check over IPv6). Each repository adds a ten-line workflow that calls one
+   of them with its threshold.
+2. **Branch protection on every default branch**: pull request required, the
+   coverage check required, linear history, no force push, no deletion.
+   Preferably one organization ruleset applied to all repositories, so a new
+   repository is protected the day it is created.
+3. **Self-hosted runner**: one LXC container on the build cluster with the
+   GitHub runner, kcov, bats, fab, deck and buildtasks; IPv6 only is fine
+   because the runner connects outbound. Registered at organization level with
+   the `keel-lxc` label.
+4. **Coverage badge** from the workflow's own output (job summary and a
+   committed shields endpoint JSON), no third-party coverage service, since
+   the number is already computed by the gate.
+
+Blocked today on token scopes (`workflow` to push workflow files, `admin:org`
+for organization rulesets and runner registration); everything else in this
+section is prepared and can be pushed the moment the scopes exist.
+
+## 3. Bringing each repository up to the guidelines
+
+Same sequence per repository, one pull request each, smallest first:
+
+1. Merge `docs/coverage-baseline` (the honest number and the plan).
+2. Add the workflow calling the reusable one with the measured threshold.
+3. Enable protection with that check required.
+4. Merge our fix branches (each already carries its tests).
+5. Raise the threshold as tests land, per the COVERAGE.md plan, until 90.
+
+Order: keel and turnkey-chroot (already at 100, protection first), inithooks,
+tkldev, buildtasks, fab, common, then confconsole and webmin (no branches yet:
+baseline job first), then the appliances once `test-appliance.yml` and the
+runner exist, then the tklbam family last (0002).
+
+## 4. Code changes the guidelines require
+
+- tkldev-setup: map appliance names to `keel-<app>` when the remote is the
+  organization (`GIT_REMOTE_URL` set to github.com/keel-linux), keep upstream
+  behaviour otherwise. On the tkldev fork, with its bats test.
+- bt-layer and the M0 gate procedure: product paths follow the same mapping.
+- Documentation: the org profile and the site list the prefix rule; every
+  README of an appliance fork states "compatible with TurnKey Linux
+  appliances" and the upstream it tracks.
+
+## 5. Milestone mapping
+
+- M0 (now): sections 2 and 3 for the infrastructure repositories; keel-core
+  builds from the organization; both are the M0 gate of docs/m0-gate.md.
+- M1 (19.1): appliances onboarded through `test-appliance.yml`; keel-transition
+  and the keyring package get their own repositories (infrastructure, no
+  prefix: `keel-transition` is a package name, the repository can be
+  `transition`); confconsole and webmin baselines and first tests.
+- M2 and M3: as in BRIEF section 9, each new repository created under the
+  ruleset from day one.
+
+## 6. Decisions still open for the maintainer
+
+- Whether keel-core is an appliance (prefixed, as done) or infrastructure.
+- Runner hosting: which node of the cluster, and who holds the runner token.
+- Whether the appliance boot test counts as the 90 percent for recipes
+  (proposed above) or a per-file measure of conf.d scripts is required.
