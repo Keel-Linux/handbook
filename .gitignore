@@ -2,3 +2,4 @@ repos/
 *.pyc
 __pycache__/
 .coverage
+worktrees/
