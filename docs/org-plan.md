@@ -90,7 +90,9 @@ docs/ci-cd.md section 3; this is where each one stands in the sequence above.
 | keel-lamp, keel-lapp, keel-wordpress, keel-moodle, keel-odoo, keel-redis, keel-ejabberd, keel-nginx-php-fastcgi | not started | not started | the appliance job skips with a notice until each layer is published, so the gate can be added before the layer exists |
 | tklbam, tklbam-python-boto, turnkey-pylib, cdroots, bootstrap | last, per 0002 | not started | n/a |
 | keel-linux.github.io (the site) | done 2026-09-26 | done | `python / coverage`: tools/sitecheck.py, the checks a build step would have done |
-| .github (the reusable workflows) | done 2026-09-26 | done | `actionlint`, pinned by digest; the check of the checks |
+| .github (the reusable workflows) | done 2026-09-26 | done | `actionlint`, pinned by digest, and `tests / coverage` over the tools it lends the others |
+| apt (the archive and its tooling) | done 2026-09-26 | not possible while private | `tests / coverage` at 99 runs on every pull request, but branch protection on a private repository needs a paid plan, so the check cannot be required until the repository is public with the key rotation |
+| handbook | n/a, no code | not possible while private | same limitation; nothing executable lives there |
 
 The last two rows are not code repositories and have no coverage number, so
 the honest equivalent of the coverage gate is a check of what they actually
@@ -104,6 +106,21 @@ published (docs/releases-host.md, publishing a layer). For the rest, adding
 the caller is safe at any time: `test-appliance.yml` passes with a notice
 while the layer is missing, so the gate is in place the day the first build
 lands instead of being retrofitted.
+
+### The gate that measures whether a change can be installed
+
+Added 2026-09-26 after the confconsole lesson: the Instance menu and the
+console mark were merged with no entry in `debian/changelog`, so the newest
+installable confconsole stayed at the previous version and neither change
+reached an appliance. The code was on the default branch and the gate was
+green. A coverage gate measures the code, not whether the code can be
+installed.
+
+`require-changelog.yml` closes that: a pull request touching a file the package
+ships must add a changelog entry with a greater version, while tests,
+documentation and CI are exempt. It is required on the four repositories that
+produce packages (confconsole, inithooks, keel, keel-transition) as
+`package / changelog`.
 
 ## 4. Code changes the guidelines require
 
