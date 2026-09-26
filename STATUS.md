@@ -846,3 +846,35 @@ inithooks, so the chain reaches an appliance only when `core` is rebuilt with
 `keel 0.2.1` and `inithooks 2.3.6+keel4`; and
 `inithooks/libinithooks/declarative.py` is still a second implementation of
 the spec vocabulary (decision 0009).
+
+## A recipe that existed only on the build host (2026-09-26)
+
+Rebuilding the forum chain with tonight's packages failed on its second layer:
+
+    ERROR [layer-lib]: SOURCE_DATE_EPOCH not set and no git history in
+    /turnkey/fab-keel/products/nodejs-nginx
+    FATAL [bt-layer]: no usable SOURCE_DATE_EPOCH
+
+`core` rebuilt because its recipe is a checkout of keel-core. The stack layer
+between core and the forum was a plain directory on the build host: three
+files, no history, no copy anywhere, and therefore no deterministic date to
+build with. The reproducible build work assumes the recipe's own history
+supplies that date, so a recipe that is not a repository cannot be built
+reproducibly and cannot be rebuilt by anyone else.
+
+It is now `Keel-Linux/keel-nodejs-nginx`, public, with its appliance gate
+wired from the start, and the build host's directory is a checkout of it.
+
+The nodebb recipe on the host was worse than missing: it was stale. It
+predated the conffile fix that PR 1 of keel-nodebb merged, which is the fix
+for the failed build that produced the broken layer in the first place. The
+host now tracks the repository, and both directories are checkouts rather than
+copies.
+
+Mistake worth recording: to let git read a directory owned by another user I
+ran `chown -R` on it, and that walked into the mounted deck of a previous
+build before I stopped it. The published layer was not touched, because an
+overlay sends writes to its upper directory and never to the lower one, and
+the deck itself is discarded by the next build. The right remedy was
+`git config --global --add safe.directory`, which touches no file, and that is
+what is in place.
