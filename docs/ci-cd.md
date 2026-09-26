@@ -9,7 +9,8 @@ and 3. Coverage standard: decisions 0003 and 0004.
 | --- | --- | --- |
 | Reusable workflows | `keel-linux/.github`, `.github/workflows/` | `test-python.yml`, `test-shell.yml`, `test-appliance.yml`, `build-deb.yml`; documented in `profile/WORKFLOWS.md` |
 | Unit tests and coverage gate | hosted `ubuntu-latest` runners (plain virtual machines, no `container:` jobs, no images) | active in eight repositories |
-| Appliance build and boot, Debian packages | self-hosted runner `keel-lxc-1`, labels `self-hosted, keel-lxc`, on the public services VM (docs/releases-host.md) | online since 2026-09-26; `test-appliance.yml` must fetch layers from the mirror before its first run (section 6) |
+| Appliance boot test | self-hosted runner `keel-lxc-1`, labels `self-hosted, keel-lxc`, on the public services VM (docs/releases-host.md) | online since 2026-09-26. `test-appliance.yml` fetches the layers from `https://mirror.keellinux.org/layers`, verifies, assembles, boots in LXC and runs the repository's `tests/boot-test.sh`; it builds nothing, because the runner has no fab, deck or buildtasks. Callers: keel-core and keel-nodebb. Blocked from actually running by one organization setting, section 5 |
+| Debian packages | the same runner | `build-deb.yml` unchanged and still inactive: `build-essential devscripts equivs fakeroot dpkg-dev` are not installed on the runner host |
 | Site | GitHub Pages, `keel-linux/keel-linux.github.io`, branch `main`, path `/`; the same checkout served at `https://www.keellinux.org/` and the apex by the public services VM (pull every 15 minutes) | published |
 
 Each repository carries one ten-line caller, `.github/workflows/tests.yml`,
@@ -27,9 +28,15 @@ job id `coverage`, so the required check is exactly:
     tests / coverage
 
 Renaming the caller job renames the check and silently detaches it from
-protection, so the job id `tests` is part of the contract. The other names,
-for later: `tests / build-and-boot` (test-appliance.yml) and `package / deb`
-(build-deb.yml, caller job id `package`).
+protection, so the job id `tests` is part of the contract.
+
+An appliance repository carries a second caller job, `appliance`, which calls
+`test-appliance.yml` (job id `build-and-boot`), so its check is exactly:
+
+    appliance / build-and-boot
+
+The remaining name, for later: `package / deb` (build-deb.yml, caller job id
+`package`).
 
 ## 3. Per-repository thresholds
 
@@ -48,6 +55,8 @@ repository):
 | tklbam-profiles | master | test-shell | 0 | success (placeholder notice) | on |
 | confconsole | master (fast-forwarded to upstream 0f37b48 on 2026-09-26; the fork's tip a2d9f70 was 50 upstream commits behind) | test-python (`package: ifutil`), after a test-shell placeholder at 0 in the baseline pull request | 99 | success (103 tests, ifutil.py 99.21 percent) | on since 2026-09-26 |
 | webmin | master (equal to upstream) | test-shell | 0 | success (placeholder notice; the project code is the Python update tool `buildsrc_lib`, and the first pytest switches the caller to test-python) | on since 2026-09-26 |
+| keel-core | master | test-shell (threshold 100) **plus** test-appliance (`appliance: core`, `parent: ""`) | 100 | `tests / coverage` success. `appliance / build-and-boot` accepted and queued, not yet run (section 5, runner group) | on; `tests / coverage` required, `appliance / build-and-boot` to be added after its first green run |
+| keel-nodebb | main | test-shell (threshold 100, raised from 95) **plus** test-appliance (`appliance: nodebb`, `parent: nodejs-nginx`) | 100 | `tests / coverage` success. The boot test run by hand on the runner fails on a real defect of the published layer (buildtasks#6), so the appliance check stays advisory | to be applied with `tests / coverage` required only |
 | .github | main | none (no code under test) | n/a | n/a | on, no required check |
 | keel-linux.github.io | main | none (static site) | n/a | n/a | on, no required check |
 
@@ -106,8 +115,11 @@ Rules for the number:
             with:
               threshold: 0
 
-   Python: `test-python.yml` with `package: <import name>`. Appliances:
-   `test-appliance.yml` with `appliance:` and `parent:` (after the runner).
+   Python: `test-python.yml` with `package: <import name>`. Appliances add a
+   second job, `appliance`, calling `test-appliance.yml` with `appliance:`,
+   `parent:` and `timeout:`, gated on `if: vars.KEEL_LXC_RUNNER == 'true'`;
+   its check is `appliance / build-and-boot` and it is required only once it
+   has passed once, because it depends on a layer being published.
 2. Push once to the default branch (allowed only before protection exists)
    and confirm the check `tests / coverage` appears on the commit:
    `GET /repos/keel-linux/<repo>/commits/<sha>/check-runs`.
@@ -155,6 +167,20 @@ Rules for the number:
   `test-appliance.yml` gate on `if: vars.KEEL_LXC_RUNNER == 'true'` so no job
   sits queued for 24 hours against a label no runner carries; set it back to
   `false` if the runner goes away.
+- **Runner group: public repositories, open.** Runner group 1 (`Default`)
+  has `allows_public_repositories: false`, and every repository of the
+  organization is public, so GitHub accepts an `appliance / build-and-boot`
+  job and then leaves it queued while `keel-lxc-1` is online and idle. This
+  is the one thing between the gate and its first real run. One call:
+
+        gh api -X PATCH orgs/keel-linux/actions/runner-groups/1 \
+          -F allows_public_repositories=true
+
+  Do the matching tightening in the same sitting: a self-hosted runner that
+  serves public repositories must never run code from an unreviewed fork, so
+  set the fork pull request policy to require approval for all outside
+  contributors. Every pull request so far comes from a branch of the
+  repository itself, not from a fork.
 - Local clones: `Keel/repos/keel` (uncommitted work on `main`) and
   `Keel/repos/dot-github` were left on their checked-out branches and are
   behind `origin`; `git pull --ff-only` when convenient.
@@ -195,19 +221,65 @@ no IPv6). Commands as root unless stated.
 
 What the runner host deliberately lacks: fab, deck, buildtasks, the
 `/turnkey/*` trees and `/mnt/builds/layers`. Layer builds stay on the build
-host (docs/build-host.md). Consequences, to be done before the first
-appliance job:
+host (docs/build-host.md). What that cost, and how it was settled on
+2026-09-26:
 
-- `test-appliance.yml` must stop calling `bt-layer` and instead download
-  `<appliance>.tar.zst` plus `.sha256` from
-  `https://mirror.keellinux.org/layers/` over IPv6, verify the checksum, and
-  run `keel verify` and `tests/boot-test.sh` against a local layers
-  directory. Until then a caller fails at the build step on this runner.
-- `build-deb.yml` needs `build-essential devscripts equivs fakeroot dpkg-dev`
-  on the runner host; not installed yet.
-- The `keel` command is not installed on the runner host either; the
-  workflow should install it from the archive once `archive.keellinux.org`
-  is signed, or check it out and run it from the tree.
+- `test-appliance.yml` was rewritten (`.github` pull request #3) and no
+  longer calls `bt-layer`. It probes
+  `https://mirror.keellinux.org/layers/<appliance>.manifest` over IPv6,
+  checks the published `parent` against the caller's `parent` input, runs
+  `keel pull` into a scratch cache and `keel verify` (0, 8 and 9 pass; 6 and
+  7 fail), then hands the assemble, the boot and the checks to the
+  repository's `tests/boot-test.sh`, run as root through
+  `/usr/local/sbin/keel-ci-boot-test`. Every run gets its own container name
+  and scratch tree, `keel-<appliance>-ci-<run id>-<attempt>`, and a cleanup
+  step with `if: always()` destroys both. When the manifest is not on the
+  mirror the job passes with a notice and an "Appliance test skipped"
+  section in the job summary, so a repository whose layer was never
+  published does not fail forever.
+- `keel` comes from a checkout of `keel-linux/keel` at `main`, not from a
+  package: decision 0005 is open, nothing is signed and
+  `archive.keellinux.org` has no keel package, so there is nothing to
+  install. The checkout needs only python3 and PyYAML, both on the runner,
+  and the job summary records the commit it resolved to. When the archive is
+  signed, the two lines that clone become an `apt-get install keel`.
+- `build-deb.yml` still needs `build-essential devscripts equivs fakeroot
+  dpkg-dev` on the runner host; not installed.
+- What the runner needed beyond the packages it already had: `apparmor`
+  (4.1.0, already present, `lxc-start` needs it for the generated profile);
+  `/var/tmp/keel-ci` owned by `runner`; two root-owned entry points,
+  `keel-ci-boot-test` and `keel-ci-cleanup`, added to
+  `/etc/sudoers.d/runner` next to `apt-get` and the `lxc-*` commands, each
+  checking that it acts only on a workspace under
+  `/home/runner/actions-runner/_work` and a scratch tree under
+  `/var/tmp/keel-ci`. No blanket sudo. Both are written by
+  `keel-provision` (docs/releases-host.md section 7).
+- Container networking: `lxcbr0`, whose dnsmasq advertises the ULA prefix
+  `fc42:5009:ba4b:5ab0::/64` with `ra-only`, so a container has a global
+  scope IPv6 address about five seconds after `lxc-start` and the host can
+  reach it, which the HTTP checks of an appliance need. A macvlan interface
+  on `eth0` would give a public address but a host cannot reach its own
+  macvlan children.
+
+### What one real run does, measured by hand on the runner
+
+`core`, as the `runner` user, exactly the sequence the workflow runs:
+`keel pull` from the mirror 3 s (the mirror is the same host), `keel verify`
+exit 8, assemble 13 s, container started and a global IPv6 address in 5 s,
+first boot finished 5 s later, `keel diff` 8 same and 0 drift and 1 unknown
+(`instance.fqdn`, which inspect cannot read offline, exit 13). 23 s in total,
+then the container and the scratch tree removed.
+
+`nodebb`: `keel pull` of the three layers, 598 MB, 7 s; `keel verify` exit 8;
+assemble 43 s; container up with an address in 5 s; then the first boot stops
+in `10regen-sshkeys` because the published layer still carries the build time
+wrappers `/usr/local/bin/systemctl` and `/usr/local/bin/service`, which call
+each other in a loop outside a build chroot. `core` and `nodejs-nginx` do not
+carry them, so it is `bt-layer` adding `LAYER_CHILD_OVERLAYS` to a child
+build and not stripping the finished layer: buildtasks issue #6. The gate
+found a real defect on its first run, which is what it is for; until the
+layer is rebuilt, `appliance / build-and-boot` is not a required status on
+keel-nodebb.
 
 ## 7. CD: what is published where today
 
@@ -216,7 +288,7 @@ appliance job:
 | Organization site | `https://keel-linux.github.io/` | GitHub Pages from `main` at `/` (build type legacy, `.nojekyll`, HTTPS enforced); a push to `main` is the deployment | live, `GET /repos/keel-linux/keel-linux.github.io/pages` reports `status: built`. If it is ever disabled: `POST /repos/keel-linux/keel-linux.github.io/pages` with `{"source": {"branch": "main", "path": "/"}}` |
 | Debian packages | workflow artifacts only (`build-deb.yml`, artifact `deb`, 30 days) | `dpkg-buildpackage -us -uc -b` on the LXC runner | inactive until the runner exists; nothing is signed |
 | APT repository | `https://archive.keellinux.org/` (README only) | `bin/publish` in repos/apt, target to be switched from Pages to this host | blocked on the signing key (decision 0005) |
-| Appliance layers and manifests | `https://mirror.keellinux.org/layers/` (staging, unsigned, header `X-Keel-Distribution`) | `keel-sync-layers` on the VM pulls from the build host's temporary mirror and verifies sha256 (docs/releases-host.md section 6) | staging layers served; signed manifests blocked on the key |
+| Appliance layers and manifests | `https://mirror.keellinux.org/layers/` (staging, unsigned, header `X-Keel-Distribution`) | staged on the build host and published by `bin/keel-publish-mirror` (docs/releases-host.md section 6, publishing a layer) | `core`, `lamp`, `nodejs-nginx` and `nodebb` served; `nodebb` published 2026-09-26 so the appliance gate had something to boot; signed manifests blocked on the key |
 
 The APT repository, the keyring package and layer publication follow the
 decision 0005 outcome; when it lands, the publication step is added to

@@ -72,7 +72,7 @@ visudo -c -f /etc/sudoers.d/runner >/dev/null
 # through these two commands only, and each checks where it is allowed to
 # act before doing anything.
 log appliance-gate
-install -d -m 0755 /var/tmp/keel-ci
+install -d -m 0755 -o runner -g runner /var/tmp/keel-ci
 cat > /usr/local/sbin/keel-ci-boot-test << 'GATE'
 #!/bin/sh
 # keel-ci-boot-test WORKSPACE SCRATCH APPLIANCE [tests/boot-test.sh options]
@@ -138,7 +138,7 @@ chmod 0755 /usr/local/sbin/keel-ci-cleanup
 
 # ---------------------------------------------------------------- trees
 log trees
-install -d -m 0755 /srv/archive /srv/mirror/layers /srv/releases/pve /srv/releases/meta /srv/forum /var/lib/dehydrated/acme-challenges
+install -d -m 0755 /srv/archive /srv/mirror/layers /srv/mirror/bootstrap /srv/releases/pve /srv/releases/meta /srv/forum /var/lib/dehydrated/acme-challenges
 rm -rf /srv/apex
 
 cat > /srv/archive/README.txt << 'TXT'
@@ -164,11 +164,17 @@ cp /srv/releases/README.txt /srv/releases/meta/README.txt
 cat > /srv/mirror/README.txt << 'TXT'
 Keel Linux image mirror (mirror.keellinux.org)
 
-/layers/  appliance layers: <name>.tar.zst with .sha256, .hash and .manifest
-/images/  assembled templates and ISOs (appears with the first release)
+/layers/     appliance layers: <name>.tar.zst with .sha256 and .manifest
+/images/     assembled templates and ISOs
+/bootstrap/  TKLDev bootstraps: bootstrap-<codename>-<arch>.tar.gz with .sha256
+             and .sha512 (what fab seeds a build from; TurnKey publishes none
+             for trixie)
+/selfcheck/  the daily reproducibility result of the reference appliance
 
-Layers here are staging builds and unsigned until the signing subkey rotation;
-the X-Keel-Distribution header of every response says so.
+Everything here is a staging build and unsigned until the signing subkey
+rotation of decision 0005: no .hash file names a key, an .UNSIGNED note sits
+beside the digests, and the X-Keel-Distribution header of every response says
+so.
 TXT
 
 # ---------------------------------------------------------------- site checkout

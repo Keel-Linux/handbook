@@ -36,17 +36,24 @@ touch also get the 0004 treatment.
 1. **Reusable workflows in `.github`**: `test-python.yml` (pytest under
    coverage, `coverage report --fail-under=<input>`), `test-shell.yml` (bats
    under kcov, threshold script), `test-appliance.yml` (self-hosted runner
-   label `keel-lxc`: bt-layer build, `keel assemble`, container boot, HTTP
-   check over IPv6). Each repository adds a ten-line workflow that calls one
-   of them with its threshold.
+   label `keel-lxc`: `keel pull` and `keel verify` from
+   `https://mirror.keellinux.org/layers`, `keel assemble`, container boot,
+   the repository's `tests/boot-test.sh`, HTTP check over IPv6). Each
+   repository adds a ten-line workflow that calls one of them with its
+   threshold; an appliance repository adds a second job for the boot test.
+   Done 2026-09-26; the appliance workflow fetches layers rather than
+   building them, because the runner has no fab, deck or buildtasks.
 2. **Branch protection on every default branch**: pull request required, the
    coverage check required, linear history, no force push, no deletion.
    Preferably one organization ruleset applied to all repositories, so a new
    repository is protected the day it is created.
-3. **Self-hosted runner**: one LXC container on the build cluster with the
-   GitHub runner, kcov, bats, fab, deck and buildtasks; IPv6 only is fine
-   because the runner connects outbound. Registered at organization level with
-   the `keel-lxc` label.
+3. **Self-hosted runner**: registered at organization level with the
+   `keel-lxc` label, done 2026-09-26. Not an LXC container of the build
+   cluster as planned here: `keel-lxc-1` runs on the public services VM
+   (docs/releases-host.md), which has native systemd, LXC, kcov and bats and
+   the outbound IPv4 the GitHub API still needs. It deliberately has no fab,
+   deck or buildtasks, so it consumes published layers instead of building
+   them.
 4. **Coverage badge** from the workflow's own output (job summary and a
    committed shields endpoint JSON), no third-party coverage service, since
    the number is already computed by the gate.
@@ -69,6 +76,25 @@ Order: keel and turnkey-chroot (already at 100, protection first), inithooks,
 tkldev, buildtasks, fab, common, then confconsole and webmin (no branches yet:
 baseline job first), then the appliances once `test-appliance.yml` and the
 runner exist, then the tklbam family last (0002).
+
+State on 2026-09-26. The per-repository thresholds and run conclusions are in
+docs/ci-cd.md section 3; this is where each one stands in the sequence above.
+
+| Repository | Steps 1 and 2 | Step 3 (protection) | Required checks |
+| --- | --- | --- | --- |
+| keel | done | done | `tests / coverage` |
+| turnkey-chroot, inithooks, tkldev, buildtasks, fab, common, tklbam-profiles | done | done | `tests / coverage` |
+| confconsole, webmin | done | done | `tests / coverage` |
+| keel-core | done; the appliance job added 2026-09-26 | done | `tests / coverage`; `appliance / build-and-boot` after its first green run |
+| keel-nodebb | done; the appliance job added 2026-09-26 | to apply | `tests / coverage`; the appliance check waits on buildtasks#6 |
+| keel-lamp, keel-lapp, keel-wordpress, keel-moodle, keel-odoo, keel-redis, keel-ejabberd, keel-nginx-php-fastcgi | not started | not started | the appliance job skips with a notice until each layer is published, so the gate can be added before the layer exists |
+| tklbam, tklbam-python-boto, turnkey-pylib, cdroots, bootstrap | last, per 0002 | not started | n/a |
+
+The two appliances that are through the sequence are the two whose layers are
+published (docs/releases-host.md, publishing a layer). For the rest, adding
+the caller is safe at any time: `test-appliance.yml` passes with a notice
+while the layer is missing, so the gate is in place the day the first build
+lands instead of being retrofitted.
 
 ## 4. Code changes the guidelines require
 
