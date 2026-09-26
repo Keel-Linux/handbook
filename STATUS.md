@@ -682,3 +682,32 @@ the archive served lives in it. It is now `Keel-Linux/apt`, private, with the
 build host's published state and the workstation's tooling merged into one
 history, and gated at 99. It becomes public with the key rotation, as decision
 0005 says.
+
+## The gate that measures whether a change can be installed (2026-09-26)
+
+The confconsole lesson of today deserved a check, not just a fix. The Instance
+menu and the console mark were merged, the coverage gate was green, and the
+newest installable confconsole stayed at the previous version, so neither
+change reached an appliance and the image was read as evidence that the menu
+had never been written. A coverage gate measures the code. Nothing measured
+whether the code could be installed.
+
+`require-changelog.yml` in the organization's workflow repository refuses a
+pull request that changes a file the package ships without a changelog entry
+whose version is greater. Tests, documentation and CI ship nothing and are
+exempt. The rule is `bin/require-changelog`, a script with thirteen bats cases
+at 100 percent of its lines, rather than shell inside a workflow: the entry
+rewritten at the same version, the version that goes backwards, the changelog
+the pull request itself adds, a caller with its own path and exempt
+expression, a repository with no changelog, and the three ways the arguments
+can be wrong.
+
+It is required as `package / changelog` on the four repositories that produce
+packages: confconsole, inithooks, keel and keel-transition. The workflow
+repository gained a `tests / coverage` gate of its own for the tools it lends
+the others, beside `actionlint`.
+
+Where protection is not possible: a private repository cannot require a check
+on this plan, so `apt` and `handbook` run their gates on every pull request
+without being able to enforce them. `apt` becomes public with the key
+rotation.
