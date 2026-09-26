@@ -86,7 +86,7 @@ docs/ci-cd.md section 3; this is where each one stands in the sequence above.
 | turnkey-chroot, inithooks, tkldev, buildtasks, fab, common, tklbam-profiles | done | done | `tests / coverage` |
 | confconsole, webmin | done | done | `tests / coverage` |
 | keel-core | done; the appliance job added 2026-09-26 | done | `tests / coverage`; `appliance / build-and-boot` after its first green run |
-| keel-nodebb | done; the appliance job added 2026-09-26 | to apply | `tests / coverage`; the appliance check waits on buildtasks#6 |
+| keel-nodebb | done; the appliance job added 2026-09-26 | done | `tests / coverage`; the appliance check waits on buildtasks issue 6 |
 | keel-lamp, keel-lapp, keel-wordpress, keel-moodle, keel-odoo, keel-redis, keel-ejabberd, keel-nginx-php-fastcgi | not started | not started | the appliance job skips with a notice until each layer is published, so the gate can be added before the layer exists |
 | tklbam, tklbam-python-boto, turnkey-pylib, cdroots, bootstrap | last, per 0002 | not started | n/a |
 
