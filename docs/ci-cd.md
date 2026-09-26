@@ -9,7 +9,7 @@ and 3. Coverage standard: decisions 0003 and 0004.
 | --- | --- | --- |
 | Reusable workflows | `keel-linux/.github`, `.github/workflows/` | `test-python.yml`, `test-shell.yml`, `test-appliance.yml`, `build-deb.yml`; documented in `profile/WORKFLOWS.md` |
 | Unit tests and coverage gate | hosted `ubuntu-latest` runners (plain virtual machines, no `container:` jobs, no images) | active in eight repositories |
-| Appliance boot test | self-hosted runner `keel-lxc-1`, labels `self-hosted, keel-lxc`, on the public services VM (docs/releases-host.md) | online since 2026-09-26. `test-appliance.yml` fetches the layers from `https://mirror.keellinux.org/layers`, verifies, assembles, boots in LXC and runs the repository's `tests/boot-test.sh`; it builds nothing, because the runner has no fab, deck or buildtasks. Callers: keel-core and keel-nodebb. Blocked from actually running by one organization setting, section 5 |
+| Appliance boot test | self-hosted runner `keel-lxc-1`, labels `self-hosted, keel-lxc`, on the public services VM (docs/releases-host.md) | online since 2026-09-26. `test-appliance.yml` fetches the layers from `https://mirror.keellinux.org/layers`, verifies, assembles, boots in LXC and runs the repository's `tests/boot-test.sh`; it builds nothing, because the runner has no fab, deck or buildtasks. Callers: keel-core and keel-nodebb. First green CI run on keel-core 2026-09-26, 39 seconds; required on `master` since |
 | Debian packages | the same runner | `build-deb.yml` unchanged and still inactive: `build-essential devscripts equivs fakeroot dpkg-dev` are not installed on the runner host |
 | Site | GitHub Pages, `keel-linux/keel-linux.github.io`, branch `main`, path `/`; the same checkout served at `https://www.keellinux.org/` and the apex by the public services VM (pull every 15 minutes) | published |
 
@@ -55,7 +55,7 @@ repository):
 | tklbam-profiles | master | test-shell | 0 | success (placeholder notice) | on |
 | confconsole | master (fast-forwarded to upstream 0f37b48 on 2026-09-26; the fork's tip a2d9f70 was 50 upstream commits behind) | test-python (`package: ifutil`), after a test-shell placeholder at 0 in the baseline pull request | 99 | success (103 tests, ifutil.py 99.21 percent) | on since 2026-09-26 |
 | webmin | master (equal to upstream) | test-shell | 0 | success (placeholder notice; the project code is the Python update tool `buildsrc_lib`, and the first pytest switches the caller to test-python) | on since 2026-09-26 |
-| keel-core | master | test-shell (threshold 100) **plus** test-appliance (`appliance: core`, `parent: ""`) | 100 | `tests / coverage` success. `appliance / build-and-boot` accepted and queued, not yet run (section 5, runner group) | on; `tests / coverage` required, `appliance / build-and-boot` to be added after its first green run |
+| keel-core | master | test-shell (threshold 100) **plus** test-appliance (`appliance: core`, `parent: ""`) | 100 | both success: `tests / coverage` 2m41s, `appliance / build-and-boot` 39s (run 36272285880, container `keel-core-ci-36272285880-1`, `keel diff` 6 same and 0 drift) | on; **both** checks required since 2026-09-26 |
 | keel-nodebb | main | test-shell **plus** test-appliance (`appliance: nodebb`, `parent: nodejs-nginx`) | 95, the lowest of the three measured shell files (`40nodebb` at 96.97; the other two at 100) | `tests / coverage` success. The boot test run by hand on the runner fails on a real defect of the published layer (buildtasks issue 6), so the appliance check stays advisory | on since 2026-09-26, `tests / coverage` required |
 | .github | main | none (no code under test) | n/a | n/a | on, no required check |
 | keel-linux.github.io | main | none (static site) | n/a | n/a | on, no required check |
@@ -167,20 +167,27 @@ Rules for the number:
   `test-appliance.yml` gate on `if: vars.KEEL_LXC_RUNNER == 'true'` so no job
   sits queued for 24 hours against a label no runner carries; set it back to
   `false` if the runner goes away.
-- **Runner group: public repositories, open.** Runner group 1 (`Default`)
-  has `allows_public_repositories: false`, and every repository of the
-  organization is public, so GitHub accepts an `appliance / build-and-boot`
-  job and then leaves it queued while `keel-lxc-1` is online and idle. This
-  is the one thing between the gate and its first real run. One call:
+- **Runner group: public repositories, opened 2026-09-26.** Runner group 1
+  (`Default`) had `allows_public_repositories: false` while every repository
+  of the organization is public, so GitHub accepted an
+  `appliance / build-and-boot` job and then left it queued with `keel-lxc-1`
+  online and idle. That was the one thing between the gate and its first real
+  run. Opened with:
 
-        gh api -X PATCH orgs/keel-linux/actions/runner-groups/1 \
-          -F allows_public_repositories=true
+        echo '{"allows_public_repositories":true}' \
+          | gh api --method PATCH /orgs/keel-linux/actions/runner-groups/1 --input -
 
-  Do the matching tightening in the same sitting: a self-hosted runner that
-  serves public repositories must never run code from an unreviewed fork, so
-  set the fork pull request policy to require approval for all outside
-  contributors. Every pull request so far comes from a branch of the
-  repository itself, not from a fork.
+  **Still to do, and it matters:** a self-hosted runner that serves public
+  repositories must never run code from an unreviewed fork. Set the fork pull
+  request policy to require approval for all outside contributors. Every pull
+  request so far comes from a branch of the repository itself, not a fork, so
+  nothing unreviewed has run, but the setting is what keeps that true.
+- **A queued job carries the workflow definition it was queued with.** The
+  runs that had piled up against the closed runner group were expanded from
+  the old `test-appliance.yml` and ran `bt-layer` when they were finally let
+  through. Cancel stale queued runs after changing a reusable workflow and
+  trigger a fresh one; the check is only meaningful on a run created after
+  the change.
 - Local clones: `Keel/repos/keel` (uncommitted work on `main`) and
   `Keel/repos/dot-github` were left on their checked-out branches and are
   behind `origin`; `git pull --ff-only` when convenient.
@@ -272,9 +279,20 @@ host (docs/build-host.md). What that cost, and how it was settled on
   on `eth0` would give a public address but a host cannot reach its own
   macvlan children.
 
-### What one real run does, measured by hand on the runner
+### What one real run does
 
-`core`, as the `runner` user, replaying every step of the workflow from a
+`core`, run 36272285880 of keel-core, the first `appliance / build-and-boot`
+in CI: **39 seconds**, every step green. The probe answered 200, the published
+parent `none` matched the caller, `keel pull` took the layer from the mirror,
+`keel verify` passed, the chain assembled into
+`/var/tmp/keel-ci/keel-core-ci-36272285880-1/lxc/...`, the container
+`keel-core-ci-36272285880-1` started on `lxcbr0` and had the address
+`fc42:5009:ba4b:5ab0:3a3c:c7b3:c779:316f` five seconds later, the first boot
+finished five seconds after that, `keel diff` reported 6 same and 0 drift, and
+`keel-ci-cleanup` removed the container and the scratch tree. The unit test
+job on the hosted runner took 2m41s, four times as long as the boot test.
+
+The same sequence replayed by hand beforehand, as the `runner` user, from a
 clean clone of `master`: clone, keel checkout, manifest 200, published parent
 `none` matching the caller, `keel pull` 3 s (the mirror is the same host),
 `keel verify` exit 9 (every layer matches; the packages half is not

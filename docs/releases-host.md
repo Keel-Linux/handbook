@@ -415,15 +415,12 @@ nothing else on the VM was touched.
   passes `sh -n` and shellcheck and only has to be installed:
   `install -m 0755 -o root -g root keel-provision.pending
   /usr/local/sbin/keel-provision`. Until then, do not run `keel-provision`.
-- **The Default runner group refuses public repositories.**
-  `allows_public_repositories` is `false` on runner group 1 and every
-  repository of the organization is public, so GitHub accepts an
-  `appliance / build-and-boot` job and then leaves it queued while
-  `keel-lxc-1` is online and idle. One call by the maintainer fixes it:
-  `gh api -X PATCH orgs/keel-linux/actions/runner-groups/1 -F allows_public_repositories=true`.
-  Worth doing in the same sitting: set the fork pull request policy to
-  require approval for all outside contributors, because a self-hosted
-  runner on this VM must never run code from an unreviewed fork.
+- **Fork pull requests.** The Default runner group was opened to public
+  repositories on 2026-09-26 so the appliance gate could run, which means a
+  workflow from a fork could in principle reach this VM. Set the fork pull
+  request policy to require approval for all outside contributors. Every pull
+  request so far comes from a branch of the repository itself, so nothing
+  unreviewed has run here, but the setting is what keeps that true.
 - `build-deb.yml` build dependencies on the runner host (section 7).
 - IPv4: the A records point at addresses that do not forward 80 and 443 to
   the VM; either the cluster adds the forwarding or the A records go.

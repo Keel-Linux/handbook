@@ -570,3 +570,43 @@ the first boot chain still does not call `keel spec apply --system`, so the
 `/etc/hosts` entry is not written at first boot yet, and the hook that calls
 it must run after `09hostname`; and `libinithooks/declarative.py` is a second
 implementation of this vocabulary that knows none of these four changes.
+
+## Two more holes in the first boot, closed (2026-09-26)
+
+inithooks PR #9 and PR #10, both found by pulling on the thread the forum
+build left.
+
+**The runner never gave the hooks the path of the conf file.** `run` exported
+`INITHOOKS_CONF` inside the test that sources it, so the variable reached a
+hook only when the file already existed. `29preseed`, the hook whose whole
+job is to create that file on a headless machine, ran `cat>$INITHOOKS_CONF`
+with an empty target, died with an ambiguous redirect and was logged as
+failed on every headless first boot. That is the `29preseed` exit 1 the forum
+log showed, and it is an upstream defect, recorded as issue H in the TurnKey
+plan with a fix branch. `tests/test-run.bats` reproduces it with the real
+overlay hook: three of its seven tests fail without the one line.
+
+**The two readers of the instance description disagreed about the
+vocabulary.** The tooling renamed `security.updates` to
+`security.updates_at_first_boot` today; the hook library rejects an unknown
+key under `security`, so a description written for the current vocabulary
+would have been valid to the half that writes it and invalid to the half that
+boots from it, leaving the instance with nothing declared. The rename is now
+in both, the old name still loads with one warning naming its replacement,
+and `tests/test_vocabulary.py` freezes the vocabulary and, with `KEEL_SRC`
+pointing at the tooling, runs both readers over one document and compares
+their rename tables. The duplication stays on purpose, since inithooks must
+carry no dependency on us; the test is what keeps the copies honest.
+
+Packaged as 2.3.6+keel3 and +keel4. Coverage: shell 112 bats, lowest file
+98.44, total 99.55 against a gate of 98; Python 185 tests plus 3 skipped,
+library 100, CLI 99, total 99 against a gate of 95.
+
+## The TurnKey notes are in git too (2026-09-26)
+
+`marcos-mendez/tkl-notes`, private: the brief, the roadmap, the eight plan
+files, the defect reports with their fix branches and the draft issues. Same
+reason as the handbook. Each defect in plan/02 was reproduced on a real 19.0,
+which is work that no amount of reading the code gives back. Working clones
+and build output stay untracked, and two headings in the brief were reworded
+to name the work rather than the tool that read it.
