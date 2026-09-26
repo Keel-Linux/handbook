@@ -89,6 +89,15 @@ docs/ci-cd.md section 3; this is where each one stands in the sequence above.
 | keel-nodebb | done; the appliance job added 2026-09-26 | done | `tests / coverage`; the appliance check waits on buildtasks issue 6 |
 | keel-lamp, keel-lapp, keel-wordpress, keel-moodle, keel-odoo, keel-redis, keel-ejabberd, keel-nginx-php-fastcgi | not started | not started | the appliance job skips with a notice until each layer is published, so the gate can be added before the layer exists |
 | tklbam, tklbam-python-boto, turnkey-pylib, cdroots, bootstrap | last, per 0002 | not started | n/a |
+| keel-linux.github.io (the site) | done 2026-09-26 | done | `python / coverage`: tools/sitecheck.py, the checks a build step would have done |
+| .github (the reusable workflows) | done 2026-09-26 | done | `actionlint`, pinned by digest; the check of the checks |
+
+The last two rows are not code repositories and have no coverage number, so
+the honest equivalent of the coverage gate is a check of what they actually
+are: the site is checked for links, fragments, assets and page shape, and the
+workflow repository is linted, including shellcheck over every run block. The
+rule the guidelines state is that every repository has a required check, not
+that every repository reports a percentage.
 
 The two appliances that are through the sequence are the two whose layers are
 published (docs/releases-host.md, publishing a layer). For the rest, adding

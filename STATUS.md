@@ -610,3 +610,37 @@ reason as the handbook. Each defect in plan/02 was reproduced on a real 19.0,
 which is work that no amount of reading the code gives back. Working clones
 and build output stay untracked, and two headings in the brief were reworded
 to name the work rather than the tool that read it.
+
+## Every active repository now has a gate (2026-09-26)
+
+An audit of the organization found twenty-six repositories, thirteen gated and
+thirteen not. Eleven of the thirteen are deferred by decision: the eight
+appliance forks wait for their layers, and the tklbam family is last by
+decision 0002. The other two were the ones that mattered.
+
+**The site had no check at all**, and nothing builds it: what is in the
+repository is what the browser gets, so a link that resolved to nothing or an
+asset that had been removed went straight to the public page. It is the most
+visible repository we have. `tools/sitecheck.py` now does what a build step
+would have done: internal links resolve, fragments name ids that exist
+including on another page, referenced assets exist and every asset is
+referenced (counting the social card of the og:image and twitter:image tags),
+external links are https, and each page has a language, a title and one h1.
+Two real findings came out of the first run: the dark and one colour marks
+were served and referenced by nothing, so the guidelines page now has a
+section for the mark offering all four variants with the rules for using them.
+37 tests, 99 percent of the checker, `python / coverage` required on main.
+
+**The workflow repository had no check and no protection**, while holding the
+four reusable workflows every other repository calls at `@main`: a mistake
+there breaks every gate at once and no caller can catch it. actionlint now
+runs on it, pinned by version and sha256 the way test-shell pins kcov, with
+shellcheck over every run block and no tolerance for informational findings.
+Four real findings, fixed in the same change, one of them in the linting
+workflow itself, which is the gate catching the commit that introduced it.
+`actionlint` required on main.
+
+The last two repositories have no coverage number, and the honest equivalent
+of the coverage gate is a check of what they actually are. The guideline is
+that every repository has a required check, not that every repository reports
+a percentage.
