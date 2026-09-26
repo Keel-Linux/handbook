@@ -644,3 +644,41 @@ The last two repositories have no coverage number, and the honest equivalent
 of the coverage gate is a check of what they actually are. The guideline is
 that every repository has a required check, not that every repository reports
 a percentage.
+
+## Today's fixes are packaged, and the archive is in git (2026-09-26)
+
+The staging archive carried `+keel1` of inithooks and confconsole, so nothing
+merged today could reach a machine. Built on the build host and published to
+`trixie-staging`, which is unsigned and which no appliance may use until the
+key rotation:
+
+| Package | Version | What it carries |
+| --- | --- | --- |
+| inithooks | 2.3.6+keel4 | the instance description path, the conf path export, the vocabulary parity |
+| confconsole | 2.2.3+keel2 | the Instance menu, the mark above the usage screen |
+| keel-transition | 0.1.0 | the migration path, built earlier and waiting in incoming |
+| keel-archive-keyring | 0.1.0 | the project public key |
+
+confconsole needed a package entry of its own: the Instance menu and the mark
+were merged with no changelog bump, so the newest installable confconsole was
+`+keel1` and neither reached the forum image. That is the whole reason the menu
+looked unwritten. `keel` moves from Suggests to Recommends there, since the
+menu reports its absence rather than failing.
+
+**The publication failed on its last step and taught us something.** reprepro
+included the packages, exported the indices, and then the commit in the
+published tree failed: root on the build host has no git identity. The archive
+was correct and the record of it was not, which is the worst place to stop.
+Fixed in the archive repository: the publication now passes its own name and
+address, overridable through the environment, with two tests, one of which
+points git at an empty global and system config. The harness had always
+configured an identity, the way a workstation has one, which is why no test
+caught it.
+
+**The archive repository had no remote at all.** It holds the reprepro
+configuration, the publication, release, mirror and self check tooling, and it
+doubles as the Pages checkout for archive.keellinux.org, so the state of what
+the archive served lives in it. It is now `Keel-Linux/apt`, private, with the
+build host's published state and the workstation's tooling merged into one
+history, and gated at 99. It becomes public with the key rotation, as decision
+0005 says.
