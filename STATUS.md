@@ -474,3 +474,39 @@ TurnKey entries sit in deb822 files shared with Debian, so disabling them by
 renaming would disable Debian too. The tool names those files in its report
 and relies on the pin instead, and still renames a `turnkey.list` where one
 exists.
+
+## The first boot reads the description again (2026-09-26)
+
+inithooks PR #8. The forum build left a defect that made every declarative
+promise unreliable: the description is written to `/etc/keel/instance.yaml`,
+which the tooling writes and the operator edits, and `00declarative` read
+`/etc/inithooks.yaml` and nothing else. The hook found no file, exited 0 as
+designed, and the instance came up from an empty conf. Hostname, network and
+secrets were ignored on a boot that reported success.
+
+Both paths carry the same document and the same schema version, so the fix
+is a search, not a rename: `INITHOOKS_DECL` names a file outright when set,
+otherwise the first of `/etc/keel/instance.yaml` and `/etc/inithooks.yaml`
+that exists is read, and when both exist the first wins and the other is
+named in a warning. `declarative.py --which` prints the path that would be
+read, which is how the hook asks, so the order lives in one place and is
+tested there. `default/inithooks` no longer sets `INITHOOKS_DECL`, which
+would have won over the search on every machine. A reader that cannot run
+leaves the boot alone with a warning instead of aborting it.
+
+`DECL_PATHS` is built from `DECL_DEFAULT`, so the upstream form of the patch
+keeps the second path alone and everything else applies unmodified.
+
+Measured: 169 tests, declarative library 100 percent, CLI 99, total 99 with
+branches against a gate of 95. Packaged as 2.3.6+keel2. Still to prove on a
+machine: a rebuilt core layer with +keel2 and an appliance whose description
+sits at the instance path, with `keel diff` reporting the declared values.
+
+## The handbook is in git (2026-09-26)
+
+This tree was the largest single point of failure in the project: the brief,
+the status log, the decisions and the whole operational record existed in one
+directory on one workstation, with no history and no copy. It is now
+`Keel-Linux/handbook`, private, because it records host addresses, the sudo
+policy of the CI runner and the recovery procedures. README.md says which
+documents are promoted to the public site.
