@@ -903,3 +903,114 @@ script is read as it executes. Two consequences, both handled:
 The lesson is the same one as the recipes: what runs on the build host has to
 be a checkout that someone keeps current, or it quietly becomes a fork of its
 own.
+
+## A build that installs yesterday's packages now fails (2026-09-27)
+
+The forum chain rebuilt late on the 26th carried inithooks 2.3.6+keel1,
+confconsole 2.2.3+keel1 and keel 0.1.0, hours after 2.3.6+keel4, 2.2.3+keel2
+and 0.2.1 had been published to the staging archive. Every step of that build
+succeeded, which is the part worth fixing.
+
+**Why it passed.** `bt-layer` runs `make clean` and ignores its status. That
+clean failed:
+
+    deck -D build/root.patched
+    rmdir: failed to remove '.../build/root.patched': Device or resource busy
+    make: *** [product.mk:270: clean] Error 1
+
+`root.patched` was mounted twice, so the `rmdir` inside `deck -D` failed and
+make stopped before `rm -rf $(STAMPS_DIR)`. The stamps of `bootstrap`,
+`root.spec` and `root.build` survived from 16:57, only `root.patched` was
+rebuilt, and the archive the chroot read was the copy `bootstrap/post` had
+made that morning. The recipe's own guard was `grep -c '+keel1$'`, a literal
+that the stale packages satisfied exactly. Two independent defects that happen
+to cancel out into a green build.
+
+**What the recipe asserts now** (keel-nodebb pull request 7, merge ffb23e2):
+
+- `bin/keel-archive-check` compares the package index copied into a build tree
+  with the index of the live archive and stops the build when they differ. The
+  Makefile calls it in `bootstrap/post`, where the copy is made, and again in
+  `root.patched/pre`, which runs on every build and therefore catches a
+  bootstrap that this build did not make. A stamped bootstrap can no longer
+  smuggle an old archive into a rebuild; it fails loudly instead.
+- `conf.d/zz-project-packages`, the new last conf script, replaces the
+  literal. For each of inithooks, confconsole and keel it checks that the
+  archive offers exactly one version, that apt's candidate is that version,
+  that the version is served by `file:/srv/keel-apt/repo` rather than an
+  upstream source, and that the installed package is that candidate with dpkg
+  status `install ok installed`. It then removes the build time package
+  source, which `conf.d/main` used to do. No version is written down anywhere,
+  so a rebuild made after a publication either carries the new versions or
+  fails.
+
+Both scripts run for real in the tests against scratch trees, with `dpkg`,
+`dpkg-query` and `apt-cache` as PATH stubs reading fixtures: 21 new tests,
+both files at 100 percent under kcov, and both added to the measured set.
+`tests / coverage` green at threshold 95.
+
+keel-core was checked for the same pattern and does not have it: its plan
+lists no project package, its `conf.d/main` is the upstream no-op and nothing
+in it copies an archive. Its layer carries the upstream inithooks 2.3.6 and
+confconsole 2.2.3, and the forum layer upgrades them. So there was nothing to
+change there and no second pull request.
+
+**The build host.** `/turnkey/buildtasks-keel` is reset to `origin/19.x`
+(85a1771), so `layer_audit_packages` and the make status capture of PR 4 and
+the signing identity fix of PR 5 are now what builds run. The local commit was
+discarded: `git diff origin/19.x 19.x` showed it as a revert of PRs 3, 4 and
+5, its `zz-ssl-ciphers` content already being on the branch. The three product
+directories are checkouts and were updated before the rebuild: `core` to
+keel-core master 53d9fb5 (it had been sitting on the upstream 24c82ee, so the
+core layer gained the keel banner overlay), `nodejs-nginx` to 648d6b6 and
+`nodebb` to ffb23e2. `build/` stays out of git through `.git/info/exclude`,
+and `.gitignore` in core.
+
+The three stale build directories were removed before rebuilding, which is
+the state `make clean` could not reach: every mount under
+`/turnkey/fab-keel/products/*/build` was unmounted lazily first, then the
+trees deleted. No `chown -R` anywhere near them.
+
+**The rebuild**, `bin/keel-release --force --rebuild nodebb`, 00:34 to 00:59
+UTC. The two checks fired and passed in the nodebb build log, and so did the
+new conf script:
+
+    [archive-check bootstrap] .../build/bootstrap/srv/keel-apt/repo/... is the archive at /srv/keel-apt/repo/...
+    [archive-check root.patched] .../build/root.patched/srv/keel-apt/repo/... is the archive at /srv/keel-apt/repo/...
+    inithooks 2.3.6+keel4, the candidate of the project archive
+    confconsole 2.2.3+keel2, the candidate of the project archive
+    keel 0.2.1, the candidate of the project archive
+
+`/root/audit-layers.sh /mnt/builds/layers core nodejs-nginx nodebb` exits 0:
+every package installed in all three, no `/usr/local/bin/systemctl` or
+`service` shim left behind, and the nodebb rootfs carries inithooks
+2.3.6+keel4, confconsole 2.2.3+keel2 and keel 0.2.1. core and nodejs-nginx
+carry the upstream inithooks 2.3.6 and confconsole 2.2.3 and no keel, as their
+recipes intend.
+
+| Layer | sha256 | Bytes |
+| --- | --- | --- |
+| core | `b457aaac8b8be6f1d7c9584a27d60d211c60dc5c78c101b384f43c3e3778f025` | 326,426,823 |
+| nodejs-nginx | `f588cb159c9732ffd0b50568ca0beccd9ae1f23dfe6fb805b343fa90fdf47785` | 148,868,412 |
+| nodebb | `310147d9e32d0f446fc913433b36402f301988fc3a29809d53dbd6792aa9fd6d` | 166,185,619 |
+
+**Published** with `bin/keel-publish-mirror --unsigned-staging 2026-09-27`
+from a workstation, both tunnels open, exit 0. The release staged under the
+27th because the build crossed midnight UTC. `keel verify` over the public
+names reports 3 layers checked, 3 ok (exit 9, packages not implemented); the
+archive still has no `InRelease`, which is what an unsigned archive returns.
+`https://archive.keellinux.org/staging-unsigned` now offers inithooks
+2.3.6+keel4, confconsole 2.2.3+keel2 and keel 0.2.1, where it had been serving
+the `+keel1` set. `keel pull nodebb --source https://mirror.keellinux.org/layers`
+follows the chain and fetches all three layers, 641,480,854 bytes.
+
+One practical note for the next publication: the ControlMaster socket
+`keel-publish-mirror` opens lives under `$TMPDIR`, and a long `TMPDIR` fails
+with `unix_listener: path ... too long for Unix domain socket` before any
+transfer starts. `TMPDIR=/run/user/$(id -u)` is short enough.
+
+**Still open.** `make clean` failing silently is the defect that let this
+happen at all, and it is in buildtasks, not in the recipe: `bt-layer` should
+treat a failed clean as fatal, or remove the build directory itself, rather
+than building on top of whatever the failure left. The recipe now refuses the
+result, which is the safety net, not the fix.
