@@ -1710,3 +1710,104 @@ The layers themselves are ready: `<name>.manifest`, `<name>.tar.zst` and
 mirror already serves. Publishing them turns `appliance / build-and-boot` in
 each repository from a skip into a real run, which is the first time either
 boot test proves a declared `secrets.db_password` reaching a database.
+
+## A release can be finished in seconds instead of staged again (2026-09-27)
+
+The signing subkey is passphrase protected and the gpg agent holds the
+passphrase for ten minutes. A release of five appliances takes longer than
+that, so `keel-release --force all` reached its first signature after the
+passphrase had gone and died there, at `bt-aplinfo`, with `gpg: signing
+failed: Inappropriate ioctl for device`. `--force` empties the dated
+directory before it starts, so five staged templates, their `.sha512`
+signatures and the signed `MANIFEST` went down with it. Three attended
+moments had been spent that way.
+
+Merged as [apt#6](https://github.com/Keel-Linux/apt/pull/6).
+
+### What a rerun is now allowed to skip
+
+Each step asks the artifact on disk whether it has anything left to do,
+never a stamp saying the step ran:
+
+| step | redone only when |
+| --- | --- |
+| build a layer | the tarball does not match its manifest (as before) |
+| stage a layer | the staged copy is not that same layer: manifest, tarball digest, published `.sha256`, package list |
+| capture packages | the manifest does not already record this pool and the list beside it |
+| assemble a template | it is missing, or its `.sha512` is not its digest |
+| write the index | it is not the index of exactly these templates at this URL |
+| sign | what is there does not verify |
+
+`--resume` works in a dated directory that already exists and never empties
+it. `--force` is kept as the old name and now means the same thing, so the
+runbooks need no change and nothing wipes a directory holding signatures
+again. Copying a previous release aside to `/srv/keel-release/archive/` by
+hand, as was needed this morning, is no longer needed.
+
+### Signing is the last phase, and only the last phase
+
+`bt-aplinfo` is no longer given `BT_GPGKEY`. The index is signed by the same
+phase that signs the template digests and `MANIFEST`, so no step before the
+signing can fail for want of a passphrase, which is precisely what happened.
+`--sign-only DATE` runs that phase alone over what is staged and takes no
+build lock: it builds nothing, and waiting behind a build would spend the
+moment it exists to use. Run twice it signs nothing a second time, and
+`MANIFEST` is rewritten only when it would say something else, so the
+signature keeps standing over the bytes it was made on.
+
+Two ways a signature could be lost are closed. `release_sign` writes
+`<file>.asc.new` and moves it into place only after gpg succeeds, because
+gpg empties its `--output` before it asks the agent for the passphrase: a
+failed signing used to truncate a good signature. And a run with no key in
+the keyring now leaves an earlier run's signatures where they are, and says
+so, instead of replacing them with an `UNSIGNED` note it cannot undo.
+
+### The wait for the build lock
+
+`keel-release` used to exit 4 the moment the build lock was held, and the
+daily self check held it for eight minutes right after the maintainer had
+typed the passphrase. It now waits `KEEL_BUILD_WAIT` seconds, 600 by
+default, and says on the first look what it is waiting for and for how long.
+600 is the life of the passphrase in the agent: a release is attended, so
+waiting a few minutes for a build that is going spends that moment better
+than refusing at once, and waiting longer than the passphrase lives would
+gain nothing. `--wait SECONDS` sets another ceiling and `--no-wait` refuses
+immediately. The daily self check still skips rather than waits: nobody is
+waiting for it, it runs again tomorrow, and a check queued behind a release
+would hold the lock the release wants next.
+
+### The gate
+
+`tests/coverage.sh` at threshold 99: **99.55 percent** over `bin/` and
+`lib/`, `lib/release.sh` 99.10, every measured file at or above 99. 54 cases
+in `tests/release.bats`. Two `layout.bats` cases failed in CI on teardown
+rather than on an assertion (`rm: cannot remove '.../pages/.git': Directory
+not empty`, a git housekeeping run outliving the test); the scratch checkout
+now turns off `gc.auto` and `maintenance.auto`, and teardown no longer fails
+a test that passed.
+
+### The staged release 2026-09-27 needs no passphrase moment
+
+While this was being written, a `keel-release --force all` started on the
+build host at 06:06, wiped the staged tree and rebuilt all five templates
+from the layers. That run completed at 06:17 and signed everything, so
+`/srv/keel-release/2026-09-27/` now holds five templates, five signed
+`.sha512`, a signed `pve/aplinfo.dat` and a signed `MANIFEST`, all verifying
+against subkey `03041024F4B2C0C2F42DDDEA04906EAB77513310`. It was the last
+release that had to be staged twice.
+
+The new tooling was carried to `/srv/keel-apt/apt` by git bundle and merged
+there (the checkout also carries the publishing commits, so it is merged and
+never reset), then run against that release as the proof:
+
+    bin/keel-release --date 2026-09-27 --sign-only all
+
+Exit 0 in 35 seconds over 3.2 GB. It read every digest and verified every
+signature, wrote nothing, asked for no passphrase, and reported each
+artifact as already signed and `MANIFEST: unchanged`. `MANIFEST`,
+`MANIFEST.asc` and all six other signatures are byte for byte what they
+were, and no `.asc.new` or `.UNSIGNED` was left behind.
+
+What is left is the publication: `bin/keel-publish-mirror 2026-09-27` moves
+the release to the public services VM. Nothing about it needs the signing
+subkey any more.
