@@ -216,3 +216,33 @@ So the unit extraction of mariadb and postgresql, and the `apache-php` layer,
 come before LAMP and LAPP, and WordPress comes on top of LAMP inheriting the
 choice of where its database lives. `apache-php` shared by both stacks is the
 second consumer 0010 was waiting for.
+
+
+## The standard set, decided 2026-09-27: MariaDB, PostgreSQL, Redis
+
+The maintainer chose three engines to carry the whole treatment: the unit
+extraction, the console modes, the configuration and the boot tests. Measured
+against what Debian 13 can rebuild, this is also the largest set that keeps the
+sovereignty claim intact.
+
+| Upstream appliance | Debian 13 | Verdict |
+| --- | --- | --- |
+| mysql, which installs MariaDB | yes | ours, keel-mariadb |
+| postgresql | yes | ours, keel-postgresql |
+| redis | yes, `redis-server 5:8.0.2-3+deb13u2` | next, the fork keel-redis exists untouched |
+| couchdb | absent, comes from Apache's own repository | out while it needs a third party |
+| mongodb | absent, removed over the SSPL licence change, upstream recipe untouched since 2022 | out while it needs a third party |
+
+Redis is the engine where these modes are cheapest, which is worth stating
+because it inverts the usual assumption that the SQL engines lead. Replication
+is one directive, `replicaof`, with `masterauth` for the credential. Failover
+has `redis-sentinel`, packaged with the server. Sharding is native in Redis
+Cluster and needs no extra package at all, where PostgreSQL has no packaged
+option and MariaDB needs Spider. So the room left in `role` for shard and
+multi-primary values will be exercised by Redis first, and a vocabulary shaped
+only around SQL would have to be broken to fit it.
+
+Debian 13 also ships `valkey-server 8.1.1`, the fork made after Redis changed
+its licence. Recorded as the ready escape if Redis tightens further: the same
+configuration unit can serve both, and the choice would be a package, not a
+new topology.
