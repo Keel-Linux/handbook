@@ -2678,3 +2678,159 @@ Four defects the bench found that no fixture could:
 - Seeding a replica from a backup of a primary that already held data is still
   the operator's step. `gtid_slave_pos` empty means from the start of the
   primary's binary log, which is honest only because of the refusal.
+
+## 2026-09-27 (later still): the first components leave the shared tree, and the layer LAMP and LAPP will share
+
+Decision 0010's prerequisite landed earlier today (`bt-layer` records `units` in
+the layer manifest and subtracts the parent's), and 0013's catalog section says
+what to do with it: a database is a component, not a parent layer, so LAMP and
+LAPP can be children of one `apache-php`. Three repositories were created for
+that, and six pull requests are open and green.
+
+| Repository | PR | What it is |
+| --- | --- | --- |
+| fab | [#6](https://github.com/Keel-Linux/fab/pull/6) | Package as 1.1.1+keel2, so the build host gets the unit slots |
+| unit-mariadb | [#1](https://github.com/Keel-Linux/unit-mariadb/pull/1) | The MariaDB component, out of the shared tree |
+| unit-postgresql | [#1](https://github.com/Keel-Linux/unit-postgresql/pull/1) | The PostgreSQL component, out of the shared tree |
+| keel-mariadb | [#11](https://github.com/Keel-Linux/keel-mariadb/pull/11) | Compose the component instead of including `common` |
+| keel-postgresql | [#7](https://github.com/Keel-Linux/keel-postgresql/pull/7) | The same, and the bind addresses move with the server |
+| keel-apache-php | [#1](https://github.com/Keel-Linux/keel-apache-php/pull/1) | The shared web layer, with its boot test |
+
+Nothing is merged: merging needed a permission this session did not have, so
+the six are waiting. Coverage: unit-mariadb **100 percent (17/17)** over 20
+bats tests, unit-postgresql **100 percent (17/17)** over 23, keel-apache-php
+**100 percent (177/177)** over 45. Each has `main` protected on
+`tests / coverage` and `package / changelog`, both required, merge commits only,
+squash and rebase off.
+
+### The name, and why it is not keel-
+
+`unit-mariadb` and `unit-postgresql`. Decision 0006 gives appliances the
+`keel-` prefix and leaves infrastructure unprefixed, and a component is
+neither: not an appliance, and not a fork of an upstream repository. `unit-`
+names the artefact in the vocabulary of the build system that consumes it, and
+the name after the dash is the directory under `unit.d`, which is the name the
+manifest carries:
+
+    keel-linux/unit-mariadb  ->  unit.d/mariadb  ->  units mariadb@1.0.0
+
+The components are `mariadb` and `postgresql`, not `mysql` and `pgsql`, because
+that is what the server, the layer and the appliance are called.
+
+### The equivalence measurement, and the fourth build that was needed
+
+Four builds per component, not three. The three of the 0010 experiment
+(control, unit, control again for the noise floor) plus one more: the recipe's
+changelog entry, which `require-changelog` insists on, is turned by fab into
+the release package `turnkey-<layer>-19.0`, so it changes the package list and
+three files by itself. The fourth build is the shared tree plus that entry
+alone, which measures the difference instead of arguing it.
+
+| | packages | files | symlinks | noise floor | outside it |
+| --- | --- | --- | --- | --- | --- |
+| mariadb | 438, identical | 35,315 | 3,380, identical | 179 | **0** |
+| postgresql | 430, identical | 37,439 | 3,802, identical | 13 | **1** |
+
+All at `SOURCE_DATE_EPOCH=1700000000`, fab 1.1.1+keel2, common 897ad4c, parent
+`core` `7acf2c53`, 102 to 126 seconds a build. No path exists on one side and
+not the other in any pair.
+
+The mariadb noise floor is 173 files under `/var/lib/mysql/**` plus six already
+known: `/etc/webmin/mysql/config`, `/var/webmin/module.infos.cache`,
+`/var/log/alternatives.log`, `/var/log/webmin/webmin.log`,
+`/var/cache/ldconfig/aux-cache`, `/root/.wget-hsts`. The postgresql one is 6
+files under `/var/lib/postgresql/**` plus the same shape, including the
+snakeoil key and certificate. The unit build differs from the control by
+exactly the files by which the control differs from itself.
+
+The one path outside the noise floor, in postgresql, is
+`/etc/postgresql/17/main/postgresql.conf`, and it is one line:
+
+    - listen_addresses = '::1,127.0.0.1'	# set by conf.d/main of keel-postgresql
+    + listen_addresses = '::1,127.0.0.1'	# set by the postgresql component
+
+The value is byte identical and `pg_hba.conf` is identical. Last night's fix
+moved into the component on purpose: binding is decided by whoever installs the
+server, and LAPP will carry the component without carrying that recipe, so a
+fix living in the recipe would have to be copied. `conf.d/main` keeps the check
+that the built image has the line, so the component is verified by the recipe
+rather than trusted by it.
+
+### What the slots were for, in practice
+
+- **`conf-vars` is used, once.** `PGSQL_PASS` is read by the PostgreSQL conf
+  script, and `_CONF_VARS` is settled before any unit is looked at, so without
+  the slot the variable would be dropped. `make debug` on the unit build:
+  `UNIT_CONF_VARS = PGSQL_PASS`.
+- **`MYSQL_PASS` was not carried.** It was written in one line of
+  `mk/turnkey/mysql.mk` and read nowhere, here or in the recipe. A dead
+  interface is not extracted.
+- **No removelist was needed.** `removelists/mysql` is 0 bytes and there is no
+  `removelists/pgsql`. The slot exists; neither component uses it.
+- **The order inversion of the 0010 experiment is still harmless**, and now for
+  a stated reason rather than by luck: the recipe's overlay reaches the tree
+  twice, through `COMMON_OVERLAYS` and again as `ROOT_OVERLAY` after the units,
+  and no path of either component's overlay is a path of its recipe's.
+
+### apache-php, and what its boot test proves
+
+`bt-layer apache-php --parent core`: 129 seconds, 492 packages, 37,362 files,
+3,540 symlinks, 56,133,883 bytes, sha256 `b9dd64db`. `bt-layer` put
+`turnkey.d/zz-ssl-ciphers` into the child conf list by itself, because
+`conf/apache-ssl` carries the mark, which is this morning's buildtasks fix
+doing its job unprompted.
+
+What is in it is the intersection of the two upstream stacks: Apache with
+mod_php, php-cli, mod_security2, mod_evasive, mod_perl2, the Webmin modules for
+Apache and php.ini, Adminer with libjs-jush, Composer, the web control panel
+assets, the shared conf scripts, and the default site serving `/var/www` on 80
+and 443. What is not: the database unit, the Adminer configuration that names a
+database, the landing page, the confconsole overlay per stack, each stack's
+extra drivers, and LAMP's Upgrade header.
+
+The boot test, on a container assembled from `core` plus the layer, every
+request to the container's global IPv6 address, 25 seconds from boot to
+verdict:
+
+```
+boot-test: apache answered 200 on port 80 over IPv6
+boot-test: apache over TLS answered 200 on port 443 over IPv6
+boot-test: PHP executed ('PHP Version' in the body of /phpinfo.php)   [80 and 443]
+boot-test: the CGI handler ran /cgi-bin/test.cgi
+boot-test: adminer answered with its own page on port 12322
+boot-test: webmin-apache is installed
+boot-test: webmin answered 200 on port 12321
+keel diff: no drift, but a declared field could not be observed offline
+boot-test: apache-php boot test passed
+```
+
+Serving PHP as source has a verdict of its own, because a web stack that
+publishes what its pages contain is a worse failure than one that does not
+answer. The first run of the test failed and the failure was the test's:
+Adminer's vhost opens with `SSLEngine on`, so 12322 is TLS only and plain HTTP
+there is answered 400 by Apache, not by Adminer.
+
+### What this leaves, and two things to know about the build host
+
+- **The six pull requests need merging**, then `keel-release` for the three
+  layers and the maintainer's signature. Nothing was published: the staged
+  `postgresql` layer was restored to the published `d5220c56` after the
+  measurement, and `apache-php` is staged in `/mnt/builds/layers` unsigned.
+- **fab on the build host is 1.1.1+keel2 now**, installed from the branch of
+  pull request 6 because the unit slots live in `share/product.mk`, which a
+  build reads from the installed package. Every layer built on that host from
+  now on records `fab_version 1.1.1+keel2`.
+- **A `keel-release mariadb` run at 17:54, not this work's, rebuilt that layer
+  in the staging directory** (sha256 `974fa6bb`) and its `keel verify` refused
+  the chain, because `wordpress.manifest` still names `0adca434` as its parent.
+  The published files are kept in `/root/mariadb-prerebuild-backup` and in
+  `mariadb.manifest.prev`. Whoever owns that release should decide whether to
+  publish the rebuild and rebuild `wordpress` on it, or restore the published
+  layer.
+- **The assembly step is still a clone.** Materialising `unit.d` from the pins
+  a recipe declares is the piece 0010 names as work of the project; today
+  `README.rst` documents the clone, `unit.d/` is in `.gitignore`, and the layer
+  manifest is the record of what a build applied.
+- **The boot test library now has five copies.** This is the fourth caller the
+  STATUS entry of this morning named, so moving its shared half into
+  `keel-linux/.github` is due before LAMP and LAPP add a sixth and a seventh.
