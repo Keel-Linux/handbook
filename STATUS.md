@@ -1439,3 +1439,154 @@ hid the next:
 
 `appliance / build-and-boot` is a candidate for the protection rule of `main`
 now that it passes; that is a maintainer decision and has not been made here.
+
+## The layer builder knows what a unit is (2026-09-27)
+
+Decision 0010 was accepted with a prerequisite: nothing moves out of the
+shared tree until `bt-layer` records units in the layer manifest. The
+prerequisite holds. Three pull requests, all merged with their gates green:
+
+| | | |
+| --- | --- | --- |
+| keel-linux/fab 4 | merge `2fc6120` | the units move to their place in the order, and a build can select which of them to apply |
+| keel-linux/fab 5 | merge `16730a5` | a unit may carry a removelist and name the variables its conf script reads |
+| keel-linux/buildtasks 8 | merge `dd0dcb5` | the two manifest fields and the subtraction |
+| keel-linux/keel 24 | merge `4579aba` | the fields documented, and the rule for any other, held by tests |
+
+### The field, and the rule
+
+Two fields, next to the two pairs that were already there:
+
+    units         mariadb@1.0.0
+    build_units   none
+
+`units` is every component the finished layer carries as a fab unit, as
+`name@version` sorted by name, or `none`. `build_units` is what this build
+applied: `default` without a parent, else the difference, or `none`.
+
+`units` is cumulative, the parent's record merged with this build's own. The
+`common_*` fields are cumulative too, but only by accident, because a child
+recipe includes its parent's makefile fragments. Here `bt-layer` keeps it so
+on purpose, and it is the part of the design that took the longest to settle:
+a child that carries no database content of its own still sits on the
+database, and its own child has to be able to subtract it. A record that only
+listed what this recipe declares would lose the component one layer down,
+which is the same bug one level deeper.
+
+A version comes from the first of three sources that answers: the unit's
+`version` file, the pin an assembly step writes; the unit's own git HEAD, but
+only when the directory is the top of that work tree, so the commit of an
+enclosing product repository is never passed off as the component's;
+otherwise `sha256-` and the first 16 digits of a digest of the directory
+content, so a scratch or assembled unit still has an identity.
+
+The subtraction is by name. Same name and same version means the parent
+applied it, so it is skipped. Same name at a different version **fails the
+build**: a conf script runs once, there is no way to move a component from
+one version to another inside a child layer, and the parent is the thing to
+rebuild. `bt-layer` also refuses a unit directory that carries none of
+`plan`, `overlay/`, `conf`, `removelist`, and one whose `conf` is not
+executable, which `fab` skips without a word.
+
+A parent manifest written before these fields existed reads as `none`, so
+every layer already on the host stays usable as a parent. `keel` needed no
+change: it validates by its required keys and writes back what it read, which
+is now a documented property with tests behind it rather than an accident.
+
+### The other two findings, and the order
+
+A unit may now carry a `removelist`, and a `conf-vars` file naming the
+build-time variables its conf script reads, which is the unit form of
+`CONF_VARS += MYSQL_PASS` in `mk/turnkey/mysql.mk`. Both slots are used by
+the mariadb unit built below.
+
+The position is fixed and stated. In `root.patched`:
+
+    common overlays, common conf, common patches,
+    unit overlays, unit conf scripts, unit removelists,
+    common removelists,
+    product overlay, conf.d, product patches, product removelist
+
+The units move from last to here, which fixes both inversions the experiment
+found: a common removelist can now remove a file a unit brought in, and a
+unit's conf script runs before the common removelists. Every unit overlay is
+applied before any unit conf script, the two phases the common inputs go
+through, so a recipe composing several units does not depend on which one
+`fab` reaches first. Each command in the three loops gained `|| exit`: a
+phase is one shell line, so a unit failing in the middle of it was swallowed
+and the image shipped half applied.
+
+One caveat stands. A recipe whose own overlay must win over a unit's relies
+on `ROOT_OVERLAY`, which is applied after the units; `COMMON_OVERLAYS +=
+$(CURDIR)/overlay` alone is now applied before them. For mariadb the two
+overlays share no path, five files against six, so it does not bite, but it
+is a per-component check and not a guarantee.
+
+### The measurement
+
+Five builds on the build host, all at `SOURCE_DATE_EPOCH=1700000000`, against
+`common` f3de96a, product `ac3c3cd`, parent layer `core` `7acf2c53`, with the
+merged `share/product.mk` supplied through `FAB_SHARE_PATH`. Two recipes: the
+`mariadb` layer, and `dbapp`, a child that carries no database content of its
+own beyond one file of its own overlay. The two versions of each recipe
+differ only in the two lines that pull the component from the shared tree.
+
+| Pair | Packages | Symlinks | Directories | Regular files differing |
+| --- | --- | --- | --- | --- |
+| parent, two control builds | 438 identical | 3,380 identical | 5,291 identical | 173 of 35,315 |
+| parent, control against unit | 438 identical | 3,380 identical | 5,291 identical | 173 of 35,315 |
+| child, two control builds | 438 identical | 3,380 identical | 5,313 identical | **0** of 35,338 |
+| child, control against unit | 438 identical | 3,380 identical | 5,313 identical | 173 of 35,338 |
+
+No path exists on one side and not the other, in any pair.
+
+Attributable to the unit form, in the parent: **zero**. The 173 paths of the
+control against the unit are the same 173 paths by which the control differs
+from itself.
+
+Attributable to the unit form, in the child: **zero**, and this one is
+sharper. Two builds of the monolithic child differ in no file at all, so the
+child layer has no noise of its own to hide behind. Its 173 differing files
+are exactly the parent's 173, path for path: the child inherits the install
+time state of the database from whichever parent it was built on, and adds
+nothing. The 173 are the ones decision 0010 named and explained, 167 of them
+under `/var/lib/mysql/**`, the rest `/etc/webmin/mysql/config`,
+`/var/webmin/module.infos.cache`, `/var/log/alternatives.log`,
+`/var/log/webmin/webmin.log`, `/var/cache/ldconfig/aux-cache` and
+`/root/.wget-hsts`.
+
+### The thing that used to break
+
+The unit child did not re-run the component's conf script, and its rootfs has
+the database:
+
+| | |
+| --- | --- |
+| its manifest | `units mariadb@1.0.0`, `build_units none` |
+| its build log | the only mention of `unit.d` is the plan resolution; no overlay, no conf, no removelist |
+| `mysqltuner` downloaded | 0 times, against 6 in the parent build that ran the script |
+| `mariadb-server` | 1:11.8.6-0+deb13u1, installed |
+| `/var/lib/mysql` | 205 files, 143M, 31 system tables |
+| `/etc/init.d/mysql` | the symlink to `/etc/init.d/mariadb` that a second `ln -s` under `bash -e` would have failed on |
+| the component's overlay and the recipe's | both present, byte identical to the monolithic child |
+
+The monolithic child subtracts `mysql` from `common_conf` and
+`common_overlays`; the unit child subtracts `mariadb@1.0.0` from `units`.
+Both end at `build_conf turnkey.d/hostname`. The two mechanisms agree.
+
+### Where this leaves the host
+
+`/mnt/builds/layers` holds core `7acf2c53`, nodejs-nginx, nodebb and mariadb
+`63680d3b`, the last rebuilt from the git product with the installed fab once
+the measurement was done, so no layer there came from a scratch tree. The
+audit passes on all four. The test recipes stay in `/turnkey/unit-test` and
+`/turnkey/mono-test` with their decks released, and the measurements in
+`/turnkey/unit-test/m` for anyone who wants to repeat the arithmetic.
+
+### What is still missing before a component moves
+
+The gate is open, not walked through. Still to come: the assembly and pinning
+step that materialises `unit.d/` from a recipe's declared components, the
+first component repository, and the package pinning of decision 0012, which
+is what would take the parent's 173 file noise down and make the parent
+comparison as sharp as the child's already is.
