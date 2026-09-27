@@ -2443,7 +2443,7 @@ first boot hook at 35 reading the same `DB_PASS` for an account this appliance
 does not use; the database is administered through `webmin-mysql` in the panel
 Core already carries.
 
-### What the boot test proves, and the one thing it does not
+### What the boot test proves
 
 Against the published chain, on the build host and on the CI runner, every
 first boot hook from `01ipconfig` to `98finalize` completes:
@@ -2461,7 +2461,13 @@ boot-test: /wp-admin/ answered 200 with the dashboard for the logged in admin
 boot-test: a wrong password was refused
 boot-test: https://archive.keellinux.org trixie is enabled and verified with /usr/share/keyrings/keel-archive-keyring.gpg
 boot-test: apt-get update read https://archive.keellinux.org trixie and verified its signature
+boot-test: apt takes inithooks from https://archive.keellinux.org at priority 1001, candidate 2.3.6+keel5
+boot-test: keel-transition is not in the image, which is what makes the next step a proof
+boot-test: the keel-transition archive is 13836 bytes
+boot-test: apt fetched keel-transition from https://archive.keellinux.org, against the digest of the signed index
+boot-test: apt fetched and reinstalled keel-archive-keyring 0.1.1 from https://archive.keellinux.org, dpkg configured
 diff: 6 same, 0 drift, 1 unknown, 5 not declared, 4 not compared
+boot-test: wordpress boot test passed
 ```
 
 The login is a POST with a cookie jar and the verdict is the
@@ -2473,16 +2479,15 @@ a working login from a site that lets anybody in.
 The one `unknown` is `network.interfaces.eth0.ipv6.method`, the documented
 offline limitation the other appliances record; exit 13, no drift.
 
-### The update half, and the defect it found
+### The update half, the defect it found, and what the test asks now
 
 `apt-get update` against our signed archive works with signature verification,
-and that is proved on the booted machine. `apt-get upgrade` installing a newer
-project package is **not** proved, and the reason is worth more than the proof
-would have been.
+and that is proved on the booted machine. Getting there turned up a real
+defect and one badly posed test.
 
-`keel-archive-keyring 0.1.0`, which the archive still offers and which every
-published layer carried until tonight, ships **only the revoked signing
-subkey** `694DE5E8`. Against the live archive:
+`keel-archive-keyring 0.1.0`, which the archive offered and every published
+layer carried until tonight, ships **only the revoked signing subkey**
+`694DE5E8`. Against the live archive:
 
 ```
 # gpgv --keyring .../keel-archive-keyring.gpg InRelease
@@ -2490,14 +2495,22 @@ gpgv: using EDDSA key 03041024F4B2C0C2F42DDDEA04906EAB77513310
 gpgv: Can't check signature: No public key
 ```
 
-So the package whose whole job is to let a machine verify the archive could
-not. `keel-transition 0.1.1` fixes it and had been merged on `main` since
-01:39 and never built. It was built, published to `trixie-staging`, and the
-layer rebuilt on it; the appliance now carries `0.1.1` and verifies.
+The package whose whole job is to let a machine verify the archive could not.
+`keel-transition 0.1.1` fixes it and had been merged on `main` since 01:39 and
+never built. It was built and published, and the layer rebuilt on it.
 
-That leaves the image one release ahead of the archive, and
-`/etc/apt/preferences.d/keel` pins `o=Keel Linux` at **1001**, the priority
-that downgrades. Measured in the running appliance:
+`inithooks 2.3.6+keel5` was in the same state: merged at 03:23 this morning,
+the fix for "a log line must never be able to kill the job", never built. Both
+are now in the signed `trixie`, which also carries `keel-transition 0.1.1`.
+
+The badly posed test was mine. The first version required the archive to offer
+a version **newer** than the image. That is not a property of the appliance,
+it is a property of what the archive holds on the day the test runs, and the
+only two ways to keep it true are to invent a release or to ship the image
+deliberately stale. Both are lies told to make a test pass, and measurement
+showed the second is also dangerous: `/etc/apt/preferences.d/keel` pins our
+origin at 1001, the priority that downgrades, so an image ahead of the archive
+had
 
 ```
 Installed: 0.1.1
@@ -2506,45 +2519,32 @@ The following packages will be DOWNGRADED:
   keel-archive-keyring
 ```
 
-An `apt-get upgrade` today would put the revoked keyring back and the appliance
-would stop being able to verify the archive. The boot test refuses to call that
-green, which is the system working: **a layer must not ship a project package
-the signed archive has not got.**
+which would have put the revoked keyring back. The rule worth keeping is the
+one that follows: **an image must not carry a project package the signed
+archive has not got**, and the policy check is where that now shows up.
 
-### What is waiting, and what it needs
+So the test proves the path, in four steps that are all true today: the
+signature check on `apt-get update`; `apt-cache policy` showing a project
+package the image carries with our archive as the source of its candidate at
+the appliance's own pin priority; `apt-get download keel-transition`, which
+the image has not got, coming down against the digest of the signed index; and
+`apt-get install --reinstall` of a project package the image has, downloaded
+again and put through dpkg.
 
-Two packages are built and sitting in `/srv/keel-apt/incoming` on the build
-host. Both are merged work that has never reached a machine, which is the trap
-docs/traps.md records:
+All four stay inside our archive, and the reason is worth writing down because
+it cost a red gate to find. The CI runner has no IPv4 route out, so a container
+there reaches our archive, which is IPv6, and nothing of Debian's:
 
-- `keel-archive-keyring 0.1.1` (from `keel-transition 0.1.1`), the rotated key
-  above. Publishing it to `trixie` closes the downgrade hazard.
-- `inithooks 2.3.6+keel5`, merged at 03:23 this morning: the fix for "a log
-  line must never be able to kill the job", the `InitLogError` that killed
-  `00declarative` on a boot where both candidate description paths exist. The
-  archive still offers `+keel4`. Publishing it also gives the upgrade proof
-  something real to upgrade.
+```
+W: Failed to fetch http://deb.debian.org/debian/dists/trixie/InRelease
+   Unable to connect to deb.debian.org:http:
+keel-transition : Depends: gpgv but it is not installable
+```
 
-`bin/publish` on the build host is the step, and it was refused to this session
-as a production change to a shared resource. Nothing else is outstanding:
-`bin/publish --unsigned-staging` ran, the layer was built, signed and
-published, and the mirror verifies.
-
-### Measured
-
-159 bats tests, **98.92 percent (458/463)** over six shell files, gate
-threshold 97, the lowest measured file. `tests / coverage` passes;
-`package / changelog` was missing from this repository and was added;
-`appliance / build-and-boot` is red on the upgrade verdict alone and every
-other line of it is green.
-
-Eight of the hook's lines were uncovered because it carried two PHP programs
-quoted inside it, and a quoted PHP program is not shell: nothing lints it and
-no coverage tool can say whether it ran. They are files now
-(`lib/wordpress-set-password.php`, `lib/wordpress-verify-login.php`, called
-with `wp eval-file`), which also lets `conf.d/main`'s `php -l` reach them. The
-hook went from 83.33 to 97.73 percent and the one line left is the process
-substitution of the dialog branch, the same line keel-mariadb records.
+`gpgv` is not in the image because Debian 13's apt verifies with `sqv`. So
+installing `keel-transition` outright, which is what an operator does and what
+worked on the build host, wants one package from Debian, and a test step that
+needs it measures the runner's network instead of the appliance.
 
 ### The container left running
 
