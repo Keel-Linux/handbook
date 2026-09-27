@@ -1,6 +1,6 @@
 # 0013: Database topologies configurable from the console
 
-Status: **plan, not yet decided**, 2026-09-27. Asked for by the maintainer:
+Status: **scope decided 2026-09-27**, phases 1 and 4 deferred, sharding deferred. The maintainer chose the console flow described under "What the operator sees" below. Asked for by the maintainer:
 every Keel database appliance should be configurable from confconsole for
 standalone, cloud (master or slave) and sharding, for MariaDB and PostgreSQL
 alike, and the configuration should actually configure the database. This
@@ -134,3 +134,38 @@ If phase 3 cannot be tested in the gate with two containers, the rest should
 not be built. An untested replication feature in an appliance people trust
 with data is worse than no feature, and the project's own rule about coverage
 exists for smaller risks than this one.
+
+
+## What the operator sees, decided 2026-09-27
+
+The maintainer settled the shape: choosing a database appliance means choosing
+its mode, and the mode choice leads to a configuration screen. Sharding comes
+later. So the console offers exactly this, on both database appliances:
+
+    Database mode
+      Standalone            one server, what the appliance is today
+      Cloud                 this node takes part in replication
+        Primary             other nodes replicate from this one
+        Replica             this node replicates from another
+
+Standalone needs no second screen. Primary asks what the replicas will need
+and shows it: the address to replicate from, the replication account, and
+where its password is kept. Replica asks for the primary's address and that
+password, and warns before it acts, because becoming a replica replaces the
+local data with a copy of the primary.
+
+Two properties the screens must keep, and they are the reason this is written
+down before any code:
+
+- **Each screen configures the machine it runs on.** The primary screen does
+  not create replicas, and the replica screen does not promote anything
+  elsewhere. Promotion is its own entry on the replica, an explicit act.
+- **The console says what it is not.** Replication here has no automatic
+  failover, so the screen says so in a line the operator cannot miss. A
+  console that lets somebody believe they bought high availability is worse
+  than one that offers less.
+
+Phase 1 of the plan above, an application using a database on another machine,
+is not what was asked for now and waits. Phase 4, Galera multi-primary, and
+phase 5, sharding, wait behind the replication work, and the console shows no
+entry for a mode it cannot configure.
