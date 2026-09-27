@@ -1398,3 +1398,44 @@ the hook. It is not fixed here: it lives in the inithooks fork and shipping it
 means a new package, an archive publication and a signed release, which needs
 the passphrase arranged. Worth doing in the same pass as the next inithooks
 change.
+
+## The appliance gate is green (2026-09-27)
+
+Run 36290439227 on keel-nodebb `main`, against the chain published that
+morning:
+
+    keel verify exited 9: every layer matches
+    boot-test: assembling nodebb from https://mirror.keellinux.org/layers
+    boot-test: container address fc42:5009:ba4b:5ab0:351f:6b8e:bd1c:9e24
+    boot-test: first boot finished
+    boot-test: http://[fc42:...:9e24]/ answered 307 https://[fc42:...:9e24]/
+    boot-test: the forum answered 200, title 'Home | NodeBB'
+    keel diff: no drift
+    boot-test: nodebb boot test passed
+
+Measured on the runner: assemble 33 s, a global IPv6 address 5 s after the
+start, first boot finished 50 s later, the whole job under two minutes once
+the layers were pulled. `tests / coverage` green in the same run. The chain on
+the mirror is core `7acf2c53`, nodejs-nginx `f57917cb`, nodebb `6d2d622f`, and
+`archive.keellinux.org/dists/trixie/InRelease` answers 200 with the rotated
+key, listing inithooks 2.3.6+keel4, confconsole 2.2.3+keel2 and keel 0.2.1.
+
+So an appliance now travels the whole chain for the first time: packages
+published to a signed archive, a layer built from a recipe that refuses stale
+packages, published to the mirror with a signed manifest, pulled, verified,
+assembled, booted, set up headless from an instance description, serving over
+IPv6, and matching the description afterwards. That is the M0 loop closed end
+to end.
+
+Four defects had to be cleared, and the order is the lesson, because each one
+hid the next:
+
+| Defect | What it broke | Fixed by |
+| --- | --- | --- |
+| build time `systemctl` and `service` wrappers left in the layer | first boot stopped at `10regen-sshkeys` | keel-nodebb 1, and the rebuild |
+| no apparmor profile on the test container | `redis-server.service` exit `226/NAMESPACE` | keel-nodebb 8 |
+| `ssl_ciphers 'ZZ_SSL_CIPHERS'` unsubstituted | nginx refused to start | buildtasks 7, and the rebuild |
+| first boot writing to a `/dev/tty1` nobody reads | `./nodebb setup` blocked in `n_tty_write` | keel-nodebb 9 |
+
+`appliance / build-and-boot` is a candidate for the protection rule of `main`
+now that it passes; that is a maintainer decision and has not been made here.
