@@ -165,8 +165,8 @@ at that pool, 05:10 to 05:17 UTC, 404 seconds:
 
 | | |
 | --- | --- |
-| packages fetched from `file:/keel-pool` | 307 |
-| packages fetched over http | 0, the six http fetches in the log are index files |
+| packages fetched from `file:/keel-pool` | 302 |
+| packages fetched over http | 0; every http line in the log is an index file |
 | tarball | 326,435,084 bytes, `ad7c07b760b8e510b621f73c263d248862bc5db065ce2b796b1b930bd2042672` |
 | recorded before this run | `71ea76df6dcc4c5ed7cf20807872a93b82915de8f9062ec0b4051368211f8ca1` |
 | package list | 412 packages, `4918887db3562d3179fea536999fb7149e25e466e28e1b51778c962913a19c9c` |

@@ -1854,7 +1854,7 @@ network, and `common/removelists-final/turnkey` takes it out of the image.
 
 ### The rebuild, and what it proved
 
-`keel-selfcheck --reseed`, 05:10 to 05:17 UTC, 404 seconds: 307 packages
+`keel-selfcheck --reseed`, 05:10 to 05:17 UTC, 404 seconds: 302 packages
 fetched from `file:/keel-pool` and none over http, tarball
 `ad7c07b7...` (326,435,084 bytes) against the `71ea76df...` recorded
 before it, and a package list of 412 whose digest `4918887d...` is
