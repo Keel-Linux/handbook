@@ -2834,3 +2834,159 @@ there is answered 400 by Apache, not by Adminer.
 - **The boot test library now has five copies.** This is the fourth caller the
   STATUS entry of this morning named, so moving its shared half into
   `keel-linux/.github` is due before LAMP and LAPP add a sixth and a seventh.
+
+## The build verifies the staging archive, and the chain was rebuilt on it (2026-09-27, evening)
+
+Tracker#7 closed. The staging distribution was signed on 2026-09-27 and
+verification never landed, so a layer build printed
+
+    W: OpenPGP signature verification failed: file:/srv/keel-apt/repo
+       trixie-staging InRelease: Missing key
+       8CFD1A4841448B2227341CEB202CACBD0E97090A
+
+and installed inithooks, confconsole and keel unverified, because the source
+entry said `[trusted=yes]`, which switches verification off and turns every
+failure into a warning.
+
+### How the build verifies now, and how it fails
+
+Four things, in all four recipes that copy the archive into their bootstrap
+(keel-nodebb, keel-mariadb, keel-postgresql, keel-wordpress):
+
+1. the public half of the staging key is installed into the build tree as
+   `/etc/apt/keyrings/keel-staging-keyring.asc`, from
+   `/srv/keel-apt/keys/keel-staging-keyring.asc`, which `bin/publish` of
+   `keel-linux/apt` now writes on every signed publication, from the same file
+   whose contents it already checks `SignWith` against;
+2. the source entry names it through `signed-by` and nothing anywhere says
+   `trusted=yes`;
+3. `apt-get update` runs with `--error-on=any`, so a warning is an error;
+4. `bin/keel-archive-check` makes the same checks itself with `gpgv`, at the
+   bootstrap and again on the tree that is about to be configured, which is a
+   step where no `apt-get update` runs at all.
+
+Measured against the real archive in a scratch apt root before writing any of
+it, which is how the table below is evidence rather than expectation:
+
+| tree | apt |
+| --- | --- |
+| `[trusted=yes]`, no keyring | `W: ... Missing key`, exit 0, packages installed |
+| `signed-by`, no keyring | `E: The repository ... is not signed`, exit 100 |
+| `signed-by`, the wrong key | `E: The repository ... is not signed`, exit 100 |
+| `signed-by`, the staging key | `Get:1 ... InRelease`, exit 0 |
+
+So the answer to "how does it fail" is: apt exits 100 the moment `signed-by`
+names a keyring it cannot verify with, and `bin/keel-archive-check` exits 1
+with a `FATAL [archive-check <step>]` line before that, naming which of the
+five conditions failed. Both builds tonight printed, twice each:
+
+    [archive-check bootstrap] .../InRelease verifies against
+    8CFD1A4841448B2227341CEB202CACBD0E97090A, nothing is trusted unverified
+
+The keyring does not reach the image. The conf script removes it with the
+source entry and the copy of the archive; `common/removelists-final/turnkey`
+removes all three whatever a recipe does; `conf.d/zzz-keel-archive` of the
+wordpress recipe refuses to enable the appliance's own source while either is
+still there; and the wordpress boot test now reads the assembled rootfs and
+fails if any of the three is present. Proved on the two layers published
+tonight: absent from both rootfs trees, and both delta tarballs carry the three
+paths as whiteout entries, which is the delta format saying "removed".
+
+### One thing the strict version would have broken
+
+The first version refused a `trusted=yes` on any apt source in the build tree.
+The captured pool of decision 0012 sets `Trusted: yes` on purpose, for a
+`file:` index generated on the build host whose digests `keel-pool verify`
+checks against the same values apt does, so that rule would have failed every
+pinned build. `/srv/keel-pool/current` does not exist at the moment, which is
+the only reason tonight's rebuild did not hit it. What is refused now is a
+source that names the project archive and switches verification off
+(`KEEL_ARCHIVE_PATH`, overridable). Four more pull requests, all green.
+
+### The rebuild the issue was blocking
+
+`keel` 0.3.5 carries the database vocabulary, the role configuration and
+promotion; the published `mariadb` layer carried keel 0.2.1, so the two node
+replication gate on keel-mariadb#10 failed with `database: unknown top level
+key` (keel exits 3 at validation where the gate wants the refusal, 16).
+
+Both layers were rebuilt and published together, in order, from their default
+branches with the verification in place:
+
+| layer | published before | now | template |
+| --- | --- | --- | --- |
+| `mariadb` | `0adca434` | **`c1d6fe68`** | `debian-13-keel-mariadb_19.0-3_amd64` |
+| `wordpress` | `c9e33fa1` | **`c09dc984`** | `debian-13-keel-wordpress_19.0-3_amd64` |
+
+`wordpress.manifest` names `parent_sha256 c1d6fe68...`, so the chain is whole.
+`keel verify` reported `6 checked, 6 ok, 0 unverified, 0 mismatch, 0 invalid`
+against the staged tree before publication and again against
+`https://mirror.keellinux.org` afterwards. The new `mariadb` layer carries
+`keel 0.3.5`, and `conf.d/main` raises the floor for it from 0.2.1 to 0.3.5,
+so a build whose archive is stale fails instead of shipping a layer whose whole
+point does not work.
+
+`bin/keel-release --resume --date 2026-09-27 all` was the command, not
+`--rebuild`, which rebuilds every layer of the chain including `core` and would
+have orphaned everything else. A single layer is forced by making it not
+current, which is what moving its manifest aside does. The run refused twice
+before it worked, both times correctly: first because the staged tree still
+held the orphaned `wordpress` layer (`keel verify` exit 6 at the first
+appliance, before any build), and the parked copies then turned up in the
+signed `MANIFEST` because they were parked inside the release directory. They
+now live in `/root/wordpress-prerebuild-backup`, beside the existing
+`/root/mariadb-prerebuild-backup`, and `MANIFEST` was re-signed clean with
+`--sign-only`.
+
+### The gate, and the merges
+
+`appliance / build-and-boot` on keel-mariadb#10 is green against the rebuilt
+layer: both nodes booted, the refusal happened on the replica that held
+`operatordata` with nothing changed, the primary was configured, the replica
+reported `Slave_running ON`, the primary confirmed `'repl' is granted from
+fc42:...:%`, and `keel diff` read the whole `database.server` section as
+`same`. That is cloud mode proved on a running pair rather than merged code.
+Pull request 10 is merged. `appliance / build-and-boot` was already a required
+status on `main` there, with `strict` and `enforce_admins`, so nothing had to
+be changed; it is recorded here because it was asked for.
+
+Merged tonight, all with merge commits and green gates:
+
+| repository | pull requests | coverage after |
+| --- | --- | --- |
+| `common` | #4 | 100 percent, unchanged |
+| `apt` | #11 | 99.55 percent total, `lib/publish.sh` 100 (79/79) |
+| `keel-mariadb` | #12, #13, and #10 | 99.75 percent (403/404), 127 bats tests |
+| `keel-postgresql` | #8, #9 | 100 percent (264/264), 92 bats tests |
+| `keel-nodebb` | #11, #12 | 99.66 percent (297/298), 134 bats tests |
+| `keel-wordpress` | #4 | 99.07 percent (535/540), 196 bats tests |
+
+`bin/keel-archive-check` is 100 percent (54/54) over 27 bats tests in all four
+recipes, and every threshold is the one already committed: 95, 100, 95 and 97.
+
+### Four things found on the way, three of them now issues
+
+- **The same block is in four recipes**, and tracker#7 was the second defect
+  that had to be fixed four times. It belongs in `keel-linux/common`, as
+  `mk/keel/staging-archive.mk` plus `bin/keel-archive-check` and its bats file,
+  next to the removelist that already undoes it for every recipe at once. The
+  staging key's fingerprint is currently written down in four Makefiles, so a
+  key rotation is a four repository change. Filed as **tracker#8**, with why it
+  was not done tonight: a five repository refactoring in front of a rebuild
+  that was blocking a merge.
+- **keel-nodebb required a check no job produced.** `package / changelog` was
+  in its branch protection and its workflow had no `package` job, so every pull
+  request there was blocked for good. Added in keel-nodebb#11.
+- **keel-wordpress never tests its default branch.** It has no `main`; its
+  default is `master`, and its workflow says `push: branches: [main]`. Pull
+  requests are gated, the branch is not. Filed as **tracker#9**.
+- **`publish_commit` never committed the staging keyring.** A staging
+  publication copied `keel-staging-keyring.asc` into the Pages checkout and
+  left it untracked, so the key that clients of the staging distribution need
+  was never committed. Fixed in apt#11; it is still untracked on the build host
+  and the next `bin/publish --staging` will add it.
+
+The demonstration was not disturbed: `wordpress-demo`, `forum` and `forum2` are
+running, and the demo answers 200 on port 80 and on port 443 over IPv6 after
+the publication, which it would whatever the mirror held, because it runs from
+an assembled rootfs.
