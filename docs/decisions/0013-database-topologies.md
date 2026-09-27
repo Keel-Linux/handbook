@@ -26,7 +26,7 @@ engine, and pretending otherwise produces a console that lies.
 | Primary | binary log, `server_id`, GTID, a replication account | `wal_level=replica`, a replication slot, a replication role, `pg_hba` entry |
 | Replica | `CHANGE MASTER TO ... MASTER_USE_GTID`, seeded from a backup of the primary | `pg_basebackup` then `standby.signal` and `primary_conninfo` |
 | Multi-primary | Galera, a genuinely different animal: synchronous, quorum based, minimum three nodes | nothing equivalent in the archive |
-| Sharding | Spider storage engine, or a router in front | no packaged option |
+| Sharding | Spider storage engine, packaged | the pieces, packaged, but no product: see the correction below |
 
 ## What Debian 13 gives us, measured on the build host
 
@@ -246,3 +246,39 @@ Debian 13 also ships `valkey-server 8.1.1`, the fork made after Redis changed
 its licence. Recorded as the ready escape if Redis tightens further: the same
 configuration unit can serve both, and the choice would be a package, not a
 new topology.
+
+
+## Correction 2026-09-27: PostgreSQL sharding is not absent, it does not fit a screen
+
+Written earlier in this note as "no packaged option", which is wrong and was
+corrected by measuring the archive and the published layer itself.
+
+What is missing from Debian 13 is Citus, which distributes tables
+automatically. What is present, all of it, is the material to shard by hand:
+
+| Piece | Version | What it gives |
+| --- | --- | --- |
+| postgres_fdw | inside the server package | a remote table addressed as a local one |
+| dblink | inside the server package | a query against another node |
+| declarative partitioning | core | the split itself |
+| postgresql-17-plproxy | 2.11.0-12 | functions that route a call to the right shard |
+| postgresql-17-partman | 5.2.4-1 | keeping the partitions |
+| pgbouncer | 1.24.1 | connection pooling in front |
+
+Confirmed in the published `postgresql` layer's own rootfs: `postgres_fdw.so`
+and `dblink.so` are there already. On the MariaDB side the published layer
+carries `ha_federated.so` and `ha_federatedx.so`, with `mariadb-plugin-spider`
+1:11.8.6 one package away.
+
+So the difference between the engines is not availability, it is what the
+operator has to decide. With Spider, sharding is a plugin and a table
+declaration. With PostgreSQL, somebody designs the partition scheme, places
+each partition on a node through a foreign data wrapper, and routes the writes.
+That is systems design, not configuration, and it is the real reason it does
+not belong on a console screen.
+
+Which changes what phase 5 should promise. Not "sharding for MariaDB only", but
+this: the console configures **the role of this node** in a sharded
+arrangement, a Spider head or a data node, a PostgreSQL coordinator or a node
+holding partitions, and the schema stays with whoever designs the system. The
+console never pretends to design it.
