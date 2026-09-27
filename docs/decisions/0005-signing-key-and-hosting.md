@@ -173,8 +173,25 @@ The public key is updated in the handbook, the archive repository and the
 `keel-archive-keyring` package (0.1.1). The `common` fork's `keys/` directory
 still holds only TurnKey's keys.
 
-Operational consequence, decided 2026-09-27: the agent's cache lifetime is
-eight hours (`default-cache-ttl` and `max-cache-ttl` 28800 in
+Operational consequence, decided 2026-09-27 and widened the same morning to
+**240 hours** (`default-cache-ttl` and `max-cache-ttl` 864000), so that
+overnight work needs nobody at a keyboard. The cost, stated before the change
+and accepted: for ten days, anything running as root on the build host can sign
+with the release key without being asked.
+
+My recommendation, recorded because it was not taken: 24 hours. A cache that
+outlives the working session is indistinguishable from having no passphrase,
+except that it hides that fact from whoever reads the configuration. At ten
+days the release key is effectively unlocked, and it would be more honest to
+remove the passphrase and record that decision than to keep a protection that
+does not protect. The case that justifies unattended signing is already solved
+another way: the staging distribution has its own key with no passphrase, so
+unattended signing exists; what it does not have is the key that means the
+maintainer stood behind the artifact, and that is the one worth keeping human.
+Also worth knowing: `gpgconf --reload gpg-agent` flushes the cache, so the
+passphrase has to be typed once after each change.
+
+The first decision, superseded: the agent's cache lifetime is eight hours (`default-cache-ttl` and `max-cache-ttl` 28800 in
 `/root/.gnupg/gpg-agent.conf`, mode 600), chosen by the maintainer after three
 passphrase moments were spent on releases that expired mid-flight. The cost,
 accepted knowingly: during that window anything running as root on the build
