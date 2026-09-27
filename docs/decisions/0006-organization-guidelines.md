@@ -41,3 +41,23 @@ Status: decided by the maintainer
 - Pushing workflow files and creating organization rulesets need token scopes
   the agent's GitHub login does not have today (`workflow`, `admin:org`); the
   maintainer grants them once.
+
+
+## Reversed 2026-09-27: there is a tracker after all
+
+This note said the project would have no global tracker, unlike TurnKey Linux.
+The maintainer reversed it, and the reason is worth keeping: without one,
+knowledge that crosses repositories ends up either in long documents that have
+to be read whole, or in an agent's memory, which is worse than a document
+because nobody else can read it and it cannot be closed.
+
+`Keel-Linux/tracker` is public and holds what does not belong to a single
+repository: cross repository work, the order of work, and decisions waiting on
+the maintainer. Work whose whole diff lands in one repository gets an issue
+there instead. Anything naming a host, an address or a credential path stays in
+this private handbook.
+
+The working method the maintainer set alongside it: document the work as issues
+first, in order, per repository, and resolve them through pull requests. An
+issue is atomic, it can be closed, and it costs a reader nothing to look at one
+without the rest.
