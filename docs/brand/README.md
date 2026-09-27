@@ -7,7 +7,9 @@ the distribution makes about itself.
 
 Master: `keel-logo-2026-09-27.webp`, drawn by the maintainer, 1254 by 1254.
 Every other file here is an export of it. A change to the mark is a new export,
-never an edit of an export, and never a redraw by hand.
+never an edit of an export, and never a redraw by hand. `trace.py` takes the
+vectors off the drawing and `export.py` takes the rasters off the vectors, so
+a new drawing is two commands and no hand work at any step.
 
 ## Colours, measured from the master
 
@@ -112,6 +114,8 @@ and no size is assumed anywhere.
 | `keel-lockup-*.png` | symbol with the wordmark |
 | `keel-social-1200x630.png` | link preview card |
 | `banner.txt`, `banner-small.txt` | the console marks, in keel-core's overlay |
+| `trace.py` | traces the vectors off the master |
+| `export.py` | re-exports the rasters off the vectors |
 
 The site, the organization profile and the appliance overlay reference these
 names. Replacing a file's contents is the change; renaming one breaks them.

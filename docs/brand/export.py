@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """Re-export every raster brand file from the vector masters.
 
-The masters are the five SVG files beside this script. Every PNG in this
-directory is produced from them by this script and by nothing else: a raster
-is never retouched by hand, because the next export would silently undo the
-retouch. Run it after any change to a master.
+The masters are the five SVG files beside this script, which `trace.py`
+traces from the drawing. Every PNG in this directory is produced from them
+by this script and by nothing else: a raster is never retouched by hand,
+because the next export would silently undo the retouch. Run it after any
+change to a master.
 
     python3 -m venv /tmp/brand && /tmp/brand/bin/pip install cairosvg
     /tmp/brand/bin/python docs/brand/export.py
 
 Needs cairosvg (which needs the system libcairo) and Pillow. No font is
-needed: the wordmark is outlines, not text.
+needed: the wordmark is outlines, not text. No shape of a master is written
+down here either: the proportion of the lockup is read out of its viewBox,
+so a retrace at another size is an export and not an edit.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -32,8 +36,19 @@ MARK_DARK = HERE / "keel-mark-dark.svg"
 LOCKUP = HERE / "keel-lockup.svg"
 LOCKUP_DARK = HERE / "keel-lockup-dark.svg"
 
-# The lockup master is 868 by 943; every lockup export keeps that ratio.
-LOCKUP_RATIO = 943 / 868
+
+def ratio(source: Path) -> float:
+    """The height of `source` over its width, from its own viewBox, so
+    every export of it keeps the proportion the master was traced at."""
+    box = re.search(r'viewBox="([-\d.eE ]+)"', source.read_text())
+    if not box:
+        sys.exit(f"{source.name}: no viewBox to take the proportion from")
+    _, _, width, height = (float(n) for n in box.group(1).split())
+    return height / width
+
+
+# Every lockup export keeps the proportion of the lockup master.
+LOCKUP_RATIO = ratio(LOCKUP)
 
 
 def render(source: Path, width: int, height: int) -> Image.Image:
