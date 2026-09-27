@@ -2235,3 +2235,122 @@ the tree. Nothing on that VM was changed, and nothing was worked around.
   `7acf2c53`, and that is what was used. keel-postgresql's own two node phase
   is the obvious next step and is still waiting on its rebuilt layer being
   published.
+
+## 2026-09-27 (later): the database sections of the instance description
+
+Issue 25 is closed, by keel PRs [#26](https://github.com/Keel-Linux/keel/pull/26),
+[#27](https://github.com/Keel-Linux/keel/pull/27) and
+[#28](https://github.com/Keel-Linux/keel/pull/28), on `main` at `fb47953`, as
+keel 0.3.0, 0.3.1 and 0.3.2. Coverage **100 percent** over 726 tests against a
+committed threshold of 95. This is phase 2 of decision 0013, the dependency
+that blocked cloud mode on all three database appliances: vocabulary, reading,
+comparison, and no database configuration changed by anything.
+
+### Two subjects, because one field cannot serve both
+
+`database.server` is what a machine that **runs** a server is: `engine`, `role`
+of `standalone`, `primary` or `replica`, `listen`, and a `replication` mapping
+holding the endpoint a replica replicates from, the origins a primary
+authorizes, and a credential by reference. `database.client` is where a machine
+that **uses** a database reaches it: `engine`, a `primary` endpoint for writes,
+optional `replicas` for reads. Separate mappings, neither implying the other, a
+machine may declare both, either or neither, and `inspect` reports each on its
+own.
+
+Three roles and no more. A Galera node or a Redis Cluster node is reported as a
+role that could not be inferred, naming the mode, which is how 0013 adds
+multi-primary and the shard roles later without renaming anything that exists.
+
+`allowed_from` is the maintainer's "several replicas", implemented as the
+authorizations the machine holds and not as a list of who is replicating,
+exactly as 0013's own note settled it. A prefix is preferred, a MariaDB host
+pattern is accepted because it is that engine's only IPv6 spelling, and a name
+is accepted and documented as fragile.
+
+### The reading is asked of the server, never read from a file
+
+Redis set the standard and the SQL engines were held to it: `INFO replication`
+and `INFO cluster` are two lines with nothing to parse, and MariaDB's
+`SHOW REPLICA STATUS` with `SHOW REPLICA HOSTS` and its replication grants, and
+PostgreSQL's `pg_is_in_recovery()` with `pg_stat_replication`,
+`pg_stat_wal_receiver` and `pg_hba_file_rules`, are the same questions in their
+own words. `pg_hba_file_rules` is used deliberately: it is the server's own
+parse of the file rather than the file.
+
+`listen` comes from `ss -lntH` on the port the server itself reported. That is
+the trap of the night before turned into a reading: the PostgreSQL appliance
+shipped listening on IPv4 only with a `listen_addresses` that read correctly, so
+a `listen` field taken from configuration would have agreed with the defect.
+
+A server that is installed and cannot be asked reports the **whole** section as
+not inferred, the way an unreadable interfaces file reports
+`network.interfaces`, so an offline root, a stopped service and a Redis with
+`requirepass` set are `unknown` to diff and never drift.
+
+### What the bench found that the fixtures could not
+
+Both defects below passed every fixture, because the fixtures were written from
+the same assumptions as the code. This is the argument for the rule that an
+issue like this does not close on fixtures.
+
+- **`--skip-column-names` strips what `\G` needs.** `SHOW REPLICA STATUS\G`
+  prints one `Name: value` per line and that flag removes the names. The
+  primary's address arrived as a bare line, the reading found no primary on a
+  machine that was plainly replicating, and the role was right only because an
+  IPv6 value happens to contain colons.
+- **MariaDB spells an IPv6 prefix as a host pattern.** It takes an address and a
+  netmask in a grant for IPv4 only, so authorizing a `/64` can only be written
+  `2804:710:d0:5:%`. `inspect` read that back off a real primary and the schema
+  refused it, so the description `inspect` wrote did not validate. A test now
+  asserts the property directly: every origin the reading can produce is one the
+  schema accepts.
+
+### The rule that had to be written down, not only coded
+
+A declared replica against an observed primary is drift that **must never be
+corrected automatically**, because demoting a primary destroys everything
+written to it since the replica last agreed. The line carries the warning, its
+mirror image carries its own, the `note` travels in the JSON so confconsole
+shows it without reproducing it, and `docs/diff.md` states it as a rule of the
+project. `keel diff` writes nothing anywhere, which is what makes saying so
+cheap today; it is written down for the phase that will configure replication.
+
+A field the declared role has no use for is `not compared`: a standalone may
+carry the authorizations it will need as a primary, which is decision 0009's
+rule for the settings of a feature that is off. Where the declared and observed
+roles disagree, the role line carries the drift and the field it governs is
+`unknown`, so one fact produces one line.
+
+### Proved on machines
+
+Two containers from the published `mariadb` layer and one from the published
+`postgresql` layer, on `mirror.keellinux.org`, with keel 0.3.2 built from the
+branch installed in each, and replication set up by hand with no help from keel:
+`MASTER_USE_GTID=slave_pos` on the MariaDB pair, `replicaof` on a Redis pair, a
+row written on the primary read back on the replica, and `master_link_status:up`.
+
+| Machine | `inspect` | `diff` |
+| --- | --- | --- |
+| mariadb appliance as it boots | `standalone`, `listen` `127.0.0.1, ::1` | 10 same, 0 drift, exit 0 |
+| the same machine, replication by hand | `replica`, primary `2804:710:d0:5:bc:24ff:fe25:b2` port 3306 | 1 drift, exit 14 |
+| the other node | `primary`, `allowed_from` `2804:710:d0:5:%` | the never-corrected warning on a description saying `replica` |
+| postgresql appliance | `standalone`, `listen` `127.0.0.1, ::1` | |
+| redis, `replicaof` by hand | `replica`, primary `...fe25:b2` port 6379 | |
+| the same container while it also had PostgreSQL | not inferred: two servers, the description holds one | |
+
+Full output is on [issue 25](https://github.com/Keel-Linux/keel/issues/25).
+The three containers were removed afterwards.
+
+### What this leaves
+
+- Phase 3 of 0013, primary and replica configured for real, now has its
+  vocabulary and its reading. The two node gate that landed today
+  (`73290a8` above) is the other half of what it needs.
+- A machine running two database servers, which keel-nodebb will be once it
+  carries Redis and a SQL engine, is not describable: the description holds one
+  `database.server`. `inspect` says so instead of picking one. Deciding whether
+  that becomes a mapping keyed by engine is a maintainer decision and belongs in
+  0013 before phase 3 touches it.
+- `secrets.db_password` is still triggered by `/etc/mysql` or `/etc/postgresql`
+  existing, while the database probe uses the server binary, which is the
+  sharper test. Worth reconciling, and deliberately not done inside this issue.
