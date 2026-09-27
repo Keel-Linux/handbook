@@ -2990,3 +2990,214 @@ The demonstration was not disturbed: `wordpress-demo`, `forum` and `forum2` are
 running, and the demo answers 200 on port 80 and on port 443 over IPv6 after
 the publication, which it would whatever the mirror held, because it runs from
 an assembled rootfs.
+
+## 2026-09-27 (later still): LAMP and LAPP as children of apache-php, and what the measurement said
+
+The payoff of the composition work, and its test. Decision 0013's layer model
+is now built: `apache-php` is the shared web layer, the database is a fab unit,
+and each stack is a child of the web layer carrying its own database
+component. Two artefacts per stack, split by content and never by topology.
+
+| Layer | Parent | Units | Packages |
+| --- | --- | --- | --- |
+| lamp | apache-php | mariadb@1.0.0 | 520 |
+| lamp-client | apache-php | none | 507 |
+| lapp | apache-php | postgresql@1.0.0 | 515 |
+| lapp-client | apache-php | none | 505 |
+
+Both artefacts of a stack are built from one commit of one repository, in two
+product directories, and the only difference between those directories is
+whether `unit.d/<engine>` was cloned into it. Nothing in either recipe asks
+which artefact is being built by name: `conf.d/main` reads what dpkg says the
+image contains, because a makefile variable says what was asked for and dpkg
+says what happened.
+
+`lamp-client` and `lapp-client` are strict subsets of their server siblings:
+13 and 10 packages fewer, every one of them the server closure, and none of
+their own.
+
+### The equivalence measurement, and why the third build is the point
+
+Against a monolithic build of the same stack on `core`, measured on the
+assembled root rather than the delta, with the control built twice so the
+comparison has a noise floor. All builds at `SOURCE_DATE_EPOCH=1700000000`,
+`common` 6803422, fab 1.1.1+keel2, `core` 7acf2c53, `apache-php` b9dd64db.
+
+| | control, run A | control, run B | composed |
+| --- | --- | --- | --- |
+| LAMP packages | 517 | 519 | 520 |
+| LAMP files | 38,989 | 39,031 | 39,034 |
+| LAMP symlinks | 3,565 | 3,594 | 3,594 |
+| LAPP packages | 510 | 510 | 515 |
+| LAPP files | 41,219 | 41,219 | 41,301 |
+| LAPP symlinks | 3,985 | 3,985 | 4,023 |
+
+**The LAMP control is not deterministic.** Two runs of the identical recipe
+differ by two packages, `php-json` and `php8.4-phpdbg`, 198 files, 42 paths and
+29 symlinks. Both packages arrive through composer's dependency closure and
+apt does not resolve it the same way twice. The LAPP control happened to be
+stable across its two runs (16 files differ, no path and no symlink), which is
+luck rather than a property: the same alternative resolution is involved.
+
+That is the instrument decision 0012 exists to sharpen, and it is the whole
+reason a control is built twice. Without run B, the composed LAMP's two extra
+PHP packages would have looked like a finding.
+
+**Read against control run B:**
+
+| pair | packages | files differing | paths on one side | symlinks |
+| --- | --- | --- | --- | --- |
+| LAMP control vs control | 2 | 198 | 42 | 29 |
+| LAMP control B vs composed | 1 | 182 | 3 | 0 |
+| LAPP control vs control | 0 | 16 | 0 | 0 |
+| LAPP control B vs composed | 5 | 36 | 82 | 38 |
+
+Every version of every shared package is identical in both stacks.
+
+**Differences attributable to the unit form**, the control-vs-composed set
+minus the control-vs-control set: LAMP **2 paths**, LAPP **20 paths**. Named:
+
+- LAMP: `/etc/hostname` and `/etc/hosts`, which carry the product's own name,
+  and the control has to be a differently named product to exist beside the
+  real one (`lamp-mono` against `lamp`, read out of both trees).
+- LAPP: the same two, plus 18 registries, caches and logs that record the
+  package set or the order it was installed in: `/var/lib/dpkg/status` and
+  `status-old` (five extra stanzas and nothing else), `triggers/File`,
+  `/var/lib/apt/extended_states`, twelve `/var/lib/ucf/{registry,hashfile}*`
+  (the `php8.4-mysql` and `php8.4-phpdbg` lines and nothing else),
+  `/var/cache/man/index.db` (same size, a cache) and `/etc/webmin/webmin.acl`,
+  which differs only in the order of the module list.
+
+So: **zero attributable to the unit form in either stack**, once the control's
+own name and the parent's package closure are accounted for.
+
+### What the composed builds do carry that a monolith cannot
+
+Not noise, and worth stating plainly, because it is a property of layering
+rather than a defect:
+
+- `turnkey-apache-php-19.0`, the parent layer's own release record. A chain
+  records every layer it is made of and a monolith records one.
+- The parent's dependency closure. `apache-php` resolved its plan before the
+  stacks' packages existed, so it carries `php-json` and `php8.4-phpdbg`,
+  which a monolith resolving once does not.
+- And the one that is a real finding: **`apache-php` carries `php-mysql` and
+  `php8.4-mysql`, so LAPP inherits a MariaDB driver.** `adminer` depends on
+  `php-mysql | php-mysqli | php-pdo-mysql | php-sqlite3 | php-pgsql` and apt
+  takes the first alternative. In the monolithic LAPP, `php-pgsql` was already
+  in the plan and satisfied it, so no MySQL driver was installed. Putting
+  Adminer in the shared layer therefore forces a database driver into the
+  shared layer, and apt chooses MySQL's. `apache-php` should name the driver
+  it wants explicitly instead of letting the alternative decide.
+
+### The boot tests, which prove the stack rather than the ports
+
+All four artefacts, on the build host, over each container's global IPv6
+address, on `lxcbr0`. Of all four: Apache 200 on 80 and on 443, PHP executing
+on both ports rather than served as source, the appliance's own page carrying
+the mark and the mark served, the CGI handler running, Adminer answering with
+its own page on 12322, the Webmin module the artefact is held to, Webmin on
+12321, and `keel diff` clean.
+
+Then the question that differs. `lamp` and `lapp` are asked whether the
+database answers on `::1` and on `127.0.0.1` as the declared account with the
+declared secret, which proves description, secret file, `DB_PASS`, hook,
+account and server in one query. `lamp-client` and `lapp-client` are asked to
+prove they have no database server: no package, no data directory, nothing
+listening on the port, no process. Four ways, because each can be true while
+the others are false, and an idle server in those artefacts would be the
+cheapest failure to ship and the most expensive to find.
+
+### A bug the boot test found that 100 percent coverage did not
+
+The first `lamp-client` run exited after the PHP verdict with no message at
+all. `bt_has_local_database` returns 1 for the artefact with no server, which
+is an answer and not an error, and `bt_has_local_database "$x"; rc=$?` is not
+exempt from errexit, so the verdict died at that line before it could print.
+All 66 tests passed on that library, because `bats run` turns errexit off.
+
+The idiom is `|| rc=$?` now, in both repositories, and the 67th test runs the
+helpers in a script with `set -euo pipefail`. Worth adding to traps.md: a bats
+suite cannot see a library that kills its caller, so a library used under
+`set -e` needs one test that runs it under `set -e`.
+
+Also corrected, because it changed the numbers: the first comparison read
+`sha256sum` output with `join` on whitespace, and the one path in the tree
+whose name contains a space, `setuptools/_vendor/jaraco/text/Lorem ipsum.txt`,
+was split and counted as a difference in every pair. It is byte identical
+everywhere. The LAMP figures are 198 and 182, not 199 and 183.
+
+### Where the two recipes differ, which is the argument for the composition
+
+The `Makefile` and `plan/main` of `keel-lapp` are `keel-lamp`'s files with the
+database named differently: the same includes in the same order, the same
+conditional on the unit, the same ports, and four packages filling the same
+four roles (client, PHP driver, Perl DBI driver, Python driver). Diffed after
+renaming, the substantive lines are identical and only comments differ.
+
+`conf.d/main` is the same script with the same skeleton and exactly two blocks
+that are not the same. Both are asymmetries between the two components, not
+between the two stacks:
+
+1. **The listen addresses.** `unit-postgresql` writes them inside its own conf
+   script. `unit-mariadb` does not, so `keel-lamp` writes
+   `99-keel-bind.cnf` itself and `keel-mariadb` carries the same file in its
+   overlay: the setting exists twice on the MariaDB side and zero times on the
+   PostgreSQL side, because there the component does it.
+2. **The build time credential.** `unit-postgresql`'s conf script gives the
+   superuser the password `postgres` when the build names no `PGSQL_PASS`, so
+   every consumer has to undo it, as `keel-postgresql` and `keel-lapp` both
+   do. The shared tree's `conf/adminer-mysql` uses a value from `mcookie` that
+   nobody records, so `keel-lamp` has nothing to undo.
+
+One further difference belongs to the shared tree: `conf/adminer-mysql` starts
+the database to create an account, so it can only run in the artefact that has
+a server, while `conf/adminer-pgsql` is two `sed` lines and runs anywhere.
+Splitting it into a driver half and an account half would remove the last
+structural difference between the two recipes.
+
+None of the three argues against the composition. All three say the same
+thing: the two components were extracted to different depths, and the recipes
+are carrying the difference.
+
+### What is proposed elsewhere and was not done here
+
+- `unit-mariadb` should set its own bind addresses, as `unit-postgresql` does.
+  One commit in the component, two deletions in its consumers. Left alone
+  because `keel-mariadb` has the unit change in flight: its PR #11 is still
+  open and the published `mariadb` layer still records `units none`, so LAMP
+  and LAPP are the first layers in the project actually built with a unit.
+- `common/conf/adminer-mysql` should be split into a driver half and an
+  account half. `common` is shared and another change landed there tonight, so
+  this is proposed and not made.
+- `require-changelog` compares only the Debian revision in the parentheses, so
+  a fork's first entry under a new upstream version cannot pass: master's top
+  entry is `turnkey-lamp-18.1 (1)` and the new one is `turnkey-lamp-19.0 (1)`,
+  and the check reports "1 is not greater than 1". The version did increase.
+  Fixing it is a change to `keel-linux/.github`, which the audit of 2026-09-26
+  called the highest blast radius in the organization, so it is reported and
+  not made. It is the only red check on either pull request that is not
+  waiting on publication.
+- `keel-apache-php`'s workflow passes `roles: primary replica` to
+  `test-appliance.yml`, booting two containers for a web layer with no
+  replication, and its `tests/coverage.sh` still carries the PostgreSQL
+  include pattern. Both look like copies from the database appliance.
+- Neither unit has a `v1.0.0` tag, though four recipes now document
+  `git clone --branch v1.0.0`. The pin resolves through the `version` file so
+  the manifests are right, but the documented command does not work.
+
+### The mirror currently serves a LAMP nobody can use
+
+`https://mirror.keellinux.org/layers/lamp.manifest` is the monolithic layer of
+2026-09-24: `parent core`, `parent_sha256 e08e8224`. The mirror's `core` is
+`7acf2c53`, so that parent no longer exists there and `keel pull lamp` cannot
+resolve. The appliance check caught it from the other side, refusing the job
+because "the published lamp layer was built on 'core', the caller declares
+'apache-php'". Publishing the new chain replaces it.
+
+### Not published
+
+The four layers are built, measured and boot tested on the build host and
+none of them has been signed or pushed to the mirror. What publication would
+put there is stated in the pull requests and in the report, for the
+maintainer to approve first.

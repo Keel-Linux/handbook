@@ -184,6 +184,46 @@ pair on one /64 differs whatever the layer shipped.
 **Hit** 2026-09-27, in the MariaDB replication work, on the first run that
 booted two nodes from their descriptions.
 
+## A bats suite cannot see a library that kills its caller
+
+**Signature.** A unit suite is green, coverage is 100 percent, and the script
+that uses the library exits in the middle with no message at all. The last
+thing printed is the verdict before the one that failed.
+
+**Cause.** `bats run` turns errexit off for the code it runs, so a function
+that dies under `set -e` dies invisibly in the suite and fatally in the
+caller. The usual shape is a helper that returns non-zero as an *answer*
+rather than as an error, read with `cmd; rc=$?`, which is not one of the
+constructs errexit exempts. `cmd || rc=$?` is.
+
+**Fix.** `|| rc=$?`, never `; rc=$?`, for a helper whose non-zero return is
+meaningful. And one test per library that runs it the way the caller does, in
+a script with `set -euo pipefail`, because no amount of `run` coverage
+substitutes for it.
+
+**Hit** 2026-09-27, the first `lamp-client` boot test: `bt_has_local_database`
+returns 1 for the artefact with no database server, which is the answer and
+not a failure, and the landing page verdict died at that line. 66 tests and
+100 percent line coverage on the same file.
+
+## A path with a space in it breaks a whitespace comparison
+
+**Signature.** An equivalence measurement reports one more differing file than
+it should, in every pair including the control against itself, and the path
+looks like it has nothing to do with the change.
+
+**Cause.** `sha256sum` output is `<hash>  <path>`, and `join` and `awk` split
+on whitespace. One path in a Debian rootfs has a space in its name,
+`setuptools/_vendor/jaraco/text/Lorem ipsum.txt`, so it becomes two fields and
+never matches itself.
+
+**Fix.** Key the comparison on a tab-separated `path<TAB>hash`, and count the
+paths with an internal space before trusting a count. There is exactly one
+today, which is what makes this easy to miss and easy to dismiss.
+
+**Hit** 2026-09-27, the LAMP composition measurement: 199 and 183 differing
+files, which are 198 and 182.
+
 ## Things we did wrong and would do again unless written down
 
 - **Discarding a local commit on a guess.** A checkout on the build host had a
