@@ -136,14 +136,45 @@ Ed25519, fingerprint 694DE5E8C17BF1F9B73EAE2BD276B62C2BD16F4E, expires
 2028-09-25. Public key saved at docs/keys/keel-archive-keyring.asc, verified
 against the fingerprint.
 
-Custody note, pending action: the passphrase-protected secret of the signing
-subkey 694DE5E8 was transmitted through the chat channel instead of scp, so
-that copy is treated as exposed. It was not imported anywhere. Agreed course:
+Custody note, pending action and under review: the passphrase-protected
+secret of the signing subkey 694DE5E8 was transmitted through the chat
+channel instead of scp, so that copy is treated as exposed. It was not imported anywhere. Agreed course:
 revoke subkey 694DE5E8 with the offline primary, issue a new signing subkey,
 re-export the public key, and deliver the new secret only by scp to the build
 host. Until then, nothing is signed and the public key is not published, so a
 single publication carries the definitive subkey. The primary key was never
 exposed and stays valid.
+
+### The rotation is questioned (2026-09-27)
+
+The maintainer does not agree that the subkey needs rotating and asked for the
+reasoning to be checked against the session that provisioned the hosts. This
+note records the question as open rather than settled, so nobody acts on the
+paragraph above as if it were decided.
+
+The case for rotating, as it stands here:
+
+- the exposure is not hypothetical. Secret key material that has been through
+  a chat window exists in that channel's history, its logs and its backups,
+  which is a different custody from "offline, on the maintainer's machine".
+  The passphrase raises the cost of using that copy; it does not remove it;
+- it is cheap today and expensive later. Nothing has been signed, the public
+  key is not published, and the archive serves only the unsigned staging
+  distribution, so a replacement costs one subkey and one scp. After the
+  first signed publication it costs a revocation, a republished key and an
+  explanation to everyone who already trusted it;
+- the primary key never left its offline custody, so only the subkey is in
+  question and the project's identity does not change.
+
+The case against is the maintainer's to make, and it is a legitimate one: if
+the channel and its history are considered private enough, the exposure can be
+accepted. If that is the conclusion, this note should say so, with the reason,
+because as written the document tells a future reader to revoke.
+
+Until it is settled, nothing is signed, which is also what the release tooling
+enforces: `bin/publish` refuses the signed distribution while no secret
+signing subkey is present, and `keel-release` says in its log that nothing
+will be signed.
 
 ## Hosting names decided (2026-09-26): the TurnKey Linux pattern
 
