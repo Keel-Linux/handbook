@@ -169,3 +169,50 @@ Phase 1 of the plan above, an application using a database on another machine,
 is not what was asked for now and waits. Phase 4, Galera multi-primary, and
 phase 5, sharding, wait behind the replication work, and the console shows no
 entry for a mode it cannot configure.
+
+
+## The catalog shape, decided 2026-09-27
+
+Proposed by the maintainer as `mariadb-std` and `mariadb-cloud`, `lamp-standalone`
+and `lamp-cloud`, and settled the other way after the argument below.
+
+**An image is never split by topology.** Standalone, primary and replica differ
+by configuration, not by content: the same server, the same packages, a
+different `server_id`, binary log and replication account. Two artifacts for
+that would be byte identical in content while each paid for its own build, boot
+test, audit, publication, signature and reproducibility. Worse for the
+operator: somebody who installed the standalone one and later wanted
+replication would have to change image instead of changing a setting, which is
+the opposite of what this work is for.
+
+**An image is split when the content differs.** A stack with a local database
+server and one without are genuinely different images: in one the server is
+installed, in the other it is absent. That difference deserves two artifacts,
+and the names say what is in them rather than what topology they are running.
+
+| Artefact | How many | Where the mode lives |
+| --- | --- | --- |
+| mariadb, postgresql | one each | standalone, primary or replica, chosen in the console |
+| lamp, lapp | two each, with and without a local database server | the remote endpoints configured in the console |
+
+The instinct behind the maintainer's proposal is right and is answered
+elsewhere: an operator should not have to know any of this before choosing from
+the catalogue. That is the job of the catalogue description and the console
+screen, not of duplicating images per topology.
+
+**Consequence for the layer model.** The database stops being a parent layer
+and becomes a component, which is what decision 0010 built the unit mechanism
+for. The composition becomes:
+
+| Artefact | Composition |
+| --- | --- |
+| apache-php | a layer on core |
+| lamp | child of apache-php carrying the mariadb unit |
+| lapp | child of apache-php carrying the postgresql unit |
+| lamp without a local database | apache-php with no database unit |
+| mariadb, postgresql | child of core carrying the same unit |
+
+So the unit extraction of mariadb and postgresql, and the `apache-php` layer,
+come before LAMP and LAPP, and WordPress comes on top of LAMP inheriting the
+choice of where its database lives. `apache-php` shared by both stacks is the
+second consumer 0010 was waiting for.
