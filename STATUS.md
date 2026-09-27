@@ -955,12 +955,12 @@ in it copies an archive. Its layer carries the upstream inithooks 2.3.6 and
 confconsole 2.2.3, and the forum layer upgrades them. So there was nothing to
 change there and no second pull request.
 
-**The build host.** `/turnkey/buildtasks-keel` is reset to `origin/19.x`
-(85a1771), so `layer_audit_packages` and the make status capture of PR 4 and
-the signing identity fix of PR 5 are now what builds run. The local commit was
-discarded: `git diff origin/19.x 19.x` showed it as a revert of PRs 3, 4 and
-5, its `zz-ssl-ciphers` content already being on the branch. The three product
-directories are checkouts and were updated before the rebuild: `core` to
+**The build host.** `/turnkey/buildtasks-keel` is reset to `origin/19.x`, so
+`layer_audit_packages` and the make status capture of PR 4 and the signing
+identity fix of PR 5 are now what builds run. The one local commit it carried
+was **not** a duplicate of anything on the branch, and discarding it cost a
+rebuild; that is the next section. The three product directories are checkouts
+and were updated before the rebuild: `core` to
 keel-core master 53d9fb5 (it had been sitting on the upstream 24c82ee, so the
 core layer gained the keel banner overlay), `nodejs-nginx` to 648d6b6 and
 `nodebb` to ffb23e2. `build/` stays out of git through `.git/info/exclude`,
@@ -1014,3 +1014,270 @@ happen at all, and it is in buildtasks, not in the recipe: `bt-layer` should
 treat a failed clean as fatal, or remove the build directory itself, rather
 than building on top of whatever the failure left. The recipe now refuses the
 result, which is the safety net, not the fix.
+
+## The commit that was only on the build host (2026-09-27)
+
+`/turnkey/buildtasks-keel` carried one commit that was not on `origin/19.x`:
+`bt-layer: run zz-ssl-ciphers when a child overlay carries the mark`. It looked
+like a duplicate of `b3d6232`, and it was: of a **local branch**
+`fix/layer-ssl-ciphers-overlay` in the workstation fork that had never been
+pushed and had no pull request. `git branch -r --contains` would have said so
+in one line. Resetting the build host threw the only running copy away.
+
+What it fixes: `layer_child_conf` added `turnkey.d/zz-ssl-ciphers` to a child
+layer only when one of the conf scripts the child runs mentioned
+`ZZ_SSL_CIPHERS`, which is how the apache conf reads it. nginx keeps the mark
+in an overlay, `overlays/nginx/etc/nginx/snippets/ssl.conf`, and the nodebb
+layer adds no conf script over its parent, so the rebuilt layer shipped
+
+    ssl_ciphers 'ZZ_SSL_CIPHERS';
+
+and the first boot died where it runs `nginx -t`:
+
+    [emerg] SSL_CTX_set_cipher_list("ZZ_SSL_CIPHERS") failed
+    (SSL: error:0A0000B9:SSL routines::no cipher match)
+
+The running `forum` container, assembled from the layer built while the local
+commit was in place, has the real cipher list. That is the comparison that
+proved the regression rather than a new defect.
+
+It is now buildtasks pull request 7, merged as 1dfc12d: the scan moves into
+`layer_needs_ssl_ciphers`, which checks the child's conf scripts as before and
+then the overlays it applies, with two cases in `tests/layer` and the gate
+green at 99 (bin/layer-lib 207 of 208, bt-layer 101 of 102). The build host
+runs that merge now.
+
+The lesson is narrow and worth keeping: a commit that exists only on a machine
+is not a duplicate of a commit that exists only on a laptop. Before resetting
+a checkout, ask git which *remote* refs contain the commit, not which local
+ones.
+
+## What the appliance gate found once the layer booted (2026-09-27)
+
+With the republished chain the gate got much further than it ever had: it
+pulls, verifies, assembles, boots, and the first boot runs to completion
+(`98finalize`, `Inithooks run completed`). The build shims are gone, so the
+`10regen-sshkeys` hang of the afternoon is fixed. It still fails, on two
+defects that the hang had been hiding, both reproduced by hand on the build
+host against `/mnt/builds/layers`:
+
+1. `redis-server.service` will not start in the test container:
+   `status=226/NAMESPACE`. The unit's namespace hardening needs an apparmor
+   profile the boot test's LXC config does not ask for. The running `forum`
+   container has `lxc.apparmor.profile = generated` and
+   `lxc.apparmor.allow_nesting = 1`; the config `bt_lxc_config` writes has
+   neither. Adding both to the container made redis come up. So this is the
+   test harness in `tests/lib/boot-test-lib.sh`, not the layer.
+2. The cipher list above, which is fixed in buildtasks now.
+
+`15regen-sslcert` and `95secupdates` also report a non-zero exit in the
+container and are not yet explained; neither stops the first boot from
+finishing.
+
+The verdict after the fix and the republication is in the release log of the
+run that follows this note.
+
+## The archive signing subkey is live (2026-09-27)
+
+The maintainer rotated the signing subkey while this work was in flight:
+`694DE5E8` is revoked with the offline primary and the signing subkey is now
+`03041024F4B2C0C2F42DDDEA04906EAB77513310`, Ed25519, expiring 2028-09-26.
+`AD0964BE3F09DED469A3B6B2148E951314703180` is unchanged and its secret stays
+offline (`sec#`). `/srv/keel-apt/apt` on the build host carries the rotated
+`keys/keel-archive-keyring.asc`, and `dists/trixie` is published and signed.
+
+Three consequences for a release from now on:
+
+- `keel-release` signs, so `release_sign ... || die 9` is a real failure mode.
+  The subkey is passphrase protected and the agent caches the passphrase for
+  ten minutes, so a release whose signing step lands more than ten minutes
+  after the maintainer typed it dies at exit 9 with `Inappropriate ioctl for
+  device`. That is the cache, not the key. The recovery is cheap: the layers
+  are already built and match their manifests, so `bin/keel-release --force
+  nodebb` without `--rebuild` reuses them and reaches the signing step in a
+  few minutes. Nothing about this may be worked around, and no passphrase goes
+  on a command line.
+- `keel verify` stops exiting 9 for a missing signature once layers carry
+  `.hash`; `release_keel_verify` already accepts 8 and 9, so the release path
+  needs no change.
+- With the release signed and `dists/trixie` signed, `keel-publish-mirror`
+  takes the signed path and installs the APT tree at the root of
+  `/srv/archive` instead of `/srv/archive/staging-unsigned`. That is what the
+  tooling documents for the day a key exists, and `--unsigned-staging` becomes
+  a no-op rather than a downgrade.
+
+## The first two database layers, and the password that reached nothing (2026-09-27)
+
+`Keel-Linux/keel-mariadb` and `Keel-Linux/keel-postgresql`, both public,
+both a small recipe built as a layer on `core` (decision 0006: the
+repository carries the `keel-` prefix, the layer name does not, so the
+layers are `mariadb` and `postgresql`). They are the database and nothing
+else. LAMP and LAPP are built on them next.
+
+**What they leave out, and why it is written down.** Upstream's `mysql`
+appliance bundles Adminer, lighttpd and php-fpm; upstream's `postgresql`
+appliance adds postgis and, in its `conf.d/main`, `listen_addresses = '*'`
+with `host all all 0.0.0.0/0 md5`. None of that is here. Adminer needs a
+web server and which web server differs by context, lighttpd upstream and
+Apache in LAMP and LAPP, so putting it in the database layer forces a
+choice the layers above would undo and make again; it arrives with the web
+stack, which is where upstream puts it for those products. Remote access
+is the change of behaviour worth naming: on an IPv6 first, publicly
+routable appliance (brief section 5.3) a database that accepts password
+authentication from anywhere is not a default to inherit quietly, so both
+layers listen on the loopback of both families and the PostgreSQL recipe
+asserts at build time that neither of upstream's two changes is present.
+An appliance with real remote clients opens the port, says who may connect
+and terminates TLS. If the maintainer later wants literal parity with the
+upstream `mysql` appliance, that is a different artefact built on this
+layer, not this layer.
+
+Batteries included stays: Webmin comes from `core` and answers on 12321,
+and each layer adds the module for its database, `webmin-mysql` and
+`webmin-postgresql`, both `2.660.turnkey0` in the TurnKey trixie archive
+that `core` reads. The boot tests check the module and the panel, not only
+the database.
+
+### The defect these two exposed
+
+`secrets.db_password` of an instance description renders to `DB_PASS` and
+to nothing else. Measured on a rendered description with the current
+library:
+
+```
+export HOSTNAME=mariadb
+export FQDN=mariadb.example.org
+export ROOT_PASS=[masked]
+export DB_PASS=[masked]
+export APP_DB_USER=admin
+```
+
+`MYSQL_PASS` and `PGSQL_PASS`, which `mk/turnkey/mysql.mk` and
+`mk/turnkey/pgsql.mk` add to `CONF_VARS`, never appear there: they are
+build time variables fab passes to the conf scripts inside the chroot,
+which is where `conf/pgsql` reads `PGSQL_PASS`. So the two halves of the
+defect are not the same defect.
+
+**MariaDB: nothing read `DB_PASS`.** The only hook that calls
+`bin/mysqlconf.py` is `firstboot.d/35adminer-mysqlpass`, which ships in the
+**Adminer** overlay of `common` together with the account it configures,
+and these layers leave Adminer out. A declared password reached nothing on
+an appliance whose whole purpose is the database, and `keel diff` would
+have said nothing, because the `secrets` section is never compared on
+either side.
+
+**PostgreSQL: the vocabulary was right and the layer shipped a password.**
+`overlays/pgsql` `firstboot.d/35pgsqlpass` already reads `DB_PASS`. But
+`conf/pgsql` opens with `set ${PGSQL_PASS:=postgres}`, so a build that
+names no `PGSQL_PASS` gives the superuser of the database the password
+`postgres`. For an appliance that is a bad default; for a published layer
+it is worse, because a layer is fetched by name and reused, so every
+appliance built on it would carry the same known superuser password and
+one whose first boot hook failed would keep it. And nothing said whether
+the declared password had arrived: `35pgsqlpass` reports on setting it,
+not on whether the database will accept it.
+
+### Where it is closed, and why there
+
+In the appliance layers, on the `DB_PASS` side. Not in the renderer, and
+the three parts brief section 10 asks for:
+
+1. *Why the renderer does not work.* `MYSQL_PASS` and `PGSQL_PASS` are
+   build time `CONF_VARS`. Emitting them from the renderer would write two
+   more copies of a secret into a root readable file that nothing consumes.
+2. *Whether it could be made to work.* Mechanically yes, but the renderer
+   would have to know which database the image carries in order to choose
+   between the two names. The description does not declare that and
+   `inspect` only guesses it from `/etc/mysql` or `/etc/postgresql`
+   (`DATABASE_DIRS`). One secret, two possible variables, decided by the
+   image: appliance knowledge in the one component that has to stay
+   appliance agnostic, landing on every appliance including those with no
+   database.
+3. *Why the layer is better.* The vocabulary is already right; both first
+   boot hooks `common` ships read `DB_PASS`. What was missing is a hook on
+   the MariaDB side, and only because the one that exists ships with
+   Adminer. The repair is one hook in the layer that has none, the shared
+   vocabulary is untouched, and an appliance with no database is unchanged:
+   it ships no such hook and `DB_PASS` stays out of its conf unless the
+   description declares it.
+
+What landed: `keel-mariadb` `firstboot.d/35mysqlpass`, at the position
+upstream uses, reads `DB_PASS`, hands it to the shared `bin/mysqlconf.py`
+once per host of the administrative account (`localhost`, `::1`,
+`127.0.0.1`, because MariaDB matches a socket connection against
+`localhost` and a TCP connection against the literal address), then
+connects as a client and runs a query. The account is `admin`, created by
+`conf.d/main` with a hash no input produces. `keel-postgresql`
+`conf.d/main` removes the build time password (`ALTER ROLE postgres
+PASSWORD NULL`, then a check that `rolpassword` is null in `pg_authid`)
+and `firstboot.d/36pgsqlverify` runs after `common`'s `35pgsqlpass` and
+proves the password over TCP on `[::1]`. Neither layer chooses a build
+time password and neither generates one: a value chosen at build time
+would be identical on every appliance built from the layer, and a random
+one would make the layer irreproducible (brief section 5.4).
+
+### Measured
+
+| Repository | Tests | Coverage | Gate |
+| --- | --- | --- | --- |
+| keel-mariadb | 61 bats | 99.51 (204/205): `lib/mariadb.sh` 100 (43/43), `35mysqlpass` 95.45 (21/22), `boot-test-lib.sh` 100 (140/140) | 95 |
+| keel-postgresql | 58 bats | 100 (197/197): `lib/postgresql.sh` 100 (41/41), `36pgsqlverify` 100 (15/15), `boot-test-lib.sh` 100 (141/141) | 100 |
+| apt | 124 bats, 27 in release.bats | 99.71 of executed lines | 99 |
+
+The one uncovered line in `35mysqlpass` is the process substitution that
+feeds the dialog loop, which kcov attributes to no line; the loop itself is
+covered. It is the same line `keel-nodebb` records for `40nodebb`.
+
+### The boot tests
+
+Each repository has `tests/boot-test.sh` in the shape of `keel-nodebb`'s,
+and each proves the declarative path rather than a listening port. A
+database appliance is not proved by a port: the database listens whatever
+password it ended up with, and `keel diff` never compares secrets. So the
+verdict is a client connection. A random password is written to
+`etc/keel/secrets/db_password` (0600); `tests/instance.yaml`, which
+declares `secrets.db_password` from that file, is installed at both paths
+the first boot reads; `keel spec apply` renders it; the container boots and
+the first boot runs through the inithooks runner alone; then
+`mysql --user=admin --host=::1 --protocol=TCP --execute='SELECT 1'` with
+`MYSQL_PWD`, or `psql --username=postgres --host=::1 --no-password
+--command='SELECT 1'` with `PGPASSWORD` (`--no-password` so a password that
+did not arrive is an error and not a hung test), inside the container. Then
+the Webmin module and Webmin over IPv6 on 12321, then `keel diff`.
+
+### State, and what is waiting
+
+| Repository | Pull request | Checks |
+| --- | --- | --- |
+| keel-mariadb | #1 the layer and the password fix | three green |
+| keel-mariadb | #2 the boot test and the coverage gate, stacked on #1 | three green |
+| keel-postgresql | #1 the layer, the password it shipped and the one nobody checked | three green |
+| keel-postgresql | #2 the boot test and the coverage gate, stacked on #1 | three green |
+| apt | #4 `mariadb core` and `postgresql core` in conf/appliances | running |
+
+`main` of both new repositories is protected, requiring `tests / coverage`
+and `package / changelog`, with merge commits only and squash and rebase
+turned off. `appliance / build-and-boot` is in place and skips with a
+notice while the layer is not on the mirror; it becomes required the day
+the first layer reaches it. Each repository was bootstrapped with the gate
+and nothing else, at threshold 0, which is `test-shell.yml`'s bootstrap
+case, so protection was on before the first line of recipe.
+
+**Nothing was built.** The build host was running the other agent's
+`keel-release --force --rebuild nodebb` (`bt-layer --parent core
+nodejs-nginx` at 01:47 UTC), and two builds must never run at once, so it
+was left alone. When it is free, and after the pull requests above are
+merged and `/srv/keel-apt/apt` and the two product checkouts on the host
+are current:
+
+    cd /srv/keel-apt/apt && bin/keel-release --force --rebuild mariadb
+    cd /srv/keel-apt/apt && bin/keel-release --force --rebuild postgresql
+    /root/audit-layers.sh
+
+A layer is published only once the audit passes and its project packages
+are the current ones, which each recipe's `conf.d/main` already enforces as
+a floor at build time: inithooks 2.3.6+keel4, confconsole 2.2.3+keel2,
+keel 0.2.1. The `conf.d` pattern that installs them is keel-nodebb's, not a
+second version of it; the archive freshness check itself stays in
+keel-nodebb's `conf.d/zz-project-packages`, and these two carry the minimum
+that publishing them requires.
