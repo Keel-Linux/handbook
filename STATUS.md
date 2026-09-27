@@ -2201,18 +2201,36 @@ from the other machine by a declared account.
 description says nothing about. That is the class of problem 0013 lists under
 promotion creating drift, met for the first time in a test.
 
-### Teardown, including a cancelled run
+### Teardown, including a cancelled run, measured
 
 Two layers, because one container left behind is somebody else's debugging
 session and two are worse. The boot test stops every node before it removes
-any tree, and its traps cover `INT` and `TERM` as well as `EXIT`, so a
-cancelled job tears down inside the test. The workflow's own step then runs
-with `if: always()`, which covers cancellation, and enumerates the containers
-from LXC rather than recomputing them from the role list, so a node the test
-renamed or started just before failing goes too. It stops all of them first
-and removes the tree last, and it reports how many container monitors of the
-run are still alive, which is the thing a later run would trip on. The run
-above reported 0.
+any tree, and its traps cover `INT` and `TERM` as well as `EXIT`. The
+workflow's own step then runs with `if: always()`, which covers cancellation,
+and enumerates the containers from LXC rather than recomputing them from the
+role list, so a node the test renamed or started just before failing goes too.
+It stops all of them first and removes the tree last, and it reports how many
+container monitors of the run are still alive, which is the thing a later run
+would trip on.
+
+**Cancellation was tested rather than assumed**, on a throwaway branch, and it
+corrected what was first written here. Run 36315031422 was cancelled at
+11:14:07 with both containers up and the boot test in the middle of checking
+the first node. The `always()` step stopped and destroyed
+`...-36315031422-1-1` at 11:14:21 and `...-1-2` at 11:14:23, `keel-ci-cleanup`
+removed the tree at 11:14:25, and the step reported 0 monitors left. Watched
+from outside at the same time: 2 monitors and 1 tree at 11:14:09, 0 monitors
+at 11:14:25, 0 trees at 11:14:30.
+
+What that run showed, and the reason both layers are needed: **the boot test's
+own traps did not fire.** It runs as root through `sudo keel-ci-boot-test`, and
+the unprivileged `runner` user the job's step runs as cannot signal a root
+child, so on a cancelled job the traps inside the test are unreachable and the
+workflow step is what does the work. The traps still earn their place for a
+run started by hand on the build host, where the signal does reach the process.
+A first, coarser attempt cancelled four seconds too late, after the test had
+already finished and cleaned up by itself, which is why the check was repeated
+with a two second poll.
 
 **The sudo policy needed no widening.** `keel-ci-cleanup` takes one container
 name and one tree and does both in a single call, so calling it per node would
