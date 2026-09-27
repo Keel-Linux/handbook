@@ -1,0 +1,136 @@
+# 0013: Database topologies configurable from the console
+
+Status: **plan, not yet decided**, 2026-09-27. Asked for by the maintainer:
+every Keel database appliance should be configurable from confconsole for
+standalone, cloud (master or slave) and sharding, for MariaDB and PostgreSQL
+alike, and the configuration should actually configure the database. This
+note is the plan that was asked for alongside it, because the request does
+not decide the hard parts and they are better decided before code exists.
+
+## First, the case that motivated it does not need any of this
+
+The example given was WordPress with its database in the cloud. That needs
+one thing: the application pointing at a database somewhere else instead of
+one on its own machine. It is a setting on the application side, no
+replication and no sharding involved, and it is the cheapest useful piece of
+the whole subject. It should ship first, and it is listed as phase 1 below.
+
+## What the three modes actually are
+
+"Master/slave" and "sharding" are names for mechanisms that differ per
+engine, and pretending otherwise produces a console that lies.
+
+| Mode | MariaDB | PostgreSQL |
+| --- | --- | --- |
+| Standalone | one server, what we ship today | one server, what we ship today |
+| Primary | binary log, `server_id`, GTID, a replication account | `wal_level=replica`, a replication slot, a replication role, `pg_hba` entry |
+| Replica | `CHANGE MASTER TO ... MASTER_USE_GTID`, seeded from a backup of the primary | `pg_basebackup` then `standby.signal` and `primary_conninfo` |
+| Multi-primary | Galera, a genuinely different animal: synchronous, quorum based, minimum three nodes | nothing equivalent in the archive |
+| Sharding | Spider storage engine, or a router in front | no packaged option |
+
+## What Debian 13 gives us, measured on the build host
+
+| Package | Version |
+| --- | --- |
+| galera-4 | 26.4.23-0+deb13u1 |
+| mariadb-plugin-spider | 1:11.8.6-0+deb13u1 |
+| patroni | 4.0.7-3~deb13u1 |
+| repmgr | 5.5.0+debpgdg-1 |
+| pgpool2 | 4.6.1-2 |
+| postgresql-17-pglogical | 2.4.5-1 |
+| citus | absent |
+| maxscale | absent |
+
+So replication has a packaged path on both engines, Galera gives MariaDB a
+real multi-primary mode, and sharding has a packaged path on MariaDB only.
+PostgreSQL sharding would need a third party repository, which costs us both
+the reproducibility work and the sovereignty claim: an image nobody can
+rebuild from our own archive is not one we should ship. That is a reason to
+say no to PostgreSQL sharding for now, and to say it out loud in the console
+rather than offering a menu entry that cannot work.
+
+## Where this collides with the brief, and how it stays inside it
+
+The brief forbids fleet orchestration in this codebase. Replication and
+sharding are cluster properties, so the line has to be drawn precisely:
+
+- **In scope:** configuring the role of *this* instance. This node is a
+  primary. This node is a replica of that address. This node is a Spider
+  head or a data node. Each screen configures the machine it runs on.
+- **Out of scope:** deciding which node should be primary, moving that role
+  around, watching for failure, and reconfiguring others. That is an
+  orchestrator, and we are not writing one here.
+
+The consequence must be stated in the console, not buried: replication
+without automatic failover is not high availability. Promotion is an
+operator action on the replica. A console that implies otherwise is worse
+than one that offers less.
+
+## The problems to plan for, which the request does not settle
+
+1. **Becoming a replica destroys local data.** A standby is a copy of the
+   primary. The apply path must refuse unless the database is empty or the
+   operator confirms destruction explicitly, and `keel diff` must never
+   trigger it on its own.
+2. **A replica needs the primary to exist first.** First boot is a
+   single-machine event, so the declarative spec has to express a
+   dependency the machine cannot satisfy alone: convergence must be
+   idempotent, retryable and honest about waiting rather than failing.
+3. **Credentials and trust between nodes.** Replication carries a password
+   and, over anything but a trusted link, TLS. The spec references secrets by
+   file today; a replica also needs the primary's address and its certificate
+   authority. IPv6 first means global addresses and no NAT, which makes this
+   simpler than it is elsewhere.
+4. **Promotion creates drift by design.** After a promotion the spec says
+   replica and the machine says primary. Diff must report it and apply must
+   refuse to silently demote. This is the same class of problem as the
+   password fields, and the vocabulary work of 0009 is the precedent.
+5. **Backups and upgrades change shape.** A replica should not be backed up
+   like a primary, and a major version upgrade of a replicated pair has an
+   order. Whatever we ship must say which.
+6. **Testing needs two machines.** The appliance gate boots one container.
+   Proving replication needs two on the same bridge, and proving Galera needs
+   three. That is new test infrastructure and it is part of this work, not an
+   afterthought.
+7. **The console can only configure one node.** confconsole runs on the
+   machine. It can ask for the primary's address and credentials; it cannot
+   coordinate. The screens must be written from that point of view.
+
+## Phases, each with what would prove it
+
+**Phase 1: the application points elsewhere.** An appliance can use a remote
+database instead of its local one, declared in the instance spec and
+configurable in confconsole. Proof: a WordPress appliance with no local
+database server, answering over IPv6, with its data in a Keel MariaDB
+appliance on another container, and `keel diff` clean on both.
+
+**Phase 2: the vocabulary and the reading.** The spec gains a database
+section, `keel inspect` reports the role the machine is actually in, and
+`keel diff` compares them. No configuration is changed by this phase. It is
+cheap and everything later depends on it. Proof: a standalone appliance
+reports standalone, and a machine put into replication by hand reports
+replica with drift.
+
+**Phase 3: primary and replica, PostgreSQL first.** Streaming replication is
+the best documented and the least surprising, and `pg_basebackup` makes the
+seeding step explicit. Then MariaDB with GTID. Proof: a two container test in
+the gate, data written on the primary readable on the replica, the replica
+refusing to be built over a non empty database, and promotion as a separate
+operator action.
+
+**Phase 4: multi-primary for MariaDB with Galera.** Only after phase 3, and
+only if the three node test can run in the gate. Proof: three containers, a
+write on any node visible on the others, and a node rejoining after being
+stopped.
+
+**Phase 5: sharding, MariaDB only, with Spider.** Configure this node as a
+head or a data node. PostgreSQL sharding stays unavailable and the console
+says why. Proof: a table sharded across two data nodes, queried through the
+head, with both nodes built from published layers.
+
+## What would make me argue against going further
+
+If phase 3 cannot be tested in the gate with two containers, the rest should
+not be built. An untested replication feature in an appliance people trust
+with data is worse than no feature, and the project's own rule about coverage
+exists for smaller risks than this one.
