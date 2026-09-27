@@ -53,12 +53,32 @@ All three, in their proper roles:
 3. `snapshot.debian.org` is the recovery path for a package that predates the
    capture, not a build dependency.
 
-## Proof
+## Proof, corrected 2026-09-27
 
-The daily self check reports `match` for `core` on two consecutive mornings,
-having reported `drift` every morning before. Then the same for one appliance
-layer. No other evidence counts: passing once can be luck, and the check is
-the instrument the project already trusts for this question.
+The criterion first written here was wrong, and the implementation proved it
+wrong rather than working around it. It said the daily self check must report
+`match`, and that check compares tarball digests. Pinning cannot make two
+tarballs identical: install time state differs between builds regardless of
+which package versions went in, which the M0 gate already measured as 49
+differing files. So the criterion asked this work for something outside its
+reach, and a criterion like that either blocks honest work or invites fudging.
+
+Split in two, because they are two different claims:
+
+1. **Package reproducibility, which pinning owns.** The package list of a
+   rebuild is identical to the recorded one, compared by digest. The check
+   reports that as its primary signal, and it is what makes 0010's
+   equivalence measurable. First measured on 2026-09-27: a rebuild from the
+   pool installed 302 package files from `file:` and none over the network,
+   and its package list digest matched the capture exactly.
+2. **Byte reproducibility, which pinning does not own.** The tarball digest.
+   It stays reported, as information rather than as a verdict, and it goes
+   green only when install time state is dealt with, which is separate work
+   with its own allow list in the M0 gate.
+
+The two consecutive mornings still apply, to the package criterion: passing
+once can be luck. First confirmable on 2026-09-29, from the runs of 09-28 and
+09-29.
 
 ## What this does not cover
 
