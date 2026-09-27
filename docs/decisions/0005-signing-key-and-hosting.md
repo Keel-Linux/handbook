@@ -173,7 +173,22 @@ The public key is updated in the handbook, the archive repository and the
 `keel-archive-keyring` package (0.1.1). The `common` fork's `keys/` directory
 still holds only TurnKey's keys.
 
-Operational consequence, unresolved: the subkey is passphrase protected and
+Operational consequence, decided 2026-09-27: the agent's cache lifetime is
+eight hours (`default-cache-ttl` and `max-cache-ttl` 28800 in
+`/root/.gnupg/gpg-agent.conf`, mode 600), chosen by the maintainer after three
+passphrase moments were spent on releases that expired mid-flight. The cost,
+accepted knowingly: during that window anything running as root on the build
+host can sign without being asked, and the window resets only on reboot.
+
+Worth revisiting, because the reason has weakened. `keel-release` became
+resumable the same day and signing is now a separate phase, `--sign-only`,
+measured at 35 seconds for all five appliances. A typed passphrase therefore
+has to survive seconds rather than twenty minutes, which the default ten
+minute cache covers comfortably. Reverting is `rm -f
+/root/.gnupg/gpg-agent.conf && gpgconf --reload gpg-agent`. Kept at eight
+hours for now by the maintainer's decision.
+
+The original statement of the problem: the subkey is passphrase protected and
 the gpg agent caches the passphrase for ten minutes after the maintainer
 types it at a terminal, so a publication that signs more than ten minutes
 later fails with `Inappropriate ioctl for device`. Three ways out, the choice
