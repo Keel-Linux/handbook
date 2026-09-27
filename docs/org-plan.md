@@ -88,6 +88,7 @@ docs/ci-cd.md section 3; this is where each one stands in the sequence above.
 | keel-core | done; the appliance job added 2026-09-26 | done | `tests / coverage` and `appliance / build-and-boot`, both required |
 | keel-nodebb | done; the appliance job added 2026-09-26 | done | `tests / coverage`; the appliance check waits on buildtasks issue 6 |
 | keel-nodejs-nginx (the stack layer) | created 2026-09-26 with the appliance gate wired | not started | `appliance / build-and-boot`, skipping with a notice until its layer is published |
+| keel-mariadb, keel-postgresql | created 2026-09-27, database only, each with the Webmin module for its database | done | `tests / coverage`, `package / changelog`, and `appliance / build-and-boot` once their layers are on the mirror |
 | keel-lamp, keel-lapp, keel-wordpress, keel-moodle, keel-odoo, keel-redis, keel-ejabberd, keel-nginx-php-fastcgi | not started | not started | the appliance job skips with a notice until each layer is published, so the gate can be added before the layer exists |
 | tklbam, tklbam-python-boto, turnkey-pylib, cdroots, bootstrap | last, per 0002 | not started | n/a |
 | keel-linux.github.io (the site) | done 2026-09-26 | done | `python / coverage`: tools/sitecheck.py, the checks a build step would have done |
