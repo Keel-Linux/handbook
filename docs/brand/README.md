@@ -178,8 +178,13 @@ the text plus four rows of frame:
 | Full, as shipped today | 19 | 34 | 40 |
 | Small, as shipped today | 11 | 26 | 32 |
 
-That single bold number is the point of the exercise: at 7 rows the mark
-appears on an ordinary 24 row console, and at 11 it never does.
+The renderer also refuses any mark at all below 24 rows, so the 22 is the
+arithmetic requirement rather than a height where anything is drawn. That is
+exactly why it matters: 22 is under 24, so a 7 row mark is admitted on an
+ordinary 24 row console, and the 11 rows shipped today need 26 and never are.
+Verified against the shipping decision code, not computed by hand: at 24 rows
+a core appliance takes the small mark at the budget and no mark at all as
+things stand today.
 
 Width: 38 columns fits a 60 column console (which gives 56) with 9 columns
 either side, and is dropped below 42 columns. The renderer centres the block
