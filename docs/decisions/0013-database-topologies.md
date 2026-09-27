@@ -282,3 +282,32 @@ this: the console configures **the role of this node** in a sharded
 arrangement, a Spider head or a data node, a PostgreSQL coordinator or a node
 holding partitions, and the schema stays with whoever designs the system. The
 console never pretends to design it.
+
+
+## Several replicas, and what a primary can honestly hold (2026-09-27)
+
+The maintainer asked that the operator be able to configure several replicas,
+by address, prefix or name. Read literally that would break the line this note
+drew, so it is worth writing what it actually means.
+
+A primary does not configure its replicas. In asynchronous replication the
+replica connects to the primary, and the primary keeps no list of who is
+replicating. What it does keep, and what the request is really about, is **who
+is allowed to**: a grant of replication from an origin in MariaDB, a line in
+`pg_hba.conf` for PostgreSQL, an ACL plus reachability for Redis. That is
+configuration of the machine the console runs on, so the primary screen can hold
+a list of authorizations without configuring anybody else's machine.
+
+The list takes a literal address or a prefix, and prefixes are preferred: with
+IPv6 and no NAT, authorizing the `/64` a fleet lives on is stable, where a list
+of single addresses goes stale each time a container is rebuilt.
+
+Names are accepted because they were asked for, and documented as fragile. Both
+MariaDB grants and `pg_hba` resolve a name, and `pg_hba` depends on reverse DNS,
+which fails quietly: the authorization stays in place and silently never
+matches. So `inspect` reports what the server actually holds rather than what
+the description asked for, and a name that stopped resolving appears as drift
+rather than as nothing.
+
+On the application side, several replicas are the list of read endpoints, which
+the client section already carries.
