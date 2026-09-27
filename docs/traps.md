@@ -160,6 +160,30 @@ as a separate phase that takes no lock and runs in seconds.
 
 **Hit** 2026-09-27, three passphrase moments lost.
 
+## Every appliance built from `core` has the same machine-id
+
+**Signature.** Anything derived from `/etc/machine-id` is identical on two
+machines that should differ. Measured 2026-09-27: both nodes of the two node
+gate, and both live appliances on the build host, read
+`f0e97605ab594989b4d78f4a126b5b37`, and so both nodes of a replicating pair
+took the same MariaDB `server_id`, which is the one thing that stops
+replication outright.
+
+**Cause.** The published `core` layer's rootfs carries a populated
+`/etc/machine-id`. Debian's own rule is the opposite: an image ships it empty
+and systemd writes a fresh one at the first boot, which is what makes it an
+identity. A layer that ships one hands its own identity to every machine built
+from it.
+
+**Fix.** Two, and both are wanted. The layer should ship `/etc/machine-id`
+empty, which is `buildtasks`' container patch's job and is not done yet. And
+nothing may depend on it being unique without saying so: `keel`'s `server_id`
+derives from the machine-id **and** the addresses the server answers on, so a
+pair on one /64 differs whatever the layer shipped.
+
+**Hit** 2026-09-27, in the MariaDB replication work, on the first run that
+booted two nodes from their descriptions.
+
 ## Things we did wrong and would do again unless written down
 
 - **Discarding a local commit on a guess.** A checkout on the build host had a
