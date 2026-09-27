@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 868 943" width="868" height="943" role="img" aria-label="Keel Linux">
+  <title>Keel Linux</title>
+  <desc>A keel seen head on: two swept wings meeting at a vertical mast, the waterline crossing at the wings' base, and the blade descending to a point below it. Under it, KEEL in a heavy navy face with LINUX letterspaced beneath.</desc>
+  <g transform="translate(33 0)">
+    <g fill="#0B2847">
+      <path d="M384 0C306 52.5 197 105 57 157.5C64.2 182.8 95 203.1 129 203.1H384Z"/>
+      <path d="M417 0C495 52.5 604 105 744 157.5C736.8 182.8 706 203.1 672 203.1H417Z"/>
+      <path d="M342 240H452L433.7 653C412 644 377 607 360 572Z"/>
+    </g>
+    <path d="M1 226C26 224 60 221.3 100 221H700C740 221.3 774 224 800 226C790 233 782 241 766 244.5C745 246 725 246 700 246H100C75 246 55 246 34 244.5C18 241 10 233 1 226Z" fill="#0170C5"/>
+  </g>
+  <g fill="#0B2847">
+    <path d="M0 705H39V852H0ZM144 705H206L104 775L206 852H142L39 775Z"/>
+    <path d="M415 705H278C255.9 705 238 721.1 238 741V816C238 835.9 255.9 852 278 852H415V821H280V793H393V763H280V735H415Z"/>
+    <path d="M415 705H278C255.9 705 238 721.1 238 741V816C238 835.9 255.9 852 278 852H415V821H280V793H393V763H280V735H415Z" transform="translate(224 0)"/>
+    <path d="M688 705H729V820H867V852H722C703.2 852 688 836.8 688 818Z"/>
+  </g>
+  <g fill="#636E7C">
+    <path d="M103 893H112V935H167V942H109C105.7 942 103 939.3 103 936Z"/>
+    <path d="M260 893H268V942H260Z"/>
+    <path d="M364 893H373L424 928V893H432V942H423L372 907V942H364Z"/>
+    <path d="M527 893V930C527 936.6 532.4 942 539 942H582C588.6 942 594 936.6 594 930V893H586V930C586 932.2 584.2 934 582 934H539C536.8 934 535 932.2 535 930V893Z"/>
+    <path d="M687 893H698L753 942H742ZM742 893H753L698 942H687Z"/>
+  </g>
+</svg>
