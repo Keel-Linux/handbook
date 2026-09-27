@@ -1811,3 +1811,95 @@ were, and no `.asc.new` or `.UNSIGNED` was left behind.
 What is left is the publication: `bin/keel-publish-mirror 2026-09-27` moves
 the release to the public services VM. Nothing about it needs the signing
 subkey any more.
+
+## The packages an image is built from are pinned (2026-09-27)
+
+Decision 0012, implemented and deployed. `repos/apt` commits `ad1e0ad`,
+`e3c50e8` and `ba6fa47`, all on `main` with the gate green (`tests /
+coverage`, 99.55 percent measured over 183 tests on `main` after the
+resumable release work merged on top, every file at or above 99), plus one
+line group in `keel-linux/common` `removelists-final/turnkey` (commit
+`897ad4c`, carried to the build host by bundle and **not yet pushed to
+`19.x`**, see the last paragraph).
+
+### The measurement came first, and it chose the shape
+
+Asked of the archives, not guessed: `core` 411 of its 412 packages for
+268.2 MiB, `nodejs-nginx` 824 of 826 for 369.3 MiB, `nodebb` 824 of 830,
+`mariadb` 433 of 438, and the union of all four 847 files and 388.9 MiB.
+The layers overlap almost completely, so a whole release is 389 MiB and not
+five times 300.
+
+Hence **one pool per release over one shared file store**: a `.deb` is
+named by what it holds, so two releases that install the same version share
+one copy and each release has its own index naming its subset. The first
+release pays 389 MiB, a later one pays its delta plus an index of a few
+hundred kilobytes. Per milestone was the open alternative and is not
+needed.
+
+### What runs on the build host
+
+`/srv/keel-pool`, 411 members, 272 MiB, captured in 80 seconds, `keel-pool
+verify` clean. Each file was checked twice before being stored, against the
+sha256 the archive states and against its own control fields, and the
+digest is kept in `dists/<id>/files` and in the `Packages` index, so apt
+checks it again on every use. One gap, recorded rather than fatal:
+`turnkey-core-19.0`, which fab builds inside the chroot.
+
+A build is pointed at the pool by hard linking it into the tree the build
+starts from, with a `file:` apt source and a pin at 1001; no server, no
+network, and `common/removelists-final/turnkey` takes it out of the image.
+`keel-release` captures after every build and records `packages`,
+`packages_sha256` and `pool` in the layer manifest.
+
+### The rebuild, and what it proved
+
+`keel-selfcheck --reseed`, 05:10 to 05:17 UTC, 404 seconds: 307 packages
+fetched from `file:/keel-pool` and none over http, tarball
+`ad7c07b7...` (326,435,084 bytes) against the `71ea76df...` recorded
+before it, and a package list of 412 whose digest `4918887d...` is
+character for character the one read from the build the pool was captured
+from. The versions are held; the tarball difference is not packages.
+
+The self check now measures both dimensions and needs both green for a
+`match`. Nothing was relaxed: either drift is still drift and still exits
+1.
+
+**The two-morning proof is pending and first confirmable on 2026-09-29**,
+the timer running at 03:40 UTC on 2026-09-28 and 2026-09-29. The tarball
+dimension cannot go green from pinning alone, and 0012 now carries the
+evidence and the amendment that follows from it: two builds 90 minutes
+apart installed the identical 412 packages and still packed different
+tarballs.
+
+### Two things found on the way, both worth more than they cost
+
+`keel-release` run over ssh built against the **upstream** `common` and
+bootstrap, because an ssh session on the build host carries
+`FAB_PATH=/turnkey/fab` and the tooling fell back to it. The daily timer,
+started by systemd with a clean environment, built against
+`/turnkey/fab-keel`. Two builds of the same layer differed for a reason
+nothing recorded, which is exactly what the self check exists to catch and
+could not: `/mnt/builds/layers/core.manifest` records `common_commit
+b60dd230`, which is not the project common. Fixed in `ba6fa47`; anything
+built over ssh before 2026-09-27 05:10 UTC was built against the upstream
+tree.
+
+And a release that lost the race for the build lock exited immediately,
+which wastes a signing passphrase the maintainer had just typed, since the
+gpg agent forgets it ten minutes later. A bounded wait now stands there
+(`KEEL_BUILD_WAIT`, 600 seconds); the daily check still skips instead of
+waiting, because nobody is waiting for it.
+
+### What is deliberately not done
+
+`/srv/keel-pool/current` is **not** set. The check is pinned by a systemd
+drop-in instead, so the attended, passphrase-gated release path is
+unchanged until the maintainer points it at the pool himself with
+`keel-pool current 2026-09-27`.
+
+The `common` commit is on the build host and in a local branch only: every
+`git push` from this workstation was refused by the permission layer, so
+`897ad4c` still has to be pushed to `keel-linux/common` `19.x`. Until it
+is, a build on another machine would pack the pool into its image, which
+the 606 MB tarball of the first attempt tonight measures exactly.

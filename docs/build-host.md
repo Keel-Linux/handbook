@@ -238,6 +238,13 @@ compares the tarball digest with the one recorded in
 which the mirror serves and `keel-publish-mirror` carries to
 `https://mirror.keellinux.org/selfcheck/` with each publication.
 
+Since 2026-09-27 it measures two things and needs both to be green for a
+`match`: the digest of the tarball, and the digest of the package list of
+the rebuilt layer, which is what the pinning of decision 0012 holds. The
+reference file gained a fourth field for the second digest, `STATUS` gained
+`packages=<status>` and `reproducibility.json` gained `packages`,
+`expected_packages_sha256`, `actual_packages_sha256` and `pool`.
+
 It takes the same lock `keel-release` takes and also looks for a build
 started by hand (`bt-layer`, `fab-chroot`, `mksquashfs`, `debootstrap`);
 when either says a build is going it skips, says why and records
@@ -255,6 +262,51 @@ because package versions are not pinned and install-time state is written
 into the image. The check does not fix that; it measures it every day and
 says so in one line, so the day the package freeze lands the number becomes
 `match` and any later regression is visible the next morning.
+
+## The captured package pool
+
+`/srv/keel-pool` holds the `.deb` files a release was built from (decision
+0012), captured by `/srv/keel-apt/apt/bin/keel-pool` and not in git. One
+shared file store, `pool/main/<prefix>/<name>/`, and one index per pool id
+under `dists/<id>/`, whose `files` names every member with its sha256.
+`current` names the pool a build is pointed at; `/etc/keel-apt.conf` can
+override it with `KEEL_POOL_ID`.
+
+```
+keel-pool current 2026-09-27
+keel-pool capture core --rootfs /srv/keel-selfcheck/builds/layers/core.rootfs
+keel-pool verify
+```
+
+`keel-release` and `keel-selfcheck` point a build at it by hard linking the
+pool into the tree the build starts from, `/turnkey/fab-keel/bootstraps/
+trixie-amd64` for `core` and `<parent>.rootfs` for a child layer, with
+`/etc/apt/sources.list.d/keel-pool.sources` reading it over a `file:` URI
+and `/etc/apt/preferences.d/keel-pool` pinning it at 1001. They take the
+three paths back out of the build tree afterwards, and
+`common/removelists-final/turnkey` takes them out of the image. Hard links,
+so pointing a build costs no disk: `/srv` and `/turnkey` are the same
+filesystem here, and `keel-pool point` copies instead and says so when they
+are not.
+
+Measured on 2026-09-27: 411 of the 412 packages of `core` are 272 MiB on
+disk, captured in 80 seconds. The one that cannot be captured is
+`turnkey-core-19.0`, which fab builds inside the chroot; it is recorded in
+`dists/<id>/gaps`.
+
+## The build environment is not the operator's environment (2026-09-27)
+
+An ssh session to this host carries `FAB_PATH=/turnkey/fab` in its
+environment. The release tooling used to fall back to it, so
+`keel-release` run over ssh built against the **upstream** `common` and the
+upstream bootstrap, while the daily timer, which systemd starts with a
+clean environment, built against `/turnkey/fab-keel`. Two builds of the
+same layer then differ for a reason nothing records: the layer in
+`/mnt/builds` records `common_commit b60dd230`, which is not the project
+common. Fixed in the tooling (`KEEL_FAB_PATH` and its four siblings no
+longer read the build variables); a machine that needs another path says so
+in `/etc/keel-apt.conf`. Anything built over ssh before that date was built
+against the upstream tree.
 
 Rebuilding this machine from a fresh Debian 13, and what on it is not in
 git: docs/infra-recovery.md.
