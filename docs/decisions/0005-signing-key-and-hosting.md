@@ -136,7 +136,7 @@ Ed25519, fingerprint 694DE5E8C17BF1F9B73EAE2BD276B62C2BD16F4E, expires
 2028-09-25. Public key saved at docs/keys/keel-archive-keyring.asc, verified
 against the fingerprint.
 
-Custody note, pending action and under review: the passphrase-protected
+Custody note, acted on 2026-09-27 (see "Rotated" below): the passphrase-protected
 secret of the signing subkey 694DE5E8 was transmitted through the chat
 channel instead of scp, so that copy is treated as exposed. It was not imported anywhere. Agreed course:
 revoke subkey 694DE5E8 with the offline primary, issue a new signing subkey,
@@ -145,7 +145,46 @@ host. Until then, nothing is signed and the public key is not published, so a
 single publication carries the definitive subkey. The primary key was never
 exposed and stays valid.
 
-### The rotation is questioned (2026-09-27)
+### Rotated (2026-09-27)
+
+Done, and the question below is closed by it. The maintainer revoked subkey
+694DE5E8 with the offline primary, reason compromised, and issued a new
+signing subkey. Measured afterwards, not assumed:
+
+| Key | Fingerprint | State |
+| --- | --- | --- |
+| Primary, certify only | AD0964BE3F09DED469A3B6B2148E951314703180 | unchanged, never left offline custody, `sec#` on the build host |
+| Old signing subkey | 694DE5E8C17BF1F9B73EAE2BD276B62C2BD16F4E | revoked 2026-09-27, kept for verification, never signed anything |
+| New signing subkey | 03041024F4B2C0C2F42DDDEA04906EAB77513310 | Ed25519, expires 2028-09-26, secret on the build host only |
+
+The procedure is `docs/keys/keel-rotate-subkey.sh`, rehearsed on a throwaway
+key of the same shape before being used on the real one. The secret travelled
+by scp and was destroyed with `shred` after the import; it did not pass
+through a chat channel, which is what was being undone.
+
+`trixie` is published and signed for the first time. It verifies against the
+published keyring with gpg (`VALIDSIG 03041024...`) and with sqv, which is
+what the Proxmox index check and our own tooling use. `bin/publish` refused
+the first attempt because the keyring file still lacked the new subkey, which
+is the check earning its place: a signature clients cannot verify is worse
+than none.
+
+The public key is updated in the handbook, the archive repository and the
+`keel-archive-keyring` package (0.1.1). The `common` fork's `keys/` directory
+still holds only TurnKey's keys.
+
+Operational consequence, unresolved: the subkey is passphrase protected and
+the gpg agent caches the passphrase for ten minutes after the maintainer
+types it at a terminal, so a publication that signs more than ten minutes
+later fails with `Inappropriate ioctl for device`. Three ways out, the choice
+being the maintainer's: prime the agent immediately before each signed
+publication; raise the agent's cache lifetime, which leaves the passphrase in
+memory until reboot and lets anything running as root on that host sign; or
+strip the passphrase from the copy on the build host, which makes publication
+fully unattended and puts an unprotected key into every snapshot of that
+machine.
+
+### The rotation was questioned (2026-09-27, superseded by the section above)
 
 The maintainer does not agree that the subkey needs rotating and asked for the
 reasoning to be checked against the session that provisioned the hosts. This
