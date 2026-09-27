@@ -2372,3 +2372,203 @@ The three containers were removed afterwards.
 - `secrets.db_password` is still triggered by `/etc/mysql` or `/etc/postgresql`
   existing, while the database probe uses the server binary, which is the
   sharper test. Worth reconciling, and deliberately not done inside this issue.
+
+## A WordPress appliance that installs itself, published (2026-09-27)
+
+`wordpress` is on the mirror, on the `mariadb` layer, and a container booted
+from it is serving. Issue [keel-wordpress#1][wpi1], pull requests
+[keel-wordpress#2][wppr] and [apt#10][aptpr].
+
+[wpi1]: https://github.com/Keel-Linux/keel-wordpress/issues/1
+[wppr]: https://github.com/Keel-Linux/keel-wordpress/pull/2
+[aptpr]: https://github.com/Keel-Linux/apt/pull/10
+
+### The layer
+
+| | |
+| --- | --- |
+| size | 101,184,601 bytes |
+| sha256 | `c9e33fa1ee5216e96b5c789aeaf9162812300ddb633493bf4b8e95fdc78bd7a0` |
+| parent | `mariadb` `0adca434`, itself on `core` `7acf2c53` |
+| product commit | `b4e0a0c` |
+| common commit | `897ad4c` |
+| `units` | `none` |
+| audited | `/root/audit-layers.sh`: every package installed, no build time `systemctl` or `service` shim, inithooks 2.3.6+keel4, confconsole 2.2.3+keel2, keel 0.2.1 |
+
+Published with `bin/keel-publish-mirror 2026-09-27`; `keel verify` reports
+`6 checked, 6 ok`. Verified from a workstation over IPv6: the manifest, the
+`.sha256` and a `content-length` of 101,184,601 on
+`https://mirror.keellinux.org/layers/wordpress.tar.zst`.
+
+**The parent is `mariadb` on purpose and it will move.** `apache-php` is being
+extracted by other work; when it lands this appliance is rebuilt on it, which
+is a new digest and nothing else, because layers are content addressed. The
+README says so and so does `.github/workflows/tests.yml`, which are the two
+places that name the parent.
+
+### What the recipe changed
+
+The repository was the untouched upstream fork. Its `conf.d/main` installs
+WordPress while the image is being built, with `DB_PASS=turnkey` and
+`ADMIN_PASS=turnkey` written into the recipe, so every machine built on the
+layer has those two passwords in a file anyone can read. The layer now carries
+no credential at all: no `wp-config.php`, and a database account created with
+a hash no input produces, which is how the parent layer publishes its own
+administrative account.
+
+`firstboot.d/40wordpress` completes the installation from
+`/etc/keel/instance.yaml`: the site title from `app.options.site_title`, the
+administrator from `app.options.admin_user` and `secrets.app_password`, and
+the database password from `secrets.db_password`, which the parent layer's
+`35mysqlpass` has already given to the `wordpress` account named in
+`app.options.db_user`. One declaration serves both layers, which is what that
+field was put there for.
+
+Neither password is ever an argument of another process: `wp-config.php` is
+written by a shell function and the administrator's password is set through
+the environment of a `wp eval-file`. The hook then asks the site to
+authenticate that account, and to refuse a wrong password, before it lets
+Apache serve anything.
+
+`wp-config.php` derives `WP_HOME` and `WP_SITEURL` from the `Host` header of
+each request instead of reading them from the database. An appliance does not
+know its address when its layer is built, and a WordPress whose recorded site
+URL is not the one it is reached by answers a permanent redirect to the
+recorded one: a machine reached by its IPv6 literal would send the visitor to a
+name that does not resolve. The salts are generated on the machine, because a
+first boot must not need the internet.
+
+`turnkey/lamp` is not included. It brings Adminer, and Adminer brings a second
+first boot hook at 35 reading the same `DB_PASS` for an account this appliance
+does not use; the database is administered through `webmin-mysql` in the panel
+Core already carries.
+
+### What the boot test proves, and the one thing it does not
+
+Against the published chain, on the build host and on the CI runner, every
+first boot hook from `01ipconfig` to `98finalize` completes:
+
+```
+boot-test: port 443 answered 200, title 'Keel WordPress boot test'
+boot-test: port 80 answered 200, title 'Keel WordPress boot test'
+boot-test: the installer is not offered and the page is a WordPress site
+boot-test: wp-config.php names 'wordpress' as 'wordpress' on the local database
+boot-test: wp-config.php carries the declared secrets.db_password
+boot-test: the database answered: wordpress@localhost	1	1
+boot-test: the wordpress database, the wp_users table and the wordpress account all exist
+boot-test: the login was accepted and set a wordpress_logged_in_ cookie
+boot-test: /wp-admin/ answered 200 with the dashboard for the logged in admin
+boot-test: a wrong password was refused
+boot-test: https://archive.keellinux.org trixie is enabled and verified with /usr/share/keyrings/keel-archive-keyring.gpg
+boot-test: apt-get update read https://archive.keellinux.org trixie and verified its signature
+diff: 6 same, 0 drift, 1 unknown, 5 not declared, 4 not compared
+```
+
+The login is a POST with a cookie jar and the verdict is the
+`wordpress_logged_in_` cookie, then `/wp-admin/` with that cookie, then the
+same POST with a wrong password required to be refused. Fetching the login page
+proves nothing, and a check that only ever tries the right password cannot tell
+a working login from a site that lets anybody in.
+
+The one `unknown` is `network.interfaces.eth0.ipv6.method`, the documented
+offline limitation the other appliances record; exit 13, no drift.
+
+### The update half, and the defect it found
+
+`apt-get update` against our signed archive works with signature verification,
+and that is proved on the booted machine. `apt-get upgrade` installing a newer
+project package is **not** proved, and the reason is worth more than the proof
+would have been.
+
+`keel-archive-keyring 0.1.0`, which the archive still offers and which every
+published layer carried until tonight, ships **only the revoked signing
+subkey** `694DE5E8`. Against the live archive:
+
+```
+# gpgv --keyring .../keel-archive-keyring.gpg InRelease
+gpgv: using EDDSA key 03041024F4B2C0C2F42DDDEA04906EAB77513310
+gpgv: Can't check signature: No public key
+```
+
+So the package whose whole job is to let a machine verify the archive could
+not. `keel-transition 0.1.1` fixes it and had been merged on `main` since
+01:39 and never built. It was built, published to `trixie-staging`, and the
+layer rebuilt on it; the appliance now carries `0.1.1` and verifies.
+
+That leaves the image one release ahead of the archive, and
+`/etc/apt/preferences.d/keel` pins `o=Keel Linux` at **1001**, the priority
+that downgrades. Measured in the running appliance:
+
+```
+Installed: 0.1.1
+Candidate: 0.1.0
+The following packages will be DOWNGRADED:
+  keel-archive-keyring
+```
+
+An `apt-get upgrade` today would put the revoked keyring back and the appliance
+would stop being able to verify the archive. The boot test refuses to call that
+green, which is the system working: **a layer must not ship a project package
+the signed archive has not got.**
+
+### What is waiting, and what it needs
+
+Two packages are built and sitting in `/srv/keel-apt/incoming` on the build
+host. Both are merged work that has never reached a machine, which is the trap
+docs/traps.md records:
+
+- `keel-archive-keyring 0.1.1` (from `keel-transition 0.1.1`), the rotated key
+  above. Publishing it to `trixie` closes the downgrade hazard.
+- `inithooks 2.3.6+keel5`, merged at 03:23 this morning: the fix for "a log
+  line must never be able to kill the job", the `InitLogError` that killed
+  `00declarative` on a boot where both candidate description paths exist. The
+  archive still offers `+keel4`. Publishing it also gives the upgrade proof
+  something real to upgrade.
+
+`bin/publish` on the build host is the step, and it was refused to this session
+as a production change to a shared resource. Nothing else is outstanding:
+`bin/publish --unsigned-staging` ran, the layer was built, signed and
+published, and the mirror verifies.
+
+### Measured
+
+159 bats tests, **98.92 percent (458/463)** over six shell files, gate
+threshold 97, the lowest measured file. `tests / coverage` passes;
+`package / changelog` was missing from this repository and was added;
+`appliance / build-and-boot` is red on the upgrade verdict alone and every
+other line of it is green.
+
+Eight of the hook's lines were uncovered because it carried two PHP programs
+quoted inside it, and a quoted PHP program is not shell: nothing lints it and
+no coverage tool can say whether it ran. They are files now
+(`lib/wordpress-set-password.php`, `lib/wordpress-verify-login.php`, called
+with `wp eval-file`), which also lets `conf.d/main`'s `php -l` reach them. The
+hook went from 83.33 to 97.73 percent and the one line left is the process
+substitution of the dialog branch, the same line keel-mariadb records.
+
+### The container left running
+
+`wordpress-demo` on the build host, macvlan on `eth0`, address
+`2804:710:d0:5:3a19:a54a:de1a:7507`, autostart on. Booted from the published
+layer, first boot complete, no failed hook. `http://[addr]/` and
+`https://[addr]/` both answer 200 with the title `Keel Linux WordPress`, the
+installer is not offered, and a real login from inside the container gets a
+session cookie and a 200 dashboard. The three secrets are
+`/etc/keel/secrets/{root,db,app}_password` inside it, mode 0600.
+
+`keel diff --spec /etc/keel/instance.yaml` on the machine is its own view of
+itself.
+
+### Notes for whoever picks this up
+
+- The `keel` layer cache keeps every version it has seen and `keel assemble`
+  refuses when two match a name (`several versions in cache, pass --sha256`).
+  Rebuilding the same layer twice in a night hits it; the superseded copies
+  are in `/root/wp-cache-superseded` on the build host.
+- The build ran with `FAB_PATH=/turnkey/fab-keel`, which `keel-release` now
+  pins, so this layer records `common_commit 897ad4c` while `core` and
+  `mariadb` record `b60dd230`. That is the state STATUS already describes and
+  not something this work changed.
+- `/root/wp-rebuild-backup` and `/root/wp-rebuild-backup2` hold the two
+  superseded layer builds of tonight and can go once the published one has
+  been exercised.
