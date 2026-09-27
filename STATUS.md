@@ -1281,3 +1281,51 @@ keel 0.2.1. The `conf.d` pattern that installs them is keel-nodebb's, not a
 second version of it; the archive freshness check itself stays in
 keel-nodebb's `conf.d/zz-project-packages`, and these two carry the minimum
 that publishing them requires.
+
+## Where this stops, and the one step that needs the maintainer (2026-09-27)
+
+The chain is rebuilt with the cipher fix and audited, and it is staged on the
+build host, but it is **not published**, because the release cannot sign:
+
+    INFO [bt-aplinfo]: signing /srv/keel-release/2026-09-27/pve/aplinfo.dat
+      with 03041024F4B2C0C2F42DDDEA04906EAB77513310
+    gpg: signing failed: Inappropriate ioctl for device
+    FATAL [bt-aplinfo]: cannot sign .../pve/aplinfo.dat
+    keel-release: bt-aplinfo failed
+
+That is the ten minute passphrase cache, not the key. The build takes about
+twenty five minutes and the signing step is the last thing it does, so a run
+started right after the passphrase is typed will always arrive too late. It
+was not worked around, and no passphrase went near a command line.
+
+What is on the build host right now:
+
+| | |
+| --- | --- |
+| `/mnt/builds/layers` | core `7acf2c53`, nodejs-nginx `f57917cb`, nodebb `6d2d622f`, each with its manifest and sha256 |
+| audit | `/root/audit-layers.sh` exits 0; nodebb carries inithooks 2.3.6+keel4, confconsole 2.2.3+keel2, keel 0.2.1 |
+| cipher list | real, no `ZZ_SSL_CIPHERS` left in `etc/nginx/snippets/ssl.conf` |
+| `/srv/keel-release/2026-09-27` | layers, the Proxmox template and an unsigned `aplinfo.dat`; **no MANIFEST**, so `keel-publish-mirror` refuses with exit 3 |
+| the mirror | still the first rebuild of tonight: right package versions, broken cipher list |
+
+To finish, with the passphrase typed immediately before:
+
+    cd /srv/keel-apt/apt && bin/keel-release --force nodebb
+
+without `--rebuild`. The three layers match their manifests, so
+`release_layer_current` skips every build and the run reaches the signing step
+in a few minutes rather than twenty five. Then, from a workstation:
+
+    cd repos/apt && TMPDIR=/run/user/$(id -u) bin/keel-publish-mirror 2026-09-27
+
+`--unsigned-staging` is no longer needed and would be a no-op: with the
+release signed and `dists/trixie` signed, the APT tree goes to the root of
+`/srv/archive`. `TMPDIR` matters: the ControlMaster socket path has to be
+short or ssh fails before any transfer with `unix_listener: path ... too long
+for Unix domain socket`.
+
+After that, re-run `appliance / build-and-boot` on keel-nodebb `main`. Both
+defects it found are fixed: the cipher list in buildtasks 1dfc12d, and the
+container apparmor profile in keel-nodebb pull request 8 (merge 6693fbd),
+which gives the boot test container `lxc.apparmor.profile = generated` and
+`lxc.apparmor.allow_nesting = 1` so `redis-server.service` can start.
