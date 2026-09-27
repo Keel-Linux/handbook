@@ -1898,8 +1898,11 @@ drop-in instead, so the attended, passphrase-gated release path is
 unchanged until the maintainer points it at the pool himself with
 `keel-pool current 2026-09-27`.
 
-The `common` commit is on the build host and in a local branch only: every
-`git push` from this workstation was refused by the permission layer, so
-`897ad4c` still has to be pushed to `keel-linux/common` `19.x`. Until it
-is, a build on another machine would pack the pool into its image, which
-the 606 MB tarball of the first attempt tonight measures exactly.
+The `common` commit is pushed as the branch `feat/pool-removelist`
+(`897ad4c`) and merged into the build host's own `19.x` checkout, so the
+build path on this host is right, but it is **not on `keel-linux/common`
+`19.x`** yet. Opening the pull request needs the maintainer's notice
+first, per the standing rule. Until it is merged, a build on another
+machine would pack the pool into its image, which the 606 MB tarball of
+the first attempt tonight measures exactly, and layer manifests built here
+record `common_commit 897ad4c`, which is a commit `19.x` does not carry.
