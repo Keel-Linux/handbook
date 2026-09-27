@@ -1590,3 +1590,123 @@ step that materialises `unit.d/` from a recipe's declared components, the
 first component repository, and the package pinning of decision 0012, which
 is what would take the parent's 173 file noise down and make the parent
 comparison as sharp as the child's already is.
+
+## The two database layers are built and audited (2026-09-27)
+
+`keel-mariadb` and `keel-postgresql` were merged tonight and nothing had been
+built from either. Both layers exist now, both pass the audit, and neither is
+published: publication signs, and the signing subkey's passphrase cache had
+expired by the time the layers were ready.
+
+### The product directories
+
+`bt-layer` reads the product's git HEAD twice: for `product_commit`, and
+through `layer_epoch` for the `SOURCE_DATE_EPOCH` that stamps every tarball
+entry. A recipe without git history is refused outright, which is the lesson
+that cost a release earlier tonight. So both products are checkouts, the way
+`nodebb` and `nodejs-nginx` are:
+
+| Directory | At | Epoch |
+| --- | --- | --- |
+| `/turnkey/fab-keel/products/mariadb` | `f8eebf6`, merge of pull request 3 | 1790476250 |
+| `/turnkey/fab-keel/products/postgresql` | `af5ea60`, merge of pull request 2 | 1790474064 |
+
+`mariadb` was already there at `ac3c3cd`, left by the unit experiment, and was
+fast forwarded; nothing local had to be discarded, the tree was clean and the
+only untracked path was `build/`. `postgresql` was cloned. `build/` is in
+`.git/info/exclude` in both, so the deck a build leaves behind is not an
+untracked file the next reader has to weigh.
+
+### Why core was not rebuilt
+
+`keel-release --rebuild` rebuilds every layer of the chain, and the chain of
+each of these recipes is `core` and then the layer. Rebuilding core was not
+wanted, for three reasons. The stale `mariadb` tarball was invalidated instead
+(its manifest moved to `/root/stale-mariadb-ac3c3cd.manifest`, which is what
+`release_layer_current` reads), and both builds ran as `bin/keel-release
+--force <layer>`, each reporting `core: tarball matches its manifest, not
+rebuilt`.
+
+- Nothing yet shows that core rebuilds to the same digest. `SOURCE_DATE_EPOCH`
+  is the product's commit date and core's has not moved, but the
+  reproducibility check only seeded its first reference this morning, and at a
+  different epoch. A core with a new digest orphans the published
+  `nodejs-nginx` and `nodebb`, whose manifests name the old one as parent.
+- `core.rootfs` is the lower directory of the mounted decks of
+  `nodejs-nginx`, `nodebb` and `mariadb`. `bt-layer` rewrites it with
+  `rsync --delete`, and changing the lower layer of a mounted overlay is
+  undefined.
+- These two layers have to sit on the core the mirror serves, `7acf2c53`, and
+  both manifests record exactly that as `parent_sha256`.
+
+Both builds used `FAB_PATH=/turnkey/fab`, which is what the host's environment
+exports and therefore what `keel-release` resolved, so `common_commit` is
+`b60dd23`, the same common every published layer was built against.
+`/turnkey/fab-keel/common` is a different tree and was being committed to
+while these builds ran, so it would have been the wrong choice twice over.
+docs/build-host.md line 29 still tells a reader to export
+`FAB_PATH=/turnkey/fab-keel`, which no layer on the mirror was built with;
+that line and the host disagree and one of them should move.
+
+### The two layers
+
+| | mariadb | postgresql |
+| --- | --- | --- |
+| size | 65,443,671 | 104,170,947 |
+| sha256 | `0adca4341e2f9cef784ed8060f6ef243af6984fb37ef7b29f33838e463e89b0a` | `e67f883bc80f4ac4d007f98580dee1e5dd15976efae92a8da73f37dc62745735` |
+| parent | core `7acf2c53` | core `7acf2c53` |
+| product commit | `f8eebf6` | `af5ea60` |
+| root.patched | 62 s | 76 s |
+| packed | 22 s | 31 s |
+| database | mariadb-server 1:11.8.6-0+deb13u1 | postgresql-17 17.11-0+deb13u1 |
+| webmin module | webmin-mysql 2.660.turnkey0 | webmin-postgresql 2.660.turnkey0 |
+
+`keel verify` read each staged chain and answered `2 checked, 2 ok, 0
+unverified, 0 mismatch, 0 invalid`.
+
+### The audit
+
+`/root/audit-layers.sh /mnt/builds/layers mariadb postgresql` exits 0. Every
+package in each rootfs is `install ok installed`, neither carries a build time
+`systemctl` or `service` shim under `/usr/local/bin`, and both carry
+inithooks 2.3.6+keel4, confconsole 2.2.3+keel2 and keel 0.2.1, the floors
+`conf.d/main` asserts at build time. Nothing was refused, so nothing had to be
+explained away.
+
+Checked beside the audit, because these are the two properties the recipes
+exist for: `mariadb` ships `firstboot.d/35mysqlpass` and the bind file that
+holds the server to `::1` and `127.0.0.1`; `postgresql` ships
+`firstboot.d/36pgsqlverify` next to common's `35pgsqlpass` and keeps Debian's
+commented `listen_addresses = 'localhost'`, so neither of upstream's two
+remote access changes is present. In both rootfs trees the build time package
+source is gone: no `/srv/keel-apt`, no `keel-staging.list`, and
+`keel.sources` disabled.
+
+### What is left, and what the maintainer walks into
+
+Both runs ended at the same line, which is the step that needs a person:
+
+    gpg: signing failed: Inappropriate ioctl for device
+    FATAL [bt-aplinfo]: cannot sign .../pve/aplinfo.dat
+
+That is the expired passphrase cache and not a broken key, so no workaround
+was attempted and `keel-release` exited 8 without writing a MANIFEST. Two
+consequences for whoever runs the publication:
+
+- `--force` wipes the dated staging directory, so the signed metadata of this
+  morning's nodebb release was copied first to
+  `/srv/keel-release/archive/2026-09-27-nodebb/`: `MANIFEST`, `MANIFEST.asc`,
+  the template's `.sha512` and `.asc`, and `pve/`. Those signatures cannot be
+  remade without the passphrase. `/srv/keel-release/2026-09-27/` now holds
+  only the postgresql chain and no MANIFEST.
+- `core.manifest` in `/mnt/builds/layers` gained `packages`,
+  `packages_sha256` and `pool` at 04:58, and a `core.packages` file is staged
+  beside it. That is the pinning work in flight, not these builds, but it
+  means the core manifest on the host no longer matches the one the mirror
+  serves, and the publication has to decide which it publishes.
+
+The layers themselves are ready: `<name>.manifest`, `<name>.tar.zst` and
+`<name>.tar.zst.sha256` are in `/mnt/builds/layers` for both, on the core the
+mirror already serves. Publishing them turns `appliance / build-and-boot` in
+each repository from a skip into a real run, which is the first time either
+boot test proves a declared `secrets.db_password` reaching a database.
