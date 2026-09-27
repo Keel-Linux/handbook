@@ -1,6 +1,6 @@
 # 0010: Composable component repositories instead of one shared tree
 
-Status: **proposed**, 2026-09-27. Raised by the maintainer: can the appliance
+Status: **accepted with a prerequisite**, 2026-09-27, by the maintainer after the experiment below. Nothing migrates until `bt-layer` records units in the layer manifest. Raised by the maintainer: can the appliance
 work be split into small atomic repositories rather than following TurnKey's
 monolithic arrangement? This note records the answer, the cost and the step
 that would prove it. Nothing is migrated until the maintainer says so.
@@ -287,3 +287,33 @@ cost the proposal was written to remove, and it is unchanged. Nothing about
 today's result makes it worse, and the experiment is repeatable at any time
 against any component, because the scratch unit is a directory and not a
 repository.
+
+
+## Direction taken (2026-09-27)
+
+The maintainer accepted the split and corrected the timing argument, which was
+wrong in the recommendation above. The second consumer of a component is not
+some future appliance: the four initial applications are MySQL, PostgreSQL,
+LAMP and LAPP, and LAMP consumes the mariadb component while LAPP consumes the
+postgresql one. Sharpening the axe now costs less than refactoring four
+recipes later.
+
+The order of work, which the experiment dictates:
+
+1. **The manifest first.** A unit vanishes from the layer manifest today, so a
+   child layer cannot subtract the component and re-runs its conf script. That
+   is a failure on the second layer, which is exactly the LAMP case, so it is
+   the first thing to fix, not the last.
+2. **Then the missing slots:** a removelist per unit, a way for a unit to
+   contribute `CONF_VARS`, and a defined position in the order, before the
+   common removelists.
+3. **Package pinning belongs to this work, not after it.** The acceptance
+   criterion here is equivalence between two builds, and equivalence is
+   currently measured through noise: two control builds of the same recipe
+   already differ in 173 files. With package versions pinned that noise falls
+   and equivalence becomes a proof rather than an estimate. Pinning is the
+   instrument this decision is measured with.
+
+The proof that the axe cuts is LAMP: built as core plus components, equivalent
+to a monolithic LAMP build, with the child layer subtracting the database
+component correctly.
