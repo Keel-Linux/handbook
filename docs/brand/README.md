@@ -83,6 +83,18 @@ by 80 screen, with the full mark and a real service list:
 An IPv6 address line is 72 characters, which is why 38 columns is the ceiling
 for the mark and why it is centred rather than left aligned.
 
+Two things measured on a real appliance, 2026-09-27, that the numbers above
+have to survive. The dialog draws a frame and padding, so the usable width is
+four columns less than the screen: at 80 columns the mark has 76, and 38 is
+comfortably inside it. And the longest service line, the admin URL, already
+wraps at that width, which is a defect of the service list rather than of the
+mark, recorded so that whoever shortens it does not blame the drawing.
+
+At 80 by 24 today, with the current oversized art, the mark is dropped
+entirely and the list still scrolls at 95 percent. That is the rule working
+and the art not fitting: the operator sees no mark at the size that matters
+most.
+
 The rule the code keeps, and its tests hold: the addresses never scroll away.
 As the screen shrinks the full mark gives way to the small one, and the small
 one gives way to nothing, before a single line of text is lost. The code reads
