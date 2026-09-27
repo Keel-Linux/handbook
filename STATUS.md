@@ -2094,3 +2094,144 @@ gate on that file, which that repository has.
 following 0010's own rule that components move one at a time as we touch
 them and never as a migration. Doing it now would mean touching four
 repositories to change nothing observable.
+
+## The gate boots two nodes, and replication is proved in it (2026-09-27)
+
+Tracker issue 4, which decision 0013 made the permission slip for everything
+in phase 3: if replication cannot be tested in the gate then the replication
+work should not be built, because an untested replication feature in an
+appliance people trust with data is worse than no feature. It can be tested
+now.
+
+`Keel-Linux/.github` pull request 9 and keel-mariadb pull request 7. The gate
+run is 36313809854 of keel-mariadb: **1m17s for the job**, two containers from
+the published `mariadb` layer, and the row written on one read back from the
+other.
+
+### The interface, and why it is that one
+
+One input on `test-appliance.yml`, `roles`, a space separated list of role
+names, one per node. The node count is the number of names, so `galera galera
+galera` is three when phase 4 comes and nothing in the workflow, the library
+or the boot test assumes two; repeats are allowed because Galera nodes share a
+role, and five is the ceiling, since the runner is shared and a longer list is
+a typo rather than a topology. Empty, the default, is one container: every new
+step is conditional on the input, so keel-core, keel-nodebb and
+keel-postgresql are called with the arguments they were called with before.
+
+Three things had to be decided and all three keep the shape a single node boot
+test already had.
+
+- **How a repository declares it.** In the caller's own short workflow, beside
+  `appliance` and `parent`. The same kind of line an appliance author already
+  writes there. The alternative, asking the boot test at run time, was
+  rejected: the count is wanted before anything is assembled, for the job
+  summary and for the name the teardown reports.
+- **How a node learns which one it is.** `/etc/keel/node.env` in its own
+  rootfs, with `KEEL_NODE_NAME`, `KEEL_NODE_ROLE`, `KEEL_NODE_INDEX` and
+  `KEEL_NODE_COUNT`, and `/etc/keel/peers.env` once every node has an address,
+  with `KEEL_NODE_<i>_ADDR` for all of them and `KEEL_PEER_<ROLE>` only for a
+  role exactly one node holds, because three Galera nodes share a role and one
+  variable could not name them. A file in its own filesystem, which is how
+  every other appliance setting arrives, rather than a hostname, an address or
+  the order the containers were started in. This is the seam: when the
+  instance description carries the role, these two files stop being written by
+  hand and the appliance reads its own spec instead.
+- **How the test addresses another node.** By literal IPv6 address, never by a
+  name, for the reason docs/traps.md already records: on Debian `localhost`
+  resolves to 127.0.0.1 alone. `btn_role_node` names the container holding a
+  role and refuses when two do, `btn_tcp_probe_argv` builds the bash
+  `/dev/tcp` connect one container runs against another, and the appliance's
+  own `bt_wait_for` turns it into a wait with a deadline.
+
+### Where the shared logic went, which the handbook had already decided
+
+`lib/boot-test-nodes.sh` of `keel-linux/.github`, with `tests/coverage.sh`
+there now measuring `lib/` beside `bin/`: **164 of 164 lines, 100 percent**,
+39 new bats tests. That is the answer this file wrote down earlier under
+"Should the boot test library become a component?", applied to new code rather
+than as a migration: nothing was moved out of the four appliance repositories,
+so no repository was touched to change nothing observable, and the new logic
+did not become a fifth copy. keel-mariadb's own library stays at **248 of 248
+lines, 100 percent**, with 24 new tests.
+
+### What the run did
+
+| | |
+| --- | --- |
+| declared | `roles: primary replica`, containers `...-1` and `...-2` |
+| layer | `mariadb` sha256 `0adca434` on `core` `7acf2c53`, `keel verify` exit 9 |
+| assemble | 16s and 14s, one rootfs per node, one layer cache for the run |
+| addresses | both from `lxcbr0` 6s after start |
+| first boot | finished on both 16s after start |
+| per node | declared password authenticated on `[::1]:3306`, `webmin-mysql` installed, Webmin 200, `keel diff` 6 same 0 drift |
+| reachability | each node's 3306 answered from the other over IPv6, 4s after the restarts |
+| replication | `'repl'@'fc42:5009:ba4b:5ab0:%'`, `Slave_running ON` |
+| the proof | a value generated for the run, written on the primary, read from the replica by `admin` from the primary container: the same value |
+| teardown | both containers and the scratch tree gone, 0 container monitors left |
+
+The gate now boots two real appliances rather than one: every check the single
+node test made runs on each node.
+
+### What is hand configuration, and what it is not
+
+The phase is deliberately hand configuration. It is the gate showing that a
+replication feature can be seen here, not the feature. The table in
+keel-mariadb's `tests/README.md` puts each piece next to the console screen of
+0013 that will own it: the role file against the instance description of phase
+2; the MariaDB drop-in, `server_id`, the bind address gaining this node's own
+literal global address and `log_bin` on the primary alone, against the Primary
+and Replica screens; the replication account against the Primary screen; and
+`CHANGE MASTER TO ... MASTER_USE_GTID=slave_pos` against the Replica screen.
+Two details are worth keeping:
+
+- Accounts are authorised for the peer's **/64**, not its single address,
+  which is what 0013 already recorded about credentials between nodes: with
+  IPv6 and no NAT a prefix is stable while a list of addresses goes stale on
+  every rebuild.
+- `skip_name_resolve` is on, so the server matches an account against the
+  address the client came from rather than whatever reverse DNS returns, which
+  on a bridge with no PTR records fails quietly and differently per node.
+
+One piece is not on the table because nobody will own it: the host row for the
+administrative account on the replica exists only so the proof can be read
+from the other machine by a declared account.
+
+`keel diff` runs before the phase, because the drop-in is drift the
+description says nothing about. That is the class of problem 0013 lists under
+promotion creating drift, met for the first time in a test.
+
+### Teardown, including a cancelled run
+
+Two layers, because one container left behind is somebody else's debugging
+session and two are worse. The boot test stops every node before it removes
+any tree, and its traps cover `INT` and `TERM` as well as `EXIT`, so a
+cancelled job tears down inside the test. The workflow's own step then runs
+with `if: always()`, which covers cancellation, and enumerates the containers
+from LXC rather than recomputing them from the role list, so a node the test
+renamed or started just before failing goes too. It stops all of them first
+and removes the tree last, and it reports how many container monitors of the
+run are still alive, which is the thing a later run would trip on. The run
+above reported 0.
+
+**The sudo policy needed no widening.** `keel-ci-cleanup` takes one container
+name and one tree and does both in a single call, so calling it per node would
+delete the configuration of the nodes not stopped yet and leave their init
+processes on a rootfs that no longer exists. `lxc-stop`, `lxc-destroy` and
+`lxc-ls` are already in `/etc/sudoers.d/runner` on the public services VM, so
+the stop loop uses those and the one `keel-ci-cleanup` call at the end removes
+the tree. Nothing on that VM was changed, and nothing was worked around.
+
+### Two things to know
+
+- The node library is cloned at `main` rather than at the commit the reusable
+  workflow is running from. It should be `github.job_workflow_sha`, and
+  actionlint 1.7.7 does not know that property while this organization's lint
+  gate fails on any finding, informational ones included. Every caller uses
+  `@main`, so today they agree; a caller pinned to a tag would not. Worth
+  revisiting when actionlint learns the property.
+- The issue named the layer digest `d5220c56`, which is the **postgresql**
+  layer. The published `mariadb` layer is `0adca434` on the same parent `core`
+  `7acf2c53`, and that is what was used. keel-postgresql's own two node phase
+  is the obvious next step and is still waiting on its rebuilt layer being
+  published.
