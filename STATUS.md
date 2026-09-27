@@ -1906,3 +1906,191 @@ first, per the standing rule. Until it is merged, a build on another
 machine would pack the pool into its image, which the 606 MB tarball of
 the first attempt tonight measures exactly, and layer manifests built here
 record `common_commit 897ad4c`, which is a commit `19.x` does not carry.
+
+## What the database gates found once the layers were published (2026-09-27)
+
+Both layers were published and both appliance gates failed. Three defects,
+two of them mine and one shared with every repository that calls
+`require-changelog`.
+
+### `package / changelog` failed on every push to main
+
+Including the commit that created each repository, which had nothing to
+check. `require-changelog` takes the two commits of the pull request and
+the workflow reads them from `github.event.pull_request.base.sha`; on a
+push that context is empty, the script is handed one argument where it
+expects two and exits 3 on its own usage. The check was reporting a defect
+in the workflow that called it, on every merge, beside the two checks that
+were telling the truth.
+
+`if: github.event_name == 'pull_request'`, which the `keel` repository
+already had. A job whose condition is false is reported as skipped, and the
+run on main is now green with `package` skipped, so requiring
+`package / changelog` on main keeps working: protection is evaluated on the
+head of a pull request, where the job runs for real. Both merges since went
+through the rule unchanged. keel-mariadb PR 4, keel-postgresql PR 3.
+
+### The boot test built a container systemd could not work in
+
+keel-mariadb's gate said the database refused the declared password. It was
+not refusing anything. Reproduced on the build host from the published
+chain, in a container booted exactly as the test boots it:
+
+    # systemctl show mariadb.service -p ExecStartPre
+    ExecStartPre={ path=/bin/sh ; code=exited ; status=226 }
+
+226 is NAMESPACE. Under the stock LXC container apparmor profile systemd
+cannot give a unit a mount namespace, and Debian's `mariadb.service` has
+`ProtectSystem=full` and `ProtectHome=true`, so it failed before its own
+first line ran. Run by hand in the same container the server starts, reads
+the overlay's `bind-address` and reports `Server socket created on IP:
+'::1', port: '3306'`. `systemd-journald`, `systemd-logind`,
+`systemd-sysusers`, `systemd-sysctl` and `tmp.mount` had failed the same
+way, which is why `15regen-sslcert` and `95secupdates` failed beside the
+database and why there was no journal to read when the container was asked
+why.
+
+So `firstboot.d/35mysqlpass` was right to exit 1: it could not start the
+service, so it did not pretend to have set a password. The defect was in
+the container the test builds, and it is the pair of defects keel-nodebb
+had already met, so both fixes were ported from its main rather than
+written a third time: `lxc.apparmor.profile = generated` with
+`lxc.apparmor.allow_nesting = 1` in `bt_lxc_config` (its PR 8), and
+`bt_mark_container` doing all three things a container build does, the
+marker, `REDIRECT_OUTPUT=true` and a drop-in putting `inithooks.service`
+on the journal (its PR 9). No hook in either database layer prints past the
+terminal buffer today, which is exactly why the second one should not be
+left for the next one to find.
+
+keel-mariadb PR 5, keel-postgresql PR 5. Seven tests each.
+
+### The PostgreSQL layer listened on one address family
+
+The hook was right here too, and this one ships. `36pgsqlverify` failed with
+`Connection refused` on `[::1]:5432`, and the cluster was online:
+
+    # ss -lntH 'sport = :5432'
+    LISTEN 0  200  127.0.0.1:5432  0.0.0.0:*
+
+`conf.d/main` asserted Debian's default, `listen_addresses = 'localhost'`,
+on the grounds that it is the loopback of both families. It is not.
+Debian's `/etc/hosts` maps `::1` to `ip6-localhost` and `ip6-loopback` and
+never to `localhost`, so `getent ahosts localhost` answers `127.0.0.1`
+alone and the cluster binds the IPv4 loopback only, with `::1` up on `lo`
+and `pg_hba.conf` already carrying its `scram-sha-256` line for `::1/128`,
+ready for a connection that could never arrive. An appliance built on this
+layer and reaching its database over IPv6, which is the default this
+project builds for, found nothing listening.
+
+Fixed by naming both addresses, `listen_addresses = '::1,127.0.0.1'`, the
+same pair the MariaDB layer writes into its `bind-address`. A literal
+address cannot resolve into something else, which is the point: the
+previous line was not wrong about what it wanted, it was wrong about what
+a name meant on this machine. The lesson is the one worth keeping:
+asserting the configuration is not asserting the behaviour, so what it
+binds is now proved on the booted machine by the boot test instead of by a
+grep of the setting at build time. keel-postgresql PR 4, changelog
+version 2.
+
+### Measured
+
+| | |
+| --- | --- |
+| keel-mariadb | 68 bats, 99.54 (217/218), gate 95; `boot-test-lib.sh` 100 (153/153) |
+| keel-postgresql | 65 bats, 100 (210/210), gate 100; `boot-test-lib.sh` 100 (154/154) |
+
+keel-mariadb's appliance gate, on the runner, against the published layer:
+
+```
+boot-test: first boot finished
+INFO: [35mysqlpass] running
+INFO: [35mysqlpass] successfully completed
+boot-test: connecting as admin on [::1]:3306 with the declared password
+boot-test: admin authenticated on [::1]:3306 with the declared password
+boot-test: webmin-mysql is installed
+boot-test: webmin answered 200 on port 12321
+diff: 6 same, 0 drift, 1 unknown, 5 not declared, 4 not compared
+boot-test: mariadb boot test passed
+```
+
+The one unknown is `network.interfaces.eth0.ipv6.method`, declared `auto`:
+`inet6 dhcp` is written for `auto` and for `dhcp` alike and there is no
+lease to read offline, which is the documented limitation keel-nodebb
+records too. Exit 13, which the shared verdict reads as no drift. Every
+other declared field is `same` and there is no drift.
+
+`appliance / build-and-boot` is now a **required status on keel-mariadb's
+main**, which is what the plan in its COVERAGE.md said would happen the day
+it went green.
+
+On the build host, on a container booted from the published chain with both
+test fixes and the layer fix in place, the same proof for PostgreSQL:
+
+```
+# ss -lntH 'sport = :5432'
+LISTEN 0  200  127.0.0.1:5432  0.0.0.0:*
+LISTEN 0  200      [::1]:5432     [::]:*
+
+$ psql --username=postgres --host=::1 --no-password \
+    --command='SELECT 1, current_user, inet_server_addr()'
+1|postgres|::1
+```
+
+and with the wrong password, `FATAL:  password authentication failed for
+user "postgres"`. Both layers refuse a wrong password: MariaDB answers
+`ERROR 1045 (28000) ... (using password: YES)`.
+
+### The postgresql layer is rebuilt and waiting to be published
+
+`bin/keel-release --resume postgresql` on the build host, with the old
+layer files moved aside so `release_layer_current` would rebuild that layer
+and only that layer. **`--rebuild` was deliberately not used**: it forces
+every layer of the chain, which would have rebuilt `core` and changed the
+digest that `mariadb` and `nodebb` are children of. `core` is untouched at
+`7acf2c53`.
+
+| | |
+| --- | --- |
+| postgresql | 104,145,081 bytes, sha256 `d5220c56`, parent `core` `7acf2c53`, product_commit `0f0d205` |
+| signed | staging subkey `03041024F4B2C0C2F42DDDEA04906EAB77513310` |
+| audited | `/root/audit-layers.sh`: every package installed, inithooks 2.3.6+keel4, confconsole 2.2.3+keel2, keel 0.2.1 |
+| `units` | `none`, recorded by bt-layer as of tonight (decision 0010's prerequisite) |
+
+Staged in `/srv/keel-release/2026-09-27`. The publication step,
+`bin/keel-publish-mirror 2026-09-27` from a workstation holding both SSH
+keys, has not been run, so the mirror still serves the superseded layer
+(`e67f883b`) and keel-postgresql's gate stays red on exactly the defect the
+rebuild fixes. The superseded files are kept in `/root/pg-rebuild-backup`
+until it is published. The mariadb layer needs no rebuild: everything
+merged into that repository since its layer was built is tests and CI,
+which ship nothing, which is what the exempt list of `require-changelog`
+encodes.
+
+### Should the boot test library become a component?
+
+It now exists in keel-core, keel-nodebb, keel-mariadb and keel-postgresql
+with the same job, and today it cost two hand ports into two repositories.
+About 130 of its 155 lines are identical everywhere; what differs is the
+appliance's own verdicts and constants.
+
+**Not as a fab unit under decision 0010.** A unit is `plan`, `overlay/` and
+`conf`: build time content that ends up inside a layer. `bt-layer` now
+records `units` in the manifest, which is 0010's prerequisite, and both
+database layers record `units none`. The boot test library is none of
+those things. It runs on the CI runner, it never enters an image, and
+nothing about it is reproducible-build state.
+
+**Yes as CI tooling, in `keel-linux/.github`**, which already holds the
+reusable workflows and `bin/require-changelog` with its own coverage gate,
+and which `test-appliance.yml` already checks out on the runner. The shared
+half moves there and each appliance keeps a small file with its own
+verdicts, which is decision 0004's split applied across repositories
+instead of within one. The cost is real and should be stated: it puts test
+logic behind the same `@main` reference as the workflows, in the repository
+the 2026-09-26 audit called the highest blast radius, so it needs its own
+gate on that file, which that repository has.
+
+**When:** at the fourth caller that needs it, which is LAMP or LAPP,
+following 0010's own rule that components move one at a time as we touch
+them and never as a migration. Doing it now would mean touching four
+repositories to change nothing observable.
