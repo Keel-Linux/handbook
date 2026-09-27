@@ -424,3 +424,29 @@ nothing else on the VM was touched.
 - `build-deb.yml` build dependencies on the runner host (section 7).
 - IPv4: the A records point at addresses that do not forward 80 and 443 to
   the VM; either the cluster adds the forwarding or the A records go.
+
+### IPv4 does not reach the public names (measured 2026-09-27)
+
+From a workstation with working IPv4 to other destinations, both public
+addresses refuse connections on both web ports:
+
+    179.191.88.34:443  Connection refused
+    179.191.88.34:80   Connection refused
+    179.191.88.35:443  Connection refused
+    179.191.88.35:80   Connection refused
+
+Refused, not timed out: something answers the SYN with a RST, so the packets
+reach a host that declines them rather than being dropped or unrouted.
+
+Not the VM. It listens on `0.0.0.0:80` and `0.0.0.0:443` as well as the IPv6
+sockets, nftables accepts 22, 80 and 443, and its only IPv4 address is
+private, `10.88.5.25/24` on eth0. It can never receive public IPv4 directly:
+something at the edge has to map those two addresses onto it.
+
+Over IPv6 the same names answer 200, the forum serves NodeBB through the
+reverse proxy, and the certificate covers all six names to 2026-12-25. So the
+gap is entirely in what the edge accepts from outside for those two addresses,
+and it is owned by whoever runs that edge, not by this project.
+
+A report claiming HTTPS answers 200 over both families was measured from
+inside the network; from the public internet it does not.
