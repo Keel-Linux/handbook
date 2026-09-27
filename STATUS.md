@@ -2572,3 +2572,109 @@ itself.
 - `/root/wp-rebuild-backup` and `/root/wp-rebuild-backup2` hold the two
   superseded layer builds of tonight and can go once the published one has
   been exercised.
+
+## 2026-09-27 (later still): cloud mode for MariaDB, the acting half
+
+Issue [keel-mariadb#9](https://github.com/Keel-Linux/keel-mariadb/issues/9) is
+the acting half of decision 0013 phase 3, on top of the vocabulary and the
+reading that landed earlier today. Five pull requests, all open and green:
+
+| Repository | PR | What it is |
+| --- | --- | --- |
+| keel | [#29](https://github.com/Keel-Linux/keel/pull/29) | A prefix and the host pattern MariaDB holds are one origin |
+| keel | [#30](https://github.com/Keel-Linux/keel/pull/30) | `apply` configures a MariaDB node in the role it declares |
+| keel | [#31](https://github.com/Keel-Linux/keel/pull/31) | `keel database promote` |
+| confconsole | [#10](https://github.com/Keel-Linux/confconsole/pull/10) | The Instance menu offers a database mode |
+| keel-mariadb | [#10](https://github.com/Keel-Linux/keel-mariadb/pull/10) | The gate configures both nodes from their descriptions |
+
+Stacked in that order, because #30 needs #29's origin translation and #31 needs
+#30's refusal. Coverage: keel **100 percent over 849 tests** (threshold 95),
+confconsole **100 percent over 379 tests** (threshold 100), keel-mariadb
+`boot-test-lib.sh` **100 percent (285/285)** under kcov over 75 bats tests,
+99.71 percent (349/350) over the three measured shell files.
+
+### What apply does, per role
+
+One drop-in, `/etc/mysql/mariadb.conf.d/99-keel-database.cnf`, carries
+`server_id`, `bind-address` from `listen` and `skip_name_resolve`, and the
+server is restarted **only when that file changed**, because none of the three
+is settable while it runs. A primary adds `log_bin` and `binlog_format`, and a
+grant of `REPLICATION SLAVE` to `repl` per entry of `allowed_from`; an origin
+the description no longer names has its account dropped, because `inspect`
+reads the authorizations off the server and one left behind drifts for ever. A
+replica gets `CHANGE MASTER TO ... MASTER_USE_GTID=slave_pos`, behind the
+refusal below, and is left alone when it already replicates from the declared
+endpoint, which matters because apply runs at every boot.
+
+The replication account name is a constant and not a field. Both ends must
+name the same account, and a field each operator sets on their own machine is
+a way to end up with two machines that cannot talk.
+
+### The four properties, as branches and not as prose
+
+1. **Becoming a replica destroys the local database.** The refusal is the
+   default: apply refuses unless the server holds no database but its own,
+   refuses when it cannot be asked what it holds (not knowing is not
+   permission), and refuses to point a replica at a different primary. The
+   override is `--destroy-local-database` in that invocation; nothing else in
+   keel passes it and the first boot hook does not, so the worst a first boot
+   can do is build a replica out of a database that holds nothing.
+2. **A primary holds authorizations, not replicas.** A prefix that stops
+   inside a group, a `/56`, is refused rather than widened or narrowed.
+3. **Promotion is a separate act**, `keel database promote`, and apply refuses
+   both directions that would need one.
+4. **No automatic failover.** Nothing in the phase looks at another machine,
+   and every cloud screen in the console says so in a line the operator cannot
+   miss.
+
+### The console
+
+Instance gains Database mode: Standalone, or Cloud splitting into Primary and
+Replica, with Promote this replica as a fourth entry under Cloud. The screens
+hold no decision: `dbscreen` collects the fields, writes them into the
+description and hands it to keel, and the refusal an operator confirms is
+keel's own words. What the operator typed is staged beside the description and
+given to `keel spec validate` before it replaces it, so a value that would not
+load cannot replace one that does.
+
+### Proved on machines, and what that found
+
+Two containers from the published `mariadb` layer on the build host, keel 0.3.5
+built from the branch installed in each, both configured from their own
+descriptions with nothing done by hand: **61 seconds end to end**. The refusal
+first, on a real server, then the primary, then the replica, then `keel diff`
+clean on both, then a row written on one read from the other over IPv6.
+
+Four defects the bench found that no fixture could:
+
+- **Every appliance built from `core` has the same machine-id.** Both nodes,
+  and both live appliances on the host, read
+  `f0e97605ab594989b4d78f4a126b5b37`, so both nodes took the same `server_id`,
+  which is the one thing that stops replication outright. The derivation now
+  mixes in the addresses the server answers on; the layer shipping a
+  machine-id is a defect of its own and is now in `docs/traps.md`, for
+  `buildtasks`' container patch to fix.
+- **`GRANT ALL PRIVILEGES` is an authorization to replicate.** ALL carries
+  `Repl_slave_priv`, so the test's administrative host row made the replica
+  read as a primary, and apply refused to demote it. The refusal was right and
+  the grant was wrong: `SELECT` on the one database is what the proof needs.
+- **A prefix cannot go in a grant.** The description carries
+  `2804:710:d0:5::/64` and the account has to be `'repl'@'2804:710:d0:5:%'`;
+  the test's own account helper needed the second form and was handed the
+  first.
+- **The confirmed line said nothing was changed.** With
+  `--destroy-local-database` the plan repeated the whole refusal, remedy
+  included, after dropping two databases. The reason and the remedy are two
+  strings now.
+
+### What this leaves
+
+- The `appliance / build-and-boot` gate needs a published `mariadb` layer
+  carrying keel >= 0.3.5, so it goes green once the three keel pull requests
+  merge and a release is staged. Nothing was published today: the proof used
+  `--keel-deb`, a new boot test option for exactly this order of work.
+- PostgreSQL and Redis follow the same shape in their own repositories, and
+  `keel.system.dbmariadb` is the one table they each add a sibling to.
+- Seeding a replica from a backup of a primary that already held data is still
+  the operator's step. `gtid_slave_pos` empty means from the start of the
+  primary's binary log, which is honest only because of the refusal.
