@@ -1329,3 +1329,72 @@ defects it found are fixed: the cipher list in buildtasks 1dfc12d, and the
 container apparmor profile in keel-nodebb pull request 8 (merge 6693fbd),
 which gives the boot test container `lxc.apparmor.profile = generated` and
 `lxc.apparmor.allow_nesting = 1` so `redis-server.service` can start.
+
+## The first boot hook that never returned (2026-09-27)
+
+With the signed republication in place the gate pulls, verifies, assembles
+and boots, and then stops: `[40nodebb] running` is the last line of the
+container's inithooks log. Reproduced on the build host against the published
+chain, the node process running `./nodebb setup` is asleep in a write to the
+terminal:
+
+    [<0>] wait_woken+0x52/0x60
+    [<0>] n_tty_write+0x406/0x500
+    [<0>] file_tty_write.isra.0+0x175/0x2c0
+
+with `/proc/<pid>/fd/1 -> /dev/lxc/tty1`.
+
+The layer ships the plain appliance `inithooks.service`, which runs the hooks
+with `StandardOutput=tty` on `/dev/tty1`. A container image does not run that
+unit: buildtasks' headless patch carries
+`ConditionPathExists=!/var/lib/turnkey-info/inithooks.service/lxc` and
+`patches/container/conf` sets `REDIRECT_OUTPUT=true`. Nothing reads tty1 in a
+container nobody has attached to, so the terminal buffer fills and the write
+blocks forever. `./nodebb setup` prints well past that buffer.
+
+The boot test wrote only the marker file, so its container was a container to
+`keel inspect` and an appliance on a console to systemd. `bt_mark_container`
+now does all three things a container build does: the marker,
+`REDIRECT_OUTPUT=true`, and a drop-in giving the unit `StandardOutput=journal`
+(keel-nodebb pull request 9). Six tests; `boot-test-lib.sh` stays at 100
+percent, 137 of 137.
+
+Measured with it in place, on the chain the mirror serves: the first boot runs
+to `98finalize`, `[40nodebb] successfully completed`, port 80 answers 307 to
+https and port 443 answers 200 with `<title>Home | NodeBB</title>` over IPv6.
+`15regen-sslcert` and `95secupdates`, which had also reported failures while
+the console was blocked, complete as well. Nothing in the layer changes, so no
+rebuild and no new release were needed for this.
+
+The order the three defects came in is the point worth keeping: the build
+shims hid the cipher list, the cipher list hid the apparmor profile, and the
+apparmor profile hid the console. Each fix bought exactly one more step, and
+none of them was visible until the one before it was gone.
+
+## A defect the container journal exposed: 00declarative dies (2026-09-27)
+
+Every boot of the test container logs this before the hooks get going:
+
+    File "/usr/lib/inithooks/bin/declarative.py", line 121, in main
+        log(f"reading {path}, ignoring {other}", "warning")
+    libinithooks.inithooks_log.InitLogError: invalid log level 'warning'
+    warning: declarative.py --which failed, no description read
+
+`InitLog.write` accepts `err|warn|info|debug`; line 121 passes `warning`. The
+`log()` helper catches `OSError` only, so `InitLogError` propagates and kills
+the script. It fires exactly when `resolve_path()` has something to ignore,
+which is when both `/etc/keel/instance.yaml` and `/etc/inithooks.yaml` exist.
+The boot test installs the spec at both paths, so the gate triggers it on
+every run.
+
+It does not stop the boot test, because the test renders `/etc/inithooks.conf`
+with `keel spec apply` before booting, so nothing depends on `00declarative`
+having read anything. On a machine that ships both files and expects the hook
+to render the conf, the render silently does not happen.
+
+The fix is one word in `bin/declarative.py`, and `log()` should catch
+`InitLogError` as well so a bad level degrades to stderr instead of killing
+the hook. It is not fixed here: it lives in the inithooks fork and shipping it
+means a new package, an archive publication and a signed release, which needs
+the passphrase arranged. Worth doing in the same pass as the next inithooks
+change.
