@@ -56,7 +56,7 @@ build. A suffix invites exactly what happened.
 
 **A Debian package this project depends on and modifies becomes a Keel
 package with a version this project chooses.** For fab that is the source
-and binary package `keel-fab` at `0.1.0`.
+and binary package `keel-fab` at `2.0.0`.
 
 Three separate things follow, and they are separate on purpose.
 
@@ -68,13 +68,41 @@ Three separate things follow, and they are separate on purpose.
    The fork keeps its full history and its upstream compatibility, per
    decision 0008, and cherry-picks in both directions are unaffected.
 
-2. **The version is ours and plain.** `0.1.0`, the scheme every package this
-   project already owns uses: `keel` 0.1.0, `keel-transition` 0.1.0,
-   `keel-archive-keyring` 0.1.0. No `+keelN`. Brief section 7's `+keelN` rule
-   is for a *rebuild of an upstream package*, and this stops being one.
+2. **The version is ours and plain, and it goes up.** `2.0.0`, no `+keelN`.
+   Brief section 7's `+keelN` rule is for a *rebuild of an upstream package*,
+   and this stops being one. But a rename does **not** start the numbering
+   over, which is the part that had to be learned: see below.
 
 3. **Nothing a caller can see is renamed.** Every command, every path and
    the python module keep their names exactly.
+
+### Why 2.0.0 and not 0.1.0
+
+`0.1.0` was proposed first, and it was the obvious choice: it is the scheme
+every package this project already owns starts at, `keel` 0.1.0,
+`keel-transition` 0.1.0, `keel-archive-keyring` 0.1.0. The changelog gate
+wired up in the same pull request refused it, which is the first thing that
+gate has ever caught in this repository.
+
+    dpkg --compare-versions 0.1.0 gt 1.1.1+keel2   ->  false
+
+`require-changelog` compares the proposed top version against the base's
+exactly that way, and `reprepro` and `dpkg-genchanges` read a changelog as
+one monotonic series too; `dpkg-genchanges` was already warning on the 0.1.0
+build that the version was earlier than the previous one. **A changelog is
+one series whatever the source name does.** Renaming the source does not
+give the file a fresh start, and nothing in the toolchain pretends it does.
+
+The reset was the wrong signal as well as the wrong number. The other Keel
+packages start at 0.1.0 because they had no predecessor. This code has been
+building every layer in production since before it was ours, so a 0.x would
+claim it is pre-release. `2.0.0` sorts above every upstream 1.x and above
+both `+keelN` builds, carries no suffix, and says what actually happened: the
+name, the numbering and the ownership change at once.
+
+The rule, for the next package that moves: **a package that becomes ours
+takes the next version above the highest it has already published, chosen by
+what the change means.** A package with no predecessor still starts at 0.1.0.
 
 ### Why `keel-fab` is the name the tooling already wanted
 
@@ -222,19 +250,22 @@ read only, no lock was taken, no layer was published or rebuilt.
 
 The package was built in a throwaway `debian:trixie` container instead, and
 its contents compared against the `.deb` the host has installed. `keel-fab
-0.1.0` against `fab 1.1.1+keel2`: the same 26 paths, 24 of them byte
-identical including all nine `/usr/bin/fab-*` symlinks and
-`share/product.mk`, `/usr/bin/fab` differing only by the `get_version`
-change and `runtime.d/*.rtupdate` only by the package name inside it, plus
-the two new files. That measurement is the evidence the conversion is safe,
-and it is the only kind of evidence that can be, since no assertion about
-`debian/` can prove what a build produces.
+2.0.0` against `fab 1.1.1+keel2`: **all 28 paths the old package had are
+present and 26 of them are byte identical**, including all nine
+`/usr/bin/fab-*` symlinks and `share/product.mk`. The two that differ are
+`/usr/bin/fab`, by the `get_version` change alone, and
+`runtime.d/*.rtupdate`, by the package name inside it. Two files are new,
+`fablib/version.py` and `/usr/share/fab/version`. Nothing is missing.
+
+That measurement is the evidence the conversion is safe, and it is the only
+kind of evidence that can be, since no assertion about `debian/` can prove
+what a build produces.
 
 Forward, once fab#9 is merged and the package is built and published:
 
-    apt-get install ./keel-fab_0.1.0_all.deb        # removes fab, Conflicts
+    apt-get install ./keel-fab_2.0.0_all.deb        # removes fab, Conflicts
     # /etc/apt/preferences.d/keel-fab becomes  Package: keel-fab
-    #                                          Pin: version 0.*
+    #                                          Pin: version 2.*
 
 Back, at any time, because `fab_1.1.1+keel2_all.deb` stays in `/root/src` and
 nothing deletes it:
@@ -298,6 +329,11 @@ not before.
   `+keelN` is for rebuilds of upstream packages only. The boundary is the one
   `apt/lib/build.sh` already implements, and a package that crosses it
   crosses both at once or neither.
+- **A rename does not reset the numbering.** A changelog is one monotonic
+  series however the source is renamed, because `require-changelog`,
+  `reprepro` and `dpkg-genchanges` all read it that way. A package that
+  becomes ours takes the next version above the highest it has already
+  published; only a package with no predecessor starts at 0.1.0.
 - **A release is a tag.** Every packaged version of a repository that ships a
   package names the commit it was built from, enforced in CI. A `.deb` built
   from an untagged tree is not a release, and the build host must not run one.

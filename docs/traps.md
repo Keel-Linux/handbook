@@ -363,10 +363,19 @@ to the version independent `/usr/lib/python3/dist-packages`. One call with the
 argument trades a missing registration for a module pinned to one python
 version, which is the worse of the two and just as quiet.
 
+**And the version does not start over either.** A changelog is one monotonic
+series however the source is renamed: `require-changelog` compares the
+proposed top version against the base's with `dpkg --compare-versions gt`,
+and `reprepro` and `dpkg-genchanges` read the file the same way. The rename
+above was first proposed as `keel-fab 0.1.0`, which is what every other Keel
+package starts at, and `0.1.0` is not greater than `1.1.1+keel2`.
+
 **Found** 2026-09-28 renaming `fab` to `keel-fab` (decision 0017,
-Keel-Linux/fab#9), by building both in a container and diffing them against
-the `.deb` installed on the build host. The static checks on `debian/` passed
-throughout and said nothing.
+Keel-Linux/fab#9). The missing files by building both in a container and
+diffing them against the `.deb` installed on the build host, since the static
+checks on `debian/` passed throughout and said nothing. The version by the
+changelog gate, on the first run after it was wired up in the same pull
+request.
 
 ## Things we did wrong and would do again unless written down
 
