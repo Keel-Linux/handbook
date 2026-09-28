@@ -160,6 +160,108 @@ as a separate phase that takes no lock and runs in seconds.
 
 **Hit** 2026-09-27, three passphrase moments lost.
 
+## A protocol that ends its lines with CRLF, read with a `$` anchor
+
+**Signature.** A check says a server did not answer, and the server is up,
+listening and answering. The same command run by hand prints exactly what
+the check was looking for.
+
+**Cause.** Redis speaks CRLF. Every line of an `INFO` reply ends `\r\n` and
+`redis-cli` prints the reply as it came, so `tcp_port:6379` is really
+`tcp_port:6379\r`, and `grep -q "^tcp_port:6379$"` never matches it. `od -c`
+is what settles it in one line:
+
+    redis-cli INFO server | grep tcp_port | od -c
+    t c p _ p o r t : 6 3 7 9 \r \n
+
+**Fix.** `tr -d '\r'` before reading an `INFO` reply, in one function
+everything calls, or match a prefix and never a whole line. And make the
+test stub answer in CRLF: the stub of the day printed `\n`, so the suite was
+green against a server that does not exist.
+
+**Hit** 2026-09-28, in the first build of `unit-redis`, in the component's
+own build time check.
+
+## redis-cli exits 0 when the server answers with an error
+
+**Signature.** A wrong password, a refused command and a successful one are
+all a success to the script that ran them.
+
+**Cause.** An error reply is a reply. `redis-cli` prints `AUTH failed:
+WRONGPASS ...` or `NOPERM ...` and exits 0.
+
+**Fix.** Read the answer, never the exit code, everywhere a Redis client is
+run: the first boot hook, the build time check and the boot test all compare
+the text. Each verdict has a test that drives it with the words a real
+refusal produces.
+
+**Found** 2026-09-27 while writing `unit-redis`, before it could be hit.
+
+## A build time check that runs a service as root leaves it files it cannot write
+
+**Signature.** A layer builds green, every check in it passes, and the
+service will not start on any machine built from it. The journal says
+`Can't open the log file: Permission denied`, or the same about a pid file
+or a socket, and the file it names exists, is empty, and is owned by root
+in a directory the service's own user owns.
+
+**Cause.** The check started the service as root. Even when it redirects the
+paths it knows about, a daemon may touch the packaged ones: Redis opens
+**every** value its `logfile` setting is ever given, so the path in the
+packaged configuration is created before a `--logfile` on the command line
+replaces it. Root creates it, and the service's user can never write it.
+
+**Fix.** A check that starts something owns what it left. Read the packaged
+paths out of the configuration before starting, and take away afterwards
+anything the check created and nothing was written to. The package ships no
+such file, and the service makes its own at the first boot, as its own user.
+
+**And the test stub has to be as impolite as the program.** The stub of the
+day wrote only where it was told, so the suite was green against a daemon
+that does not exist. It opens the packaged path now, and the test fails
+without the cleanup.
+
+**Hit** 2026-09-28, in the first `redis` layer that booted. Settled by
+comparing with the `nodejs-nginx` layer, which installs the same package
+and whose `/var/log/redis` is empty: nothing in the package or the common
+tree did it, the check did.
+
+## A Redis ACL user may be declared only once, in all the configuration there is
+
+**Signature.** `redis-server` refuses to start, and the message names a line
+that is correct on its own:
+
+    Error in user declaration 'admin': Duplicate user found.
+    A user can only be defined once in config files
+
+**Cause.** Redis keeps the last value it reads for an ordinary directive,
+which is what makes an `include` at the end of the file an override. `user`
+is not an ordinary directive: a second declaration of the same account, in
+any file the configuration includes, is fatal.
+
+**Fix.** Declare an account in exactly one place. The pattern the SQL
+engines use, publishing an account that cannot authenticate and giving it a
+password at the first boot, does not port: on Redis the build time
+configuration names no account at all, and the first boot declares it once.
+An account that is not declared cannot authenticate either, which is the
+property that pattern was for.
+
+**Hit** 2026-09-28, in the same boot as the trap above.
+
+## A check that deletes the log which explains its own failure
+
+**Signature.** A build fails in a check that ran a service, and there is
+nothing to read. The service's log was in the scratch directory the check
+removes on the way out, so the failure has to be reproduced by hand in
+whatever tree the build left behind.
+
+**Fix.** The fatal path prints the last lines of the service's own log
+before the cleanup runs. A check that starts something owns the evidence it
+produced.
+
+**Hit** 2026-09-28, in the same build as the CRLF trap above, which is why
+that one cost a reproduction step it should not have.
+
 ## Every appliance built from `core` has the same machine-id
 
 **Signature.** Anything derived from `/etc/machine-id` is identical on two

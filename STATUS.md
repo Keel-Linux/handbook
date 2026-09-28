@@ -3201,3 +3201,247 @@ The four layers are built, measured and boot tested on the build host and
 none of them has been signed or pushed to the mirror. What publication would
 put there is stated in the pull requests and in the report, for the
 maintainer to approve first.
+
+
+## Redis, the third engine, as a component and a standalone appliance (2026-09-28)
+
+`keel-redis` was an untouched fork of the upstream recipe: Redis plus Redis
+Commander on nginx, a Node.js runtime, pm2 and a landing page. It is now what
+the catalog shape of decision 0013 asks for, the database layer, built on
+`core` and carrying the server as the `unit.d/redis` component. Standalone
+only: the cloud modes come next and in their own issue, and what this layer
+adds for them is the reading they are built on.
+
+| Repository | What landed | Pull requests |
+| --- | --- | --- |
+| `keel-linux/unit-redis` | new: the component, `plan`, `overlay/`, `conf`, `version`, tags v1.0.0, v1.0.1 and v1.0.2 | 1, 2, 3 |
+| `keel-linux/keel-redis` | the recipe, rebuilt as a layer on `core`, against issue 1 | 2, 3, 4, 5 |
+| `keel-linux/apt` | `redis core` in `conf/appliances`, and a test harness that reads that file | 12 |
+| `keel-linux/tracker` | the Proxmox index is replaced by the last release published | issue 11 |
+
+Coverage: `unit-redis` 100 percent on all three measured files, 129 lines,
+70 bats tests. `keel-redis` 100 percent on all three it writes, 270 lines,
+92 bats tests. Both thresholds are the measured numbers, committed.
+
+### What the declared secret means on Redis, and why it is not requirepass
+
+`secrets.db_password` renders to `DB_PASS`, the variable the MariaDB and
+PostgreSQL hooks already read. On those engines it is a database account's
+password. **Redis has no database account.** Its secret is one of two things,
+and the vocabulary of 0013 leaves both open: `requirepass`, which is the
+password of the built in `default` user, or an ACL user with a password of
+its own. This component chose the ACL user, for two reasons that are
+checkable properties rather than preferences.
+
+**`requirepass` would also lock `INFO`.** `keel inspect` reads
+`database.server.role` from `INFO replication` and `INFO cluster`, it never
+reads a secret to get past a refusal, and docs/inspect.md already says a
+Redis with `requirepass` set is reported as a role it could not infer. An
+appliance that cannot say it is `standalone` cannot later say it is a
+`primary` or a `replica`, which is exactly the seam the next issue builds on.
+So the `default` account is left able to run one command, `INFO`, with no key
+and no channel: inspect's three questions are answered without a secret, and
+`GET` on any key is refused with `NOPERM`.
+
+**`requirepass` lives in a world readable file.** The package ships
+`/etc/redis/redis.conf` as `root:root 0644`, so the upstream appliance wrote
+the Redis password where every local account could read it and shipped
+`turnkey-redis-pw get` and a confconsole plugin to copy it into
+`/root/redis_password.txt`. An ACL rule takes the **SHA-256** of a password,
+so `/etc/redis/redis.conf.d/50-keel-secret.conf` holds a digest, `root:redis
+0640`, and nothing on the machine can print the secret back. Both tools are
+gone, with the hook that generated the password and the two that asked at the
+console for the bind address and protected mode.
+
+Before the first boot the account is published `off`, which authenticates
+nothing whatever is sent: the same reasoning as the invalid password hash
+`keel-mariadb` publishes its account with.
+
+Configuration is added as fragments under `/etc/redis/redis.conf.d`, with one
+appended line in the packaged conffile including them at the end of the file,
+where Redis's own manual says an include belongs when it is meant to
+override. The 110 kB conffile keeps every other default and every comment,
+and a package upgrade has one line to ask about.
+
+### The addresses
+
+`bind ::1 127.0.0.1`, two literal addresses. Debian ships
+`bind 127.0.0.1 -::1`, where the dash marks the address as optional: a server
+that cannot bind `::1` starts anyway and answers one family. No name is used
+anywhere, which is the trap this project has already paid for once.
+
+### The layer, and what it is built from
+
+Built on the build host from the recipe's own checkout, with the component
+cloned at its tag under `unit.d/redis`, and `bt-layer` recorded the pin:
+
+| | |
+| --- | --- |
+| layer | `redis`, delta on `core`, parent `7acf2c53` |
+| first build | sha256 `14b11627`, 46,950,426 bytes, `units redis@1.0.1` |
+| product commit | `31e8da2`, `fab 1.1.1+keel2`, `common 68034225` |
+| staged | `/srv/keel-release/2026-09-28`, signed with subkey `03041024F4B2C0C2F42DDDEA04906EAB77513310` |
+| template | `debian-13-keel-redis_19.0-3_amd64.tar.zst`, 328,892,031 bytes |
+
+Both build time checks passed on the first build that got through: the
+staging archive verified with gpgv against the staging key rather than
+trusted, the project packages checked against what that archive offers
+rather than against a literal version, `inithooks 2.3.6+keel5`,
+`confconsole 2.2.3+keel2`, `keel 0.3.5`, each the candidate of the project
+archive.
+
+### What the boot test proves, and what it found
+
+Every check below was run on the booted container, on `lxcbr0`, and every
+one of them passed on the corrected configuration:
+
+| Step | Result |
+| --- | --- |
+| `redis-server.service` | active |
+| the declared secret, over IPv6 | `admin` on `[::1]:6379` answered `PONG` |
+| the account can work | a value written and read back under a key |
+| a wrong secret | `AUTH failed: WRONGPASS ...`, and exit 0, which is why every verdict reads the answer |
+| no secret at all | `GET` refused with `NOPERM` |
+| `keel inspect` | `database.server`: `engine: redis`, **`role: standalone`**, `listen: 127.0.0.1, ::1` |
+| `keel diff`, offline root | exit 13: no drift, the database section unknown because an offline root cannot ask a server |
+
+`keel inspect` reporting `standalone` is the line that matters for the next
+issue. It works because the default account may run `INFO` and nothing
+else, which is the whole reason the declared secret is an ACL user.
+
+The gate ran the test twice before it read like that, and both failures
+were real defects in this work, not in the appliance:
+
+#### What the builds found
+
+The first build died in the component's own check:
+
+    FATAL [unit-redis conf]: no Redis answered INFO on [::1]:6379 after 30 tries
+
+The server was up, listening on both loopback families and answering.
+**Redis speaks CRLF**: every line of an `INFO` reply ends `\r\n`, `redis-cli`
+prints the reply as it came, and the check was anchored with a dollar.
+Measured in the chroot the failed build left behind:
+
+    redis-cli INFO server | grep tcp_port | od -c
+    t c p _ p o r t : 6 3 7 9 \r \n
+
+    grep -q "^tcp_port:6379$"                 no match
+    tr -d '\r' | grep -qx "tcp_port:6379"     match
+
+Three things came out of one failure, and all three are in docs/traps.md
+now. The CRLF itself, with the `od -c` that settles it in one line. The
+second Redis trap beside it, which was found while writing the component
+rather than by being hit: **redis-cli exits 0 when the server answers with
+an error**, so a wrong password prints `WRONGPASS` and exits 0, and every
+verdict in this work reads the answer and never the exit code. And a trap
+about the check rather than about Redis: **the log that explained the
+failure had been deleted by the check itself**, which runs the server in a
+scratch directory and removes it on the way out, so the failure had to be
+reproduced by hand in the tree fab left behind. The fatal path prints the
+server's last twenty lines first now.
+
+The test stub was the reason the suite was green against a server that does
+not exist: it printed `\n` where Redis prints `\r\n`. Every `INFO` stub in
+`tests/conf.bats` answers in CRLF now, so the whole file covers it, and one
+test says so by name and asserts both halves.
+
+One more weak check was found by reading rather than by failing, in this
+repository's own boot test: it asked `apt-cache` on the booted machine
+whether a Webmin module for Redis exists. That check could not fail. The
+image carries no package lists at all, because
+`conf.d/zz-project-packages` removes them with the build time archive, so
+the search answers nothing whatever the archive holds. It asks dpkg what is
+installed now, and whether the archive offers one is asked at build time,
+where there is an archive to ask.
+
+
+### An incident on the build host, and what it needs
+
+Rebuilding the layer at the corrected pin was started as
+`keel-release --resume --rebuild redis`. `--rebuild` applies to the whole
+chain, so it started rebuilding **`core`**, which was not wanted and which
+no appliance needed. It was stopped, and stopping it mid export left
+`/mnt/builds/layers` inconsistent:
+
+| | |
+| --- | --- |
+| `core.manifest` | unchanged, requires sha256 `7acf2c53`, 326,426,536 bytes |
+| `core.tar.zst` | now sha256 `1a4df079`, 326,426,466 bytes, from the interrupted rebuild |
+| `core.rootfs` | overwritten by the same rebuild, 02:34 |
+| the mirror | still serves the right one: 326,426,536 bytes, manifest sha256 `7acf2c53` |
+
+Nothing published is affected: `https://mirror.keellinux.org/layers` serves
+the original, and every published child layer records `parent_sha256
+7acf2c53`, which is what the CI runner pulls. What is wrong is the build
+host's own copy, and `keel verify --layers-dir /mnt/builds/layers` will say
+so about `core`.
+
+The repair is two writes into that directory and no build:
+
+    curl -6 -o /mnt/builds/layers/core.tar.zst \
+        https://mirror.keellinux.org/layers/core.tar.zst
+    sha256sum /mnt/builds/layers/core.tar.zst   # 7acf2c53...
+    # then re-extract core.rootfs from it, the way bt-layer exports it
+
+The accidental build should be parked rather than deleted, beside
+`/root/mariadb-prerebuild-backup` and `/root/wordpress-prerebuild-backup`,
+because it is a complete `core` and the only measurement we have of how far
+`core` drifts from itself in a day.
+
+Two lessons, and the second is the one to keep. `--rebuild` is not scoped to
+the appliance named on the command line, and the documentation does not say
+so; that is worth a line in docs/build-host.md or a flag that means this
+layer only. And a build that is stopped mid export leaves a tarball that its
+manifest disowns, which no check runs by itself: the daily self check would
+have found it in the morning.
+
+### Valkey: one unit could serve both, but not as one file
+
+Debian 13 ships `valkey-server 8.1.1+dfsg1-3+deb13u2` beside
+`redis-server 5:8.0.2-3+deb13u2`, and decision 0013 records it as the ready
+escape if Redis tightens its licence further. Both packages were unpacked
+and compared today.
+
+Everything this component decides is the same on both. Valkey's
+`valkey.conf` is the same 120 kB file with the same three commented
+`include` examples, the same `bind 127.0.0.1 -::1` default, the same
+`protected-mode yes`, the same ACL vocabulary and the same note that
+`requirepass` and `aclfile` do not mix. `INFO` answers the same sections,
+so `keel inspect` would read a role off it unchanged.
+
+What differs is names: `/etc/valkey/valkey.conf`, `valkey-cli`,
+`valkey-server`, `valkey-server.service`, `User=valkey`. The scripts already
+read every one of those from their environment, because they were written
+to be measurable: `REDIS_CONF`, `REDIS_CONF_D`, `REDIS_SERVICE`,
+`REDIS_SECRET_OWNER`, `REDIS_PORT`. So the logic is already flavour neutral
+and only two static things are not: the `plan`, which names a package, and
+the overlay, whose paths are directory names. fab has no way for a unit to
+pick either by a build variable.
+
+So the honest answer to "could the same unit serve both": the conf script,
+the first boot hook and the library, yes, unchanged, today. The plan and the
+overlay, no, not without either a second plan and overlay selected by a
+variable fab does not have, or a sibling `unit-valkey` that carries the same
+scripts. And `keel` would need one entry beside `redis` in the engine table
+of `keel/inspect/dbengines.py`, or `keel inspect` reports nothing at all for
+a Valkey machine. That is a change with its own issue, and the two commands
+the scripts name are the whole of it.
+
+### Also done on the way: main of `apt` was red and is not now
+
+`conf/appliances` is the only change the release path needs to know a new
+appliance, so `redis core` went in. Four tests of `tests/release.bats` were
+already failing on `main` before that, since 23:37 the night before, when the
+web layer and the two stacks were added to the same file and nothing else was
+touched. None of the four was about those appliances.
+
+A list written twice. `release_scratch_setup` created a product directory for
+six appliances by name, and the tests that run `keel-release all` build every
+appliance the real `conf/appliances` names, so an appliance with no product
+directory failed the release and took three unrelated tests with it; a fourth
+counted the templates as the literal 6. The harness reads the file now, and
+the counting test derives its count from the same place while still naming
+the seven appliances it has always named, so a conf that lost a line still
+fails rather than quietly releasing less. Adding an appliance is a one line
+change again.
