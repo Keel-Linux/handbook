@@ -326,6 +326,66 @@ today, which is what makes this easy to miss and easy to dismiss.
 **Hit** 2026-09-27, the LAMP composition measurement: 199 and 183 differing
 files, which are 198 and 182.
 
+## A bats negation that is not last asserts nothing
+
+**Signature.** A negative test passes whatever the code does. Deleting the
+function it refutes, or making it return 0, leaves the suite green. The test
+reads as a list of refusals and the last line is the only one that decides
+anything.
+
+**Cause.** Bash does not apply errexit to a negated command: `! cmd` is
+exempt, by the shell's own rules, precisely so that a script can test a
+command without dying. A bats test body has no assertions of its own; its
+verdict is the exit status of the last command it ran. So `! cmd` decides the
+test when it is the final command and is inert everywhere else, and moving a
+line, or adding one after it, silently changes whether it asserts.
+
+shellcheck grades the two cases apart, which is what makes a sweep possible:
+
+    shellcheck -f gcc --shell=bash tests/*.bats | grep SC2314
+
+`error:` is an inert one. `note:` is one in final position, which does assert
+today and would stop asserting if a line were added after it.
+
+**Fix.** `run ! cmd`, with `bats_require_minimum_version 1.5.0` at the top of
+the file. It asserts wherever it stands. Write every negation that way, not
+only the inert ones: a line whose meaning depends on its position is the trap,
+and a file that mixes the two forms leaves a reader to work out which half is
+real.
+
+Two things to watch when converting. `run` replaces `$output`, `$status` and
+`$lines`, so a body that refutes something and then reads the output of the
+command it was refuting has to keep that output in a local first — otherwise
+the second refutation greps an empty string and passes for a new reason. And
+`run` takes a command, not a pipeline: `! a | grep -q b` has to be rewritten,
+not prefixed.
+
+**Enforced** in the `Negations that assert (SC2314)` step of
+`test-shell.yml` in the `.github` repository, which every repository with a
+bats suite already calls at `@main`. It reports severity error only, so the
+final-position negations are not failures, and it runs before the coverage
+work and without a coverage script, because a suite that is not asserting is
+not worth measuring.
+
+**Hit** 2026-09-28, everywhere at once: 57 inert negations on the default
+branches of eight repositories, out of the 102 bare negations in the
+organization's bats suites. The worst was `inithooks`
+`tests/test-ipconfig.bats`, where twelve of the thirteen rejection cases of
+"ip6_syntax rejects what is not an IPv6 address" were inert and only the
+last one decided anything — an IPv6 validator's rejection set, in an
+IPv6-first distribution, a few entries below the one about IPv6 literals.
+Closely followed by `keel-wordpress`, where five of the six cases of
+"is_global_ipv6 refuses link local, loopback, multicast and IPv4" never ran,
+and `unit-redis`,
+where the refutation that the bind fragment never says `localhost` — put
+there by the entry above about Debian and `localhost` — was itself inert.
+
+Every predicate turned out to be right, so nothing shipped broken. That is
+luck, not evidence: the one assertion that did fail when it was turned on,
+`keel-nodebb`'s `! grep -q set_real_ip_from` against a file whose own comment
+names the directive, could never have passed for any input, and it sat there
+because nothing ever ran it.
+
 ## Things we did wrong and would do again unless written down
 
 - **Discarding a local commit on a guess.** A checkout on the build host had a
