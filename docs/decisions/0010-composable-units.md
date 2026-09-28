@@ -141,6 +141,13 @@ control by exactly the files by which the control differs from itself.
 
 ### The 173, named and explained
 
+> Superseded, with the table above, by "What a recount found" below. The
+> heading's own number is one of the wrong ones: the recount gives 182 files
+> for the control-unit pair and 173 for `/var/lib/mysql/**` alone, not 173 and
+> 167. The explanations in this table still hold for the paths they name; the
+> counts do not, and the row for `/var/lib/mysql/**` describes files nobody
+> opened.
+
 | Count | Path | Difference |
 | --- | --- | --- |
 | 167 | `/var/lib/mysql/**` | the MariaDB data directory created when the conf script starts the server. Every file is the same size and 8 to 11 bytes differ. In `mysql/user.frm` the bytes are the table creation time to the microsecond, `1790475089620377` against `1790475323514142`, the two wall clocks four minutes apart. The `.MAI`, `.MAD`, `.ibd`, `aria_log_control` and `ib_logfile0` differences are the matching creation stamps and log sequence numbers. |
@@ -325,9 +332,36 @@ count, is what the captures say:
 | control vs control again | 179 | 173 | 13 | 6 |
 | control again vs a third control | 182 | 173 | 16 | 6 |
 
+The captures these come from predate the format `bt-layer-measure` reads:
+they are bare `sha256sum` output, `<hash>` then two spaces then the path, so
+the tool cannot read them and the recount had to convert them first. Under
+the rule this note introduces, that command belongs here rather than in
+somebody's shell history. It is the whole of it:
+
+```
+key() {
+    sed 's/^\([0-9a-f]\{64\}\)  /\1\t/' "$1" \
+        | awk -F'\t' -v OFS='\t' '{ print $2, $1 }' | LC_ALL=C sort
+}
+differing() {
+    join -t"$(printf '\t')" -j1 <(key "/root/tree-$1.sha256") <(key "/root/tree-$2.sha256") \
+        | awk -F'\t' '$2 != $3 { print $1 }'
+}
+differing m-control m-unit | wc -l
+comm -23 <(differing m-control m-unit | sort -u) <(differing m-control m-control2 | sort -u)
+```
+
+The conversion is the point of the `key` function: it moves the path into
+field 1 and separates it with a tab, which is what the captures should have
+been written as in the first place. Captures taken from now on are in the
+tool's own format and need none of this.
+
 Three things follow, and the first two are why this note now names a command.
 
-**One control pair is not a floor.** Against `control vs control again` alone,
+**One control pair is not a floor.** A union floor is more permissive than a
+single pair, not more rigorous, since it subtracts strictly more; it is the
+right test because its answer does not depend on which two builds were named
+first. Against `control vs control again` alone,
 mariadb leaves three differences unaccounted for:
 `./usr/share/doc/turnkey-mariadb-19.0/changelog`,
 `./var/lib/dpkg/info/turnkey-mariadb-19.0.md5sums` and
@@ -335,7 +369,9 @@ mariadb leaves three differences unaccounted for:
 so they are install-time noise, but the pair the measurement happened to use
 did not show it. Against the union of the two control pairs the mariadb residue
 is zero, which is the result the pull request claimed, reached by an argument it
-did not make.
+did not make. `bt-layer-measure attribute` takes `--control-again` as many
+times as there are control captures and subtracts the union, and prints what
+each single pair would have said so the swing is on the record.
 
 **The postgresql extraction was not at zero.** Against either control pair, and
 against the union of both, one difference is left:

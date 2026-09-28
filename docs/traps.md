@@ -339,12 +339,20 @@ in another, so a difference attributed to the change against the first pair may
 be ordinary noise the first pair happened not to show. Subtracting one pair
 answers "is this difference in that pair", not "is this difference noise".
 
-**Fix.** `bt-layer-measure attribute` in `buildtasks`, and when a residue
-survives, capture a third control and subtract the union of both control
-pairs. Name the residue in the pull request rather than leaving it out: the
-postgresql extraction's residue was one line, the trailing comment on
-`listen_addresses` in `postgresql.conf`, which the component's conf script
-writes and `conf.d/main` used to.
+**Fix.** Capture at least three controls and give every one of them to
+`bt-layer-measure attribute` in `buildtasks`: `--control-again` is repeatable
+and the floor it subtracts is the union over every pair, so no single pair
+decides the verdict. The block also prints what each pair on its own would
+have said, which is where the swing shows. Name the residue in the pull
+request rather than leaving it out: the postgresql extraction's residue was
+one line, the trailing comment on `listen_addresses` in `postgresql.conf`,
+which the component's conf script writes and `conf.d/main` used to.
+
+A union floor is more permissive, not more rigorous: it subtracts strictly
+more than either pair, so zero against the union proves less than zero
+against one pair would have. It is the right test because it is the one whose
+answer does not depend on which two builds were named first, not because it
+is the harder one.
 
 **Hit** 2026-09-28, recounting the mariadb and postgresql extractions: 3 and 1
 files that the merged pull requests reported as zero.
