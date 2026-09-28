@@ -131,6 +131,14 @@ Differences attributable to the unit form, that is the control-vs-unit set
 minus the control-vs-control set: **zero**. The unit build differs from the
 control by exactly the files by which the control differs from itself.
 
+> Superseded by "What a recount found" below. The captures are still on the
+> build host and a recount of them gives 182, 179 and 182, not 173 three
+> times, and a residue of three files against the control pair this section
+> used. The conclusion of zero survives, against the union of both control
+> pairs; the counts in this table do not. The numbers are left as they were
+> reported, because what this note is now about is that nobody could check
+> them.
+
 ### The 173, named and explained
 
 | Count | Path | Difference |
@@ -263,9 +271,122 @@ The order to do this in, if the maintainer wants it:
    this note already lists as the main cost, or rule that a component needing
    either one stays in `common`. The second is cheaper and covers `mysql`,
    whose removelist is empty and whose variable is dead.
-3. Only then move components one at a time as we touch them, re-running this
+3. Only then move components one at a time as we touch them, re-running the
    three-build comparison for each, including the control-vs-control run.
-   Never as a migration.
+   Never as a migration. The command is `bt-layer-measure`, in `buildtasks`
+   (see below); a component extraction is not reviewable without the block it
+   prints.
+
+### The command, and what a pull request has to quote
+
+Added 2026-09-28, closing the gap this note left. Step 3 above asked for "this
+three-build comparison" and named nothing runnable: the capture was
+`/root/measure/build.sh` on the build host, a scratch file in root's home
+directory on one machine, and the comparison was ad hoc shell that was never
+committed. Two extractions, keel-mariadb#11 and keel-postgresql#7, were
+therefore approved on a number only their author could produce, which is
+testimony and not evidence. The comparison is now `bt-layer-measure` in
+`buildtasks`, documented in that repository's `docs/layer-measure.md`:
+
+    M=/mnt/builds/measure/<component>-$(date +%Y%m%d)
+    bt-layer-measure capture --dir $M --layer <layer> --parent <parent> --tag control
+    # check out the branch that supplies the component through unit.d
+    bt-layer-measure capture --dir $M --layer <layer> --parent <parent> --tag unit
+    # check out the control tree again
+    bt-layer-measure capture --dir $M --layer <layer> --parent <parent> --tag control-again
+    bt-layer-measure attribute --dir $M \
+        --control control --unit unit --control-again control-again
+
+All three captures at one `SOURCE_DATE_EPOCH`, one `common` commit and one
+parent layer, or nothing the comparison prints means anything. `capture` takes
+`/run/lock/keel-build.lock` with a bounded wait and writes into the directory
+named on the command line, so a reviewer re-runs the same command against the
+same directory rather than trusting a number.
+
+**A pull request extracting a component quotes the block `attribute` prints,
+whole.** It names the command, the three captures with their epoch and capture
+time, the noise floor, the attributable count, every state path with its
+verdict and a PASS or FAIL line. A claim of zero attributable differences that
+does not carry that block is not reviewable, and the extraction is not
+approved on it.
+
+### What a recount found, 2026-09-28
+
+The captures of both extractions are still on the build host
+(`/root/tree-m-{control,unit,control2,control3}.sha256` and the `p-` set for
+postgresql). Recounting them on a tab separated `path<TAB>hash` key, which is
+what `bt-layer-measure` does, gives different numbers from the ones above and
+from the ones the two pull requests quoted. The recount, not the earlier
+count, is what the captures say:
+
+| pair | mariadb | of which `./var/lib/mysql/**` | postgresql | of which `./var/lib/postgresql/**` |
+| --- | --- | --- | --- | --- |
+| control vs unit | 182 | 173 | 17 | 6 |
+| control vs control again | 179 | 173 | 13 | 6 |
+| control again vs a third control | 182 | 173 | 16 | 6 |
+
+Three things follow, and the first two are why this note now names a command.
+
+**One control pair is not a floor.** Against `control vs control again` alone,
+mariadb leaves three differences unaccounted for:
+`./usr/share/doc/turnkey-mariadb-19.0/changelog`,
+`./var/lib/dpkg/info/turnkey-mariadb-19.0.md5sums` and
+`./var/lib/dpkg/status`. All three are inside the *other* control pair's floor,
+so they are install-time noise, but the pair the measurement happened to use
+did not show it. Against the union of the two control pairs the mariadb residue
+is zero, which is the result the pull request claimed, reached by an argument it
+did not make.
+
+**The postgresql extraction was not at zero.** Against either control pair, and
+against the union of both, one difference is left:
+`./etc/postgresql/17/main/postgresql.conf`. It is one line, and it is real:
+
+```
+-listen_addresses = '::1,127.0.0.1'   # set by conf.d/main of keel-postgresql: see the comment there
++listen_addresses = '::1,127.0.0.1'   # set by the postgresql component: see the comment in its conf script
+```
+
+The value is identical and only the trailing comment moved, because the
+component's conf script writes a different comment than `conf.d/main` did. It
+is harmless, and it is exactly the sort of thing the measurement exists to
+surface: a file the component writes, differing because the component wrote it.
+It was reported as zero.
+
+**A path inside the noise floor was never evidence of noise.** 173 of the
+mariadb differences are `./var/lib/mysql/**`, subtracted because of where they
+are. That directory holds `mysql/global_priv` and `mysql/user.*`, and all four
+of `global_priv.MAD`, `global_priv.MAI`, `global_priv.frm` and `user.frm`
+differ in the control-vs-unit pair. The component's build-time job includes
+deleting accounts. So the measurement subtracted, as noise, every file the
+thing being measured would have shown up in. Nothing in it was wrong; nothing
+in it was evidence either.
+
+`bt-layer-measure` closes all three. It takes the three captures the step above
+asks for and reports the residue; it keeps the bytes of every path that can hold
+accounts, credentials, keys or database content
+(`share/layer-state-paths` in `buildtasks`) and compares them in both pairs, per
+line for a text file and per byte offset for a binary one, so the floor is
+subtracted at that level and not per path. A clock that moves in every build
+touches the same line or offset in both pairs and cancels; an account row that
+is gone leaves a line the control pair never produces, and is reported as real
+however deep inside the floor it sits. A state path whose bytes were not kept is
+reported as not sampled and fails the run, because a file the measurement could
+not read is not a file that did not change.
+
+It also keys every record on `path<TAB>...` with the path in field 1, rather
+than on `sha256sum`'s default `<hash>` plus two spaces plus `<path>`. That
+default is what made
+`setuptools/_vendor/jaraco/text/Lorem ipsum.txt` two fields that never matched
+themselves, so the LAMP measurement of 2026-09-27 reported 199 and 183
+differing files where the true counts were 198 and 182 (`docs/traps.md`, "A
+path with a space in it"). A path carrying a tab, a newline or a backslash is
+refused at capture time rather than mis-counted.
+
+Neither extraction is being reopened on this. Both layers are built, published
+and boot-tested, and the postgresql residue is a comment. What changes is the
+standard: from here on the block `bt-layer-measure attribute` prints is what a
+component extraction is reviewed on, and a residue is named and explained in
+the pull request rather than absent from it.
 
 ### What it costs either way
 
