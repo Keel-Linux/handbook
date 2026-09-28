@@ -326,6 +326,48 @@ today, which is what makes this easy to miss and easy to dismiss.
 **Hit** 2026-09-27, the LAMP composition measurement: 199 and 183 differing
 files, which are 198 and 182.
 
+## Renaming a Debian package drops whatever debhelper found by its name
+
+**Signature.** A package builds green after a rename, `lintian` is quiet, and
+the package is missing files or paths that the package it replaces had. In the
+worst shape the build succeeds and the first user of the missing path fails
+much later: a renamed `fab` with no `debian/<newname>.links` ships no
+`/usr/bin/fab-chroot`, and the failure appears at the first `fab-chroot` of
+the next layer build, not at packaging time.
+
+**Cause.** debhelper keys its per-package files on the **binary package
+name**: `debian/<package>.install`, `.links`, `.docs`, `.postinst` and the
+rest. A file left behind under the old name is not an error, it is simply not
+read. `dh_python3` does the same thing for private python directories, which
+it finds as `/usr/share/<package>`, so a package renamed from `fab` to
+`keel-fab` stops recognising `/usr/share/fab` and silently drops the
+byte-compilation registration in `/usr/share/python3/runtime.d` and the
+shebang rewrite of the scripts in it.
+
+**Fix.** Rename the `debian/<package>.*` files in the same commit, and assert
+every shipped path rather than trusting the build: one check per command, per
+symlink and per installed directory. Then **build both packages and compare
+the path set and the byte content**, because no assertion about `debian/` can
+say what a build produced.
+
+And when naming a private directory back, pass it **in addition to** the
+default pass, not instead of it:
+
+    override_dh_python3:
+    	dh_python3
+    	dh_python3 /usr/share/fab
+
+`dh_python3 <dir>` processes that directory *instead of* its usual work, and
+the usual work is what moves a module from `/usr/lib/python3.13/dist-packages`
+to the version independent `/usr/lib/python3/dist-packages`. One call with the
+argument trades a missing registration for a module pinned to one python
+version, which is the worse of the two and just as quiet.
+
+**Found** 2026-09-28 renaming `fab` to `keel-fab` (decision 0017,
+Keel-Linux/fab#9), by building both in a container and diffing them against
+the `.deb` installed on the build host. The static checks on `debian/` passed
+throughout and said nothing.
+
 ## Things we did wrong and would do again unless written down
 
 - **Discarding a local commit on a guess.** A checkout on the build host had a
