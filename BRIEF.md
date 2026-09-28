@@ -152,6 +152,12 @@ Ordering rationale: the spec first because it is the least invasive change and u
 - Git: never squash, never rewrite history; keep the upstream remote; cherry-pick with attribution.
 - A change of technical direction requires written justification with three parts: (1) why the previous approach does not work, (2) whether it can be made to work, (3) why the new approach is better. No exceptions.
 - Process over result: if the process fails, fix the process. Never bypass it.
+- **Issues live in the repository they concern.** Work that lands in a repository
+  gets an issue there and is closed by a pull request there. `tracker` is only for
+  what is common to the whole organization: cross-repo ordering, org-wide decisions,
+  things that belong to no single repo. Cross-referencing between the two is
+  encouraged; filing repo work in `tracker` instead of the repo is not. Open the
+  repo issue before delegating the work, never a task that exists only in a prompt.
 - Licensing: forked code stays GPL. Licensing of new components is a maintainer decision.
 - Documentation typography: no em dashes; use commas, colons, parentheses or semicolons; plain hyphen in numeric ranges.
 
