@@ -326,6 +326,126 @@ today, which is what makes this easy to miss and easy to dismiss.
 **Hit** 2026-09-27, the LAMP composition measurement: 199 and 183 differing
 files, which are 198 and 182.
 
+**Hit again** 2026-09-28, in `apt/lib/mirror.sh`: `awk 'NF == 3'` over the
+release MANIFEST's `size sha256 path` lines silently dropped any path with a
+space in it, so the digest check never saw that file while `wget -r` still
+fetched it and the install still published it — a hole in the gate exactly
+where a crafted file name puts one. `NF >= 3` fixes it, because every reader
+already used `read -r size sha path`, which takes the rest of the line. The
+lesson the first entry did not draw: a field **count** is the tell. If a
+format's last field can contain the separator, counting fields is the bug.
+
+## gpgv writes the plain text of a document whose signature it refused
+
+**Signature.** A verification step "works": the program reads the body of a
+signed file and goes on. It also goes on for a file signed by a key nobody
+trusts, or altered after signing, because the body was there to read.
+
+**Cause.** `gpgv --output FILE` writes the plain text **before** it decides,
+and leaves it there on a refusal. Measured 2026-09-28, both cases produced
+the full body beside a non zero exit:
+
+    gpgv --status-fd 1 --keyring k.gpg --output plain stable
+    rc=1
+    [GNUPG:] BADSIG 37D007E12762D9B0 Keel Test Channel Key
+    $ cat plain
+    channel stable
+    release 2026-09-28
+    ...
+
+**Fix.** Read the output only after every check below has passed, and
+raise rather than return text on a refusal, so no caller can reach it.
+`keel.layers.signature.verify_bytes` does this; on the publishing side the
+function that was doing it is `release_signature_current` in
+`apt/lib/release.sh`, which reads `--status-fd`. The first version of this
+entry named `channel_verified` in `apt/lib/channel.sh` instead, which read
+gpgv's exit status and nothing else — so it recorded as done a thing the
+code it cited did not do. `channel_verified` reads the status fd now, and
+both it and `release_signature_current` apply the rule below.
+
+**An exit status of 0 is not the check, and neither is `VALIDSIG`.** This
+is the part that cost the most, because the first version of this entry
+recorded "exit status and a VALIDSIG line" as sufficient and it is not.
+Measured on gpgv 2.4.7:
+
+| signature by | exit | status lines |
+| --- | --- | --- |
+| good key | 0 | `GOODSIG`, `VALIDSIG` |
+| revoked primary | **0** | `REVKEYSIG`, `VALIDSIG` |
+| revoked signing subkey, live primary | **0** | `REVKEYSIG`, `VALIDSIG` |
+| expired key | **0** | `KEYEXPIRED`, `EXPKEYSIG`, `VALIDSIG` |
+
+stderr says `Good signature from` in all four. `GOODSIG` is the only line
+gpgv withholds. **So the rule is: require `GOODSIG`**, and refuse
+`REVKEYSIG|EXPKEYSIG|KEYREVOKED|KEYEXPIRED` by name for a message that
+says which it was.
+
+It is worth knowing why this is not a detail. `VALIDSIG`'s last field is
+the *primary* fingerprint, so pinning a primary as the accepted signer
+also accepts a signature by a revoked subkey of it — and
+`apt/keys/keel-archive-keyring.asc` already carries
+`sub D276B62C2BD16F4E … r`, a signing subkey this project has had to
+revoke once. Revocation is the whole answer to the theft of a signing key,
+and a verifier that accepts `VALIDSIG` makes revocation do nothing.
+
+**A second property:** `gpgv` reads a **binary** keyring only. An ASCII
+armored one, which is the form this project publishes its keys in, gives
+`NO_PUBKEY` and exit 2 — which reads exactly like a wrong key. Dearmor
+first. A `--keyring` given as a relative path is resolved against
+`$GNUPGHOME` and not the working directory, and a keyring it cannot find
+produces the same `NO_PUBKEY`: three different faults, one message.
+
+**A third:** `gpgv` accepts SHA-1 unless told otherwise. Pass
+`--weak-digest SHA1`.
+
+**And a fourth, which is not about gpgv but about assuming it.** The first
+draft of the client said gpgv is on every appliance because apt verifies
+`InRelease` with it. On Debian 13 apt verifies with `sqv` and `gpgv` is a
+package of its own, which `apt`'s own README already recorded for
+`bin/verify-repo`. So the verifier could have been absent, and "I could
+not check this" is the one refusal a client must never make quietly. A
+program a check depends on is a package dependency, never an expectation.
+
+**Found** 2026-09-28, writing the channel pointer verification of decision
+0016, by testing the refusals before writing the code that reads the body.
+**The revoked and expired rows were found in review, after this entry had
+already been written with the wrong rule** — which is the trap this file is
+for, sprung inside the file itself. An entry that records a fix is worth
+less than no entry if the fix is not the one the code needs, because the
+next reader stops looking. Both implementations now require `GOODSIG`, and
+the shape to check for is: a verifier consulted for its exit status.
+
+## In one `local`, bash expands every word before it assigns any of them
+
+**Signature.** A function builds a path out of its own arguments and gets a
+path with a hole in it: `/srv/keel-release/` where `/srv/keel-release/2026-09-28`
+was meant. Under `set -u` in a generated script, the same shape is worse —
+the script dies at the unbound name with no message, the caller reports a
+generic failure, and the step looks like it did nothing.
+
+**Cause.** This is not sequential:
+
+    local date="$1" dir="$KEEL_RELEASE_ROOT/$date"
+
+`local` is a builtin, so the shell expands all of its arguments first and
+only then performs the assignments. `$date` in the second word is the value
+`date` had *outside* the function, which is usually empty. Two statements
+behave the way the one statement looks:
+
+    local date="$1" dir
+    dir="$KEEL_RELEASE_ROOT/$date"
+
+**Fix.** A `local` line declares names and assigns only from the positional
+parameters; anything derived from another local goes on its own line. Both
+halves of the channel work had this bug, and one of them was invisible: a
+published script referenced `$release` where the generator should have
+expanded it, so under `set -eu` it exited 1 before printing the refusal it
+existed to print, and the publication reported a generic exit 6.
+
+**Hit** 2026-09-28, twice, in the publishing side of decision 0016. The
+adversarial test ("a second publication of one revision with other content
+is refused") is what found the second one; the happy path passed.
+
 ## Things we did wrong and would do again unless written down
 
 - **Discarding a local commit on a guess.** A checkout on the build host had a
