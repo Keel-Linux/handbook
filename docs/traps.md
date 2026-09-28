@@ -326,6 +326,53 @@ today, which is what makes this easy to miss and easy to dismiss.
 **Hit** 2026-09-27, the LAMP composition measurement: 199 and 183 differing
 files, which are 198 and 182.
 
+## One control pair is not a noise floor
+
+**Signature.** An equivalence measurement reports a small residue of files
+that look like nothing to do with the change, typically a package's own
+`changelog`, `md5sums` and `/var/lib/dpkg/status`. Or, worse, it reports zero
+and a second control pair would not have.
+
+**Cause.** Two builds of the same recipe do not differ by a fixed set. The
+mariadb captures of 2026-09-27 differ by 179 files in one control pair and 182
+in another, so a difference attributed to the change against the first pair may
+be ordinary noise the first pair happened not to show. Subtracting one pair
+answers "is this difference in that pair", not "is this difference noise".
+
+**Fix.** `bt-layer-measure attribute` in `buildtasks`, and when a residue
+survives, capture a third control and subtract the union of both control
+pairs. Name the residue in the pull request rather than leaving it out: the
+postgresql extraction's residue was one line, the trailing comment on
+`listen_addresses` in `postgresql.conf`, which the component's conf script
+writes and `conf.d/main` used to.
+
+**Hit** 2026-09-28, recounting the mariadb and postgresql extractions: 3 and 1
+files that the merged pull requests reported as zero.
+
+## A differing path inside the noise floor is not a noise difference
+
+**Signature.** An equivalence measurement passes, and the change it was
+measuring was one whose whole effect lands in a directory the measurement
+subtracted by name.
+
+**Cause.** A path is put inside the noise floor by where it is. Whether its
+difference is really noise is a question about its bytes. For mariadb 173 of
+the 179 noise-floor files are `/var/lib/mysql/**`, which holds
+`mysql/global_priv` and `mysql/user.*`, and the component's build-time job
+includes deleting accounts.
+
+**Fix.** Keep the bytes of anything that can hold accounts, credentials, keys
+or database content (`share/layer-state-paths` in `buildtasks`) and subtract
+the floor per line for a text file and per byte offset for a binary one, not
+per path. A clock that moves in every build touches the same line or offset in
+both pairs and cancels; an account row that is gone does not. A file the
+measurement could not read is not a file that did not change, so an unsampled
+state path fails the run.
+
+**Hit** 2026-09-27, both component extractions: `global_priv.MAD`,
+`global_priv.MAI`, `global_priv.frm` and `user.frm` all differ in the
+control-unit pair and all were subtracted unexamined.
+
 ## Things we did wrong and would do again unless written down
 
 - **Discarding a local commit on a guess.** A checkout on the build host had a
