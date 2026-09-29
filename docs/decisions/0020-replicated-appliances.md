@@ -1,12 +1,11 @@
 # 0020: Replicated appliances, and what Keel Cloud does for them
 
 Date: 2026-09-29
-Status: **proposed**. The direction was set by the maintainer on
-2026-09-29 and is listed under "Decided". How the pieces are split between
-the appliance and separate projects is this note's proposal, and the
-questions at the end are open. It extends decision 0013, and it would amend
-two of its lines and one of the brief's, which the maintainer has to accept
-explicitly (brief section 11): see "What this changes in 0013 and the brief".
+Status: **decided 2026-09-29**, in two rounds: the direction first
+("Decided"), then the questions this note had left open ("Decided,
+second round"). It extends decision 0013 and amends two of its lines and
+one of the brief's (brief section 11): see "What this changes in 0013 and
+the brief".
 
 ## What was asked for
 
@@ -82,8 +81,8 @@ machines is a separate project that consumes Keel's spec.
 | Files | the stack layer, from the mutable state map (brief 4.2) | copied one way, pulled by each replica from the primary over WireGuard |
 | Health | `keel verify` | the signal everything else reads |
 | Promotion | `keel database promote`, widened | the database and the file tree promoted together, or neither |
-| Election | a separate project, running on the nodes | a majority of three decides who is primary, promotes it, and fences the loser |
-| DNS, membership, key exchange | Keel Cloud, a separate project | points the name at the primary, lets nodes find each other, distributes WireGuard public keys |
+| Election | keel-quorum, a separate project running on the nodes | a majority of three decides who is primary, promotes it, and fences the loser |
+| DNS, membership, key exchange | keel-cloud, a separate project | points the name at the primary, lets nodes find each other, distributes WireGuard public keys |
 
 **The replicas pull the files; the primary does not push.** 0013 decided that
 a primary authorizes its replicas and does not enumerate them ("A primary
@@ -166,8 +165,8 @@ claim of 0013.
 
 ## What this changes in 0013 and the brief
 
-Accepted as proposed, this note amends three lines. The maintainer has to
-say yes to each, because they move the brief's boundary:
+This note amends three lines, which move the brief's boundary. They were
+accepted on 2026-09-29 with the election on the nodes (keel-quorum):
 
 - 0013 says "watching for failure, moving that role around" is an
   orchestrator "we are not writing here". The election does exactly that.
@@ -195,20 +194,45 @@ Nothing here starts before the network field of keel#35 (0018) is done. Then:
 5. Keel Cloud as its own project: DNS with a health check, membership, key
    exchange. It starts with its own decision note.
 
+All of it comes after roadmap phase 3, the orchestrated upgrade
+(WordPress first): upgrading a replicated set is "upgrade a replica,
+promote, upgrade the old primary", which needs the upgrade of one machine
+to be reliable and reversible first.
+
 Steps 1 to 3 give a standalone operator a warm replica they promote by hand;
 step 4 makes it automatic; step 5 removes the manual DNS and key work.
 
-## Open for the maintainer
+## Decided, second round (2026-09-29)
 
-- The three amendments above.
-- Where this sits against the roadmap's phase 3, the orchestrated upgrade
-  (WordPress first). The proposal is to keep phase 3 first, since an upgrade
-  of a replicated set needs the upgrade path of one machine to exist.
-- The election mechanism: Patroni with its built-in Raft for PostgreSQL, and
-  something else for MariaDB and the web tier; or one etcd-based election
-  for the whole appliance. Whether the third node may be a small witness
-  that votes but holds no data, which halves the cost of three.
-- Whether the old primary may rejoin by itself (hard part 4), or only by an
-  operator's confirmed act, as 0013 has it today.
-- The name of the election project, and whether it lives in the Keel-Linux
-  organisation beside Keel Cloud.
+- **Order.** Roadmap phase 3, the orchestrated upgrade, comes first; this
+  work follows it (see "Order").
+- **One election for the whole appliance, on etcd.** One leader per
+  appliance, held by a lease in an etcd cluster on the nodes, and each
+  engine promoted through `keel database promote`. Not Patroni for
+  PostgreSQL beside something else for MariaDB and the files: two
+  independent leaders can disagree, and database, files and web tier must
+  be promoted together. Patroni is left out because it wants to own
+  PostgreSQL alone. **The third node may be a voter that holds no data**,
+  an etcd member only, which makes the minimum of three cheaper.
+- **Three choices belong to the operator, made at installation**, on a
+  standalone set as much as in Keel Cloud, which only offers them in a
+  friendlier screen:
+
+  | Choice | Options | Default |
+  | --- | --- | --- |
+  | Failover: a replica takes over when the primary is lost | automatic, manual | automatic, allowed only with three nodes; installation refuses it with fewer |
+  | Rejoin: the old primary comes back as a replica | automatic, manual | manual. Automatic keeps a copy of what the node held (a database dump and the file tree) before replacing it, so the writes that never reached the others are not lost silently. Manual stays the confirmed act of 0013 |
+  | Failback: the primary role goes back to the original node | automatic, manual, never | manual |
+
+- **Names and home.** `keel-quorum`, the election on the nodes, and
+  `keel-cloud`, the DNS, membership and key exchange service: two
+  repositories in the Keel-Linux organisation, apart from `keel`.
+- **A read-only status panel in confconsole.** One line per node: its
+  role, the database's replication lag, the time of its last file pull,
+  its `keel verify` health, and the elected leader when there is an
+  election. It is what an operator needs to pick the replica to promote
+  by hand, and, before a rejoin, to see what the old primary holds that
+  the new one does not. It reads the other nodes over WireGuard and
+  changes nothing on them: promotion and rejoin stay actions on the node
+  they concern, which keeps 0013's rule that each screen configures only
+  the machine it runs on. It belongs to step 3 of the order.
