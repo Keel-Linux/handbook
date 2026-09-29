@@ -326,6 +326,39 @@ today, which is what makes this easy to miss and easy to dismiss.
 **Hit** 2026-09-27, the LAMP composition measurement: 199 and 183 differing
 files, which are 198 and 182.
 
+## Two machines answer to `tkldev`, and they run different fab
+
+**Signature.** A claim about the build order, or about anything else in
+`product.mk`, that is internally coherent, cites a real file at a real path,
+survives a review, and does not describe what the build does. Nothing in the
+change depends on the wrong part, which is why it survives: the facts the work
+rests on are checked and correct, and the sentence around them is not.
+
+**Cause.** The LXC container on a workstation and the build host both answer to
+`tkldev`, and they run different fab. Reading `/usr/share/fab/product.mk` on
+the nearer one answers a question about the other. Measured 2026-09-28:
+
+| Machine | fab | `product.mk` md5 | Unit phases in `root.patched/body` |
+| --- | --- | --- | --- |
+| local `tkldev` container | `1.1.1`, stock | `0657df1a` | one, after the common removelists |
+| fab `1.1.1+keel1` (b07a733) | `1.1.1+keel1` | `c04cb601` | one, after the common removelists, as in stock (the file differs from stock only in `SOURCE_DATE_EPOCH`) |
+| build host | `1.1.1+keel2` | `a06bfe03` | three (overlays, conf scripts, removelists), before the common removelists |
+
+**Fix.** Take the reading from the machine that builds, and name the fab
+version beside it so the next reader can tell which file was read. A version
+string alone is not enough: the first correction named `1.1.1+keel1`, the one
+release that does not carry the order it was describing, and was wrong again in
+the same way. Quote the md5 of the file the reading came from; `md5sum
+/usr/share/fab/product.mk` on the build host settles it in one line, and
+`dpkg-query -W fab` says which version that is.
+
+**Hit** 2026-09-28 in the core login change (keel-core#9). The order written
+into `conf.d/main`, `COVERAGE.md` and the commit message put the common
+removelists before the units, read faithfully from the container's file. The
+two facts the change rested on were true in both versions, so the first review
+passed it; the second caught it, and then caught the version string in the
+correction.
+
 ## Things we did wrong and would do again unless written down
 
 - **Discarding a local commit on a guess.** A checkout on the build host had a
