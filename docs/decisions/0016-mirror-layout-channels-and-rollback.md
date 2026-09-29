@@ -42,8 +42,9 @@ Exactly one object in the mirror is mutable, and it is a signed pointer.
 The flat names stay, as hard links to the blobs, until their removal is its
 own change. That hard link is only compatible with "a blob is immutable"
 because the publisher validates the name it links from: `tarball` must be a
-plain file name, since `ln -f` unlinks what it names and a manifest saying
-`tarball sha256/<digest>` would otherwise replace a published blob.
+plain file name ending `.tar.zst`, since `ln -f` unlinks what it names and
+`tarball sha256/<digest>` would otherwise replace a published blob, or
+`tarball stable` a channel pointer.
 
 **The pointer is one clear signed file, not a file beside a detached
 signature.** Two files are two mutable objects, and a mirror could serve a
