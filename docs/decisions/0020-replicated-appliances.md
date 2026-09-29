@@ -4,7 +4,8 @@ Date: 2026-09-29
 Status: **decided 2026-09-29**, in two rounds: the direction first
 ("Decided"), then the questions this note had left open ("Decided,
 second round"). It extends decision 0013 and amends two of its lines and
-one of the brief's (brief section 11): see "What this changes in 0013 and
+one of the brief's (section 2), a change brief section 11 reserves to
+the maintainer: see "What this changes in 0013 and
 the brief".
 
 ## What was asked for
@@ -29,7 +30,7 @@ is new.
   standalone, primary or replica. Nothing assigns roles at installation from
   outside. This is the console flow 0013 already decided for databases,
   widened to the whole appliance.
-- **One primary and replicas on standby.** One machine takes writes; the
+- **One primary and replicas that follow it.** One machine takes writes; the
   others follow it and can be promoted. Not active-active: with two writers,
   files synchronised both ways conflict, and an Odoo filestore must move
   together with its database.
@@ -115,12 +116,12 @@ Measured with `apt-cache policy` on trixie, 2026-09-29.
 | --- | --- | --- |
 | wireguard-tools | 1.0.20210914-3 | the overlay; the module is in the kernel, and in a container the host loads it (0018) |
 | rsync | 3.5.0+ds1-0+deb13u1 | the replicas' pull of the file tree |
-| patroni | 4.0.7-3~deb13u1 | PostgreSQL election, promotion and demotion |
-| python3-pysyncobj | 0.3.14-2 | Patroni's built-in Raft, a majority without a separate store |
-| etcd-server | 3.5.16-4 | a majority store, if one election covers every engine |
-| lsyncd | 2.2.3-1+b1 | not proposed: it pushes, which needs the primary to list its replicas |
-| syncthing | 1.29.5~ds1-2 | not proposed: made for syncing both ways, which one writer does not want |
-| keepalived | 1:2.3.3-1 | not proposed: a floating address needs a shared link layer, which nodes in different places do not have |
+| etcd-server | 3.5.16-4 | the election's majority store, on every voter |
+| patroni | 4.0.7-3~deb13u1 | not used: it wants to own PostgreSQL alone, and one election covers database, files and web tier together |
+| python3-pysyncobj | 0.3.14-2 | not used: Patroni's built-in Raft, left out with Patroni |
+| lsyncd | 2.2.3-1+b1 | not used: it pushes, which needs the primary to list its replicas |
+| syncthing | 1.29.5~ds1-2 | not used: made for syncing both ways, which one writer does not want |
+| keepalived | 1:2.3.3-1 | not used: a floating address needs a shared link layer, which nodes in different places do not have |
 
 So every piece can be rebuilt from the archive, which keeps the sovereignty
 claim of 0013.
@@ -131,11 +132,13 @@ claim of 0013.
    primary cut off from the other two keeps accepting writes unless it stops
    itself. The mechanism: the primary holds a lease from the majority, and
    when it cannot renew it, it demotes itself before the lease expires, and
-   the others wait for expiry before electing. Demoting covers the database
+   the others wait for expiry before electing. This holds with a voter
+   that has no data as the third member too: a primary cut off from the
+   other two is still in the minority. Demoting covers the database
    **and** the web tier, which turns read-only, because uploads would
    otherwise keep landing on the fenced machine's disk while DNS still points
-   at it (hard part 5). Patroni makes this safe with a hardware or softdog
-   watchdog that reboots a node which failed to demote in time. An LXC
+   at it (hard part 5). On a VM, keel-quorum arms a watchdog (hardware or
+   `softdog`) that reboots a node which failed to demote in time. An LXC
    container has no `/dev/watchdog`, so in a container the guarantee rests on
    the process demoting itself on time, and the note says so rather than
    claiming more. A VM can have the watchdog.
@@ -150,9 +153,11 @@ claim of 0013.
    missing. Promotion stops the pull, promotes the database, and opens the
    tree for writes as one operation, or refuses.
 4. **The old primary coming back.** It must rejoin as a replica, which means
-   replacing its data with a copy of the new primary. 0013 makes that an
-   explicit, confirmed act. Automatic rejoin would break that rule, so it
-   needs its own decision.
+   replacing its data with a copy of the new primary. Rejoin is the
+   operator's choice (second round): manual by default, which is 0013's
+   explicit, confirmed act; automatic first keeps a database dump and a
+   copy of the file tree, so what never reached the others is not lost
+   silently.
 5. **DNS is not instant.** With a low TTL and a health check, clients follow
    a failover in one to five minutes, and some resolvers ignore low TTLs.
    This is stated, not hidden.
@@ -161,7 +166,9 @@ claim of 0013.
    Three containers on the build host's bridge. Write on the primary, stop
    it, watch a replica win the election and serve, and bring the old primary
    back as a replica. Then cut one node off the overlay and check that it
-   turns read-only, database and web tier both. Untested, none of it ships.
+   turns read-only, database and web tier both. Both layouts are tested:
+   three data nodes, and two data nodes with a voter. Untested, none of it
+   ships.
 
 ## What this changes in 0013 and the brief
 
@@ -194,7 +201,7 @@ Nothing here starts before the network field of keel#35 (0018) is done. Then:
 5. Keel Cloud as its own project: DNS with a health check, membership, key
    exchange. It starts with its own decision note.
 
-All of it comes after roadmap phase 3, the orchestrated upgrade
+All of it comes after milestone M3's orchestrated upgrade (brief section 9)
 (WordPress first): upgrading a replicated set is "upgrade a replica,
 promote, upgrade the old primary", which needs the upgrade of one machine
 to be reliable and reversible first.
@@ -204,7 +211,7 @@ step 4 makes it automatic; step 5 removes the manual DNS and key work.
 
 ## Decided, second round (2026-09-29)
 
-- **Order.** Roadmap phase 3, the orchestrated upgrade, comes first; this
+- **Order.** The orchestrated upgrade of milestone M3 comes first; this
   work follows it (see "Order").
 - **One election for the whole appliance, on etcd.** One leader per
   appliance, held by a lease in an etcd cluster on the nodes, and each
@@ -213,14 +220,19 @@ step 4 makes it automatic; step 5 removes the manual DNS and key work.
   independent leaders can disagree, and database, files and web tier must
   be promoted together. Patroni is left out because it wants to own
   PostgreSQL alone. **The third node may be a voter that holds no data**,
-  an etcd member only, which makes the minimum of three cheaper.
+  which makes the minimum of three cheaper. A voter is not an appliance:
+  it runs etcd and keel-quorum only, has no role in any spec, and is
+  installed on its own.
 - **Three choices belong to the operator, made at installation**, on a
   standalone set as much as in Keel Cloud, which only offers them in a
-  friendlier screen:
+  friendlier screen. Nodes are installed one at a time, so the choices are
+  made once, when the set is formed, and stored in etcd, where every node
+  reads the same answer. Automatic failover is held off, and shown so on
+  the status panel, until three voters are present:
 
   | Choice | Options | Default |
   | --- | --- | --- |
-  | Failover: a replica takes over when the primary is lost | automatic, manual | automatic, allowed only with three nodes; installation refuses it with fewer |
+  | Failover: a replica takes over when the primary is lost | automatic, manual | automatic, active only once three voters are present |
   | Rejoin: the old primary comes back as a replica | automatic, manual | manual. Automatic keeps a copy of what the node held (a database dump and the file tree) before replacing it, so the writes that never reached the others are not lost silently. Manual stays the confirmed act of 0013 |
   | Failback: the primary role goes back to the original node | automatic, manual, never | manual |
 
