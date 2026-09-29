@@ -326,6 +326,98 @@ today, which is what makes this easy to miss and easy to dismiss.
 **Hit** 2026-09-27, the LAMP composition measurement: 199 and 183 differing
 files, which are 198 and 182.
 
+## One control pair is not a noise floor
+
+**Signature.** An equivalence measurement reports a small residue of files
+that look like nothing to do with the change, typically a package's own
+`changelog`, `md5sums` and `/var/lib/dpkg/status`. Or, worse, it reports zero
+and a second control pair would not have.
+
+**Cause.** Two builds of the same recipe do not differ by a fixed set. The
+mariadb captures of 2026-09-27 differ by 179 files in one control pair and 182
+in another, so a difference attributed to the change against the first pair may
+be ordinary noise the first pair happened not to show. Subtracting one pair
+answers "is this difference in that pair", not "is this difference noise".
+
+**Fix.** Capture at least three controls and give every one of them to
+`bt-layer-measure attribute` in `buildtasks`: `--control-again` is repeatable
+and the floor it subtracts is the union over every pair, so no single pair
+decides the verdict. The block also prints what each pair on its own would
+have said, which is where the swing shows. Name the residue in the pull
+request rather than leaving it out: the postgresql extraction's residue was
+one line, the trailing comment on `listen_addresses` in `postgresql.conf`,
+which the component's conf script writes and `conf.d/main` used to.
+
+A union floor is more permissive, not more rigorous: it subtracts strictly
+more than either pair, so zero against the union proves less than zero
+against one pair would have. It is the right test because it is the one whose
+answer does not depend on which two builds were named first, not because it
+is the harder one.
+
+**Hit** 2026-09-28, recounting the mariadb and postgresql extractions: 3 and 1
+files that the merged pull requests reported as zero.
+
+## A differing path inside the noise floor is not a noise difference
+
+**Signature.** An equivalence measurement passes, and the change it was
+measuring was one whose whole effect lands in a directory the measurement
+subtracted by name.
+
+**Cause.** A path is put inside the noise floor by where it is. Whether its
+difference is really noise is a question about its bytes. For mariadb 173 of
+the 179 noise-floor files are `/var/lib/mysql/**`, which holds
+`mysql/global_priv` and `mysql/user.*`, and the component's build-time job
+includes deleting accounts.
+
+**Fix.** Keep the bytes of anything that can hold accounts, credentials, keys
+or database content (`share/layer-state-paths` in `buildtasks`) and judge each
+differing state path by its bytes, which is what `bt-layer-measure attribute`
+does. Do not cancel a difference against the controls by position alone: two
+unrelated changes at one line number or one byte offset look alike, and an
+account added on the line a clock moves on would pass. A text line is noise
+only if the controls pin what varies there, the same short length and only
+digits and date punctuation, as a timestamp is; a binary difference is never
+shown to be noise and has to be read and cleared in writing. A file the
+measurement could not read is not a file that did not change, so an unsampled
+state path fails the run.
+
+**Hit** 2026-09-27, both component extractions: `global_priv.MAD`,
+`global_priv.MAI`, `global_priv.frm` and `user.frm` all differ in the
+control-unit pair and all were subtracted unexamined.
+
+## Two machines answer to `tkldev`, and they run different fab
+
+**Signature.** A claim about the build order, or about anything else in
+`product.mk`, that is internally coherent, cites a real file at a real path,
+survives a review, and does not describe what the build does. Nothing in the
+change depends on the wrong part, which is why it survives: the facts the work
+rests on are checked and correct, and the sentence around them is not.
+
+**Cause.** The LXC container on a workstation and the build host both answer to
+`tkldev`, and they run different fab. Reading `/usr/share/fab/product.mk` on
+the nearer one answers a question about the other. Measured 2026-09-28:
+
+| Machine | fab | `product.mk` md5 | Unit phases in `root.patched/body` |
+| --- | --- | --- | --- |
+| local `tkldev` container | `1.1.1`, stock | `0657df1a` | one, after the common removelists |
+| fab `1.1.1+keel1` (b07a733) | `1.1.1+keel1` | `c04cb601` | one, after the common removelists, as in stock (the file differs from stock only in `SOURCE_DATE_EPOCH`) |
+| build host | `1.1.1+keel2` | `a06bfe03` | three (overlays, conf scripts, removelists), before the common removelists |
+
+**Fix.** Take the reading from the machine that builds, and name the fab
+version beside it so the next reader can tell which file was read. A version
+string alone is not enough: the first correction named `1.1.1+keel1`, the one
+release that does not carry the order it was describing, and was wrong again in
+the same way. Quote the md5 of the file the reading came from; `md5sum
+/usr/share/fab/product.mk` on the build host settles it in one line, and
+`dpkg-query -W fab` says which version that is.
+
+**Hit** 2026-09-28 in the core login change (keel-core#9). The order written
+into `conf.d/main`, `COVERAGE.md` and the commit message put the common
+removelists before the units, read faithfully from the container's file. The
+two facts the change rested on were true in both versions, so the first review
+passed it; the second caught it, and then caught the version string in the
+correction.
+
 ## A bats negation that is not last asserts nothing
 
 **Signature.** A negative test passes whatever the code does. Deleting the
