@@ -1,7 +1,8 @@
 # 0021: A resource monitor that tells the operator what to do
 
 Date: 2026-09-29
-Status: **proposed**. Asked for by the maintainer on 2026-09-29: an
+Status: **decided 2026-09-29** (see "Decided" at the end). Asked for by
+the maintainer on 2026-09-29: an
 internal monitor that notifies the operator, by email, Telegram and
 whatever else is worth it, when a disk fills, memory runs short, or CPU
 or network are overused, so that they grow the disk or the memory in
@@ -134,12 +135,15 @@ disk is filled on purpose (a loop-mounted filesystem, filled with
 `fallocate`) must produce a message on a local ntfy endpoint with its
 own disk at 100%, and a recovery message once the file is removed.
 
-## Open for the maintainer
+## Decided 2026-09-29
 
-- The channels: email, Telegram, ntfy and webhook; add or drop any.
-- The defaults above (disk 80/90, memory 85, CPU 90 for 10 minutes).
-- Whether the monitor is on by default in new images, or only when the
-  spec enables it (proposed: only when enabled, with a first boot
-  question in the init fence later).
-- Order: after the network field of keel#35, before or after M3's
-  orchestrated upgrade.
+- **The channels are email, Telegram, ntfy and webhook**, all four.
+- **The defaults are the ones above**: disk 80 percent to warn and 90
+  critical, inodes 90, memory 85 for 5 minutes, swap 50 for 5 minutes,
+  CPU 90 for 10 minutes, load 2 per core for 10 minutes; network only
+  when declared.
+- **Off unless the spec enables it.** Without a declared channel there is
+  nobody to tell; a first boot question in the init fence can come later.
+- **Built right after the network field of keel#35**, before M3's
+  orchestrated upgrade: it is small, and it protects the appliances that
+  already run.
