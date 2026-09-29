@@ -6,6 +6,12 @@ existed; what follows records what is running, not a proposal. Extends 0005,
 which settles the shape and custody of the release key. Relied on by 0016,
 which gives the channel pointer to the online key.
 
+Key custody is reserved to the maintainer (brief, section 11). The staging key
+answers the maintainer's instruction that a nightly build must not wait for a
+typed passphrase (`Keel-Linux/apt` becf0e8); the rule this note draws from it,
+under "What each key is allowed to say", is the maintainer's to ratify, and
+that is asked in handbook#11.
+
 ## What is in force
 
 Two distributions in the archive, signed by different keys, measured in
@@ -66,14 +72,15 @@ release `SignWith` is in the keyring, rather than publishing unsigned.
 
 ## Why this note was late, and what that cost
 
-The separation was implemented first and cited from four places in
+The separation was implemented first and cited from five places in
 `Keel-Linux/apt` (`conf/distributions`, `lib/common.sh`, `lib/publish.sh`
-twice) while the note did not exist. The number was skipped when 0012 was
+twice, `README.md`) while the note did not exist. The number was skipped when 0012 was
 written the same day.
 
 That cost something concrete rather than being untidy. On 2026-09-28 the gap
 was investigated, found to contain no deleted file, and recorded as a
-deliberate gap in a placeholder note, on the reasoning that nothing referenced
+deliberate gap in a placeholder note (the first commit of handbook#11,
+never merged), on the reasoning that nothing referenced
 an 0011. That reasoning was wrong: it checked this repository and not the one
 doing the citing. The placeholder is replaced by this note.
 
