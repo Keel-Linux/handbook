@@ -3445,3 +3445,93 @@ the counting test derives its count from the same place while still naming
 the seven appliances it has always named, so a conf that lost a line still
 fails rather than quietly releasing less. Adding an appliance is a one line
 change again.
+
+## The queue emptied, and the keys every image shared (2026-09-29)
+
+The maintainer authorised merging on 2026-09-29, after 41 pull requests had
+piled up waiting for it. Branch protection never required a review, only
+checks, so the queue had been waiting on authorisation, not on GitHub. Before
+merging, every pull request was brought to a verdict: nine carried CRITICAL
+or HIGH findings with no commit after the review, and nineteen had never been
+reviewed. Seven agents, one per cluster, reviewed what had not been, fixed
+what had been found, with new commits only, and waited for CI; merges and
+protection changes stayed with one coordinator, in dependency order, each at
+the head that was reviewed (`--match-head-commit`), always as merge commits.
+
+| Cluster | Merged |
+| --- | --- |
+| appliance gate named for what it proves | .github#12 and nine callers; protection renamed in eight repositories in the same sitting |
+| negations that assert | nine PRs, keel-wordpress#12, then the gate .github#14 |
+| content addressed layers and channels | keel#34, apt#14, handbook#10 |
+| the 0010 measurement | buildtasks#11, handbook#8 |
+| identity and naming | common#8, keel-wordpress#6, handbook#3 |
+| first boot | common#12, inithooks#18, inithooks#14 |
+| handbook | #13 |
+| keel-core#8 | inithooks#19, common#14, buildtasks#14 |
+
+Held, each for a stated reason: keel-nodejs-nginx#2 (red since 2026-09-26,
+no boot test, keel-nodejs-nginx#3); keel-mariadb#11 and keel-postgresql#7
+(phase 4); handbook#6, common#5 and keel-core#9 (decision 0014); fab#9 and
+handbook#18 (the name and version of keel-fab); handbook#11 (decision 0011,
+key custody); handbook#4 (a rule added to the brief).
+
+### The pinning proof held (apt#9, closed)
+
+The daily self check reported `packages=match` on 2026-09-28 and 2026-09-29
+against the reference seeded on 2026-09-27: package list sha256
+`4918887d...` all three times, tarballs different every time, which is the
+install-time state decision 0012 separates from versions.
+
+### Every image shipped the same private keys (keel-core#8)
+
+The issue named one key. Measured on all twelve layer trees and on every
+layer and template on mirror.keellinux.org, there were four kinds, identical
+in every image built from core:
+
+| Key | Came from |
+| --- | --- |
+| SSH host keys, `SHA256:co8r09Mo...` (ed25519) and two more | openssh-server at build time |
+| `/etc/ssl/private/cert.key`, `cert.pem` | turnkey-ssl's postinst copies the key it ships |
+| `/etc/webmin/miniserv.pem` | webmin at build time; unused |
+| snakeoil, one per lapp and postgresql build | ssl-cert |
+
+A machine only got its own from `10regen-sshkeys` and `15regen-sslcert`; one
+where they did not run served a key anyone can download, and nothing said
+so. The one public appliance, `forum`, serves its own keys.
+
+The fix is in three places so that none of them depends on another being
+remembered: the build removes the keys (`common/removelists-final`); the
+layer export refuses a tree that still has one (`layer_audit_keys` in
+`buildtasks`, a PEM header on its own line, text files only, four inert
+package examples allowed at their path and digest); and every boot
+generates what is missing and replaces any key on the list of published
+ones (`keel-host-keys.service` in inithooks, before sshd, Webmin, the web
+servers, PostgreSQL and the init fence). Run against the keys extracted
+from the published core layer, it replaced all four.
+
+The independent security review found one CRITICAL in the fix itself: a
+dpkg `path-exclude` for turnkey-ssl's key would have failed that package's
+postinst under `sh -e` whenever `/etc/ssl/private` was empty, which is now
+always the case in a layer. It was dropped; the key in `/usr/share` is
+public in the package anyway, and what matters is that nothing reads it.
+Also fixed from the review: a unit `Condition` that would have skipped
+silently on a read-only `/etc`, `umask 077`, and armoured OpenPGP secret
+keys in the detector.
+
+Not done, and attended: publish `inithooks 2.3.6+keel8` (it carries keel6,
+the host keys, with #18 and #14); update common and
+buildtasks on the build host together (the audit without the removals
+refuses every layer); rebuild the chain and publish. Until then the images
+on the mirror still carry the keys, and `keel-host-keys` is what protects a
+machine made from one.
+
+### Also
+
+- tracker#20: the TurnKey 19.0 catalog ranked for porting. TurnKey
+  publishes no download counts anywhere now; the ranking combines the
+  site's own popularity order, tracker issues since 2022 and stars, with
+  the raw columns kept.
+- The site took a Plausible snippet (keel-linux.github.io 9549961a); the
+  VM served it at 03:52:56 UTC, fifteen minutes after the push, as
+  designed. `analytics.pop.coop` has no AAAA record; IPv6-only visitors
+  reach it through NAT64.
