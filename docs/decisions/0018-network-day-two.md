@@ -67,27 +67,42 @@ with a confirmation window:
    uses (`lib/ipconfig.sh`), so a first boot and a day two write the same
    file for the same spec.
 2. Before touching anything, the run saves the current file under
-   `/var/lib/keel/network/` with a pending marker, and arms a revert: a
+   `/var/lib/keel/network/` with a pending marker that records the time of
+   the change, and arms a revert: a
    transient systemd timer (`systemd-run --on-active=`) that restores the
    saved file and brings the interface up on it. The timer is armed first,
    so a run that dies half way still reverts. A transient timer does not
    survive a reboot, so a unit shipped in the image also runs at boot,
-   before networking: if the pending marker is there and no confirmation was
-   recorded, it restores the saved file. A machine that reboots inside the
-   window comes back on the old network.
-3. The file is written and the interface is brought down and up
-   (`ip link set down`, then `ifup`, as `01ipconfig` does; the image ships
-   ifupdown-ng, which has no `ifreload`). The revert does the same, and
-   flushes the addresses on the interface before `ifup`, so no address the
-   new configuration added survives beside the old ones.
+   before networking (`DefaultDependencies=no`,
+   `RequiresMountsFor=/var/lib/keel`, ordered before `network-pre.target`,
+   `networking.service` and `wg-quick@.service`): if the pending marker is
+   there and no confirmation was recorded, it restores the saved file, or
+   `/etc/wireguard/` for the overlay. A machine that reboots inside the
+   window comes back on the old network. Confirming and reverting both
+   remove the marker.
+3. The interface is taken down on the outgoing configuration (`ifdown`, which
+   also stops a DHCP client it started and withdraws its resolvconf
+   entries), its addresses are flushed, since IPv4 addresses survive a link
+   going down, the new file is written, and the interface comes up on it
+   (`ifup`; the image ships ifupdown-ng, which has no `ifreload`). The revert
+   is the same sequence in the other direction, so neither leaves an address
+   or a DHCP client of the other behind.
 4. The run then waits for a confirmation that arrives **over the new
    configuration**: `keel network confirm`, its own command, run in a new
    session. That command cancels the timer and records the confirmation.
-   It refuses unless it arrives over the new configuration: run from SSH,
-   the local address of the connection (`SSH_CONNECTION`) must be one the
-   change added or kept; from a console it is accepted, since a person at
-   the console has seen the machine. A shell that survived the change, in
-   tmux or because only the gateway moved, cannot confirm by accident. Being
+   It refuses unless it arrives over the new configuration. Over SSH, the
+   session must have started after the change (its sshd process is younger
+   than the time in the marker), and its local address must be one the
+   change added or kept. The session is found from the process tree or
+   `loginctl`, not from the environment, which `sudo` resets. On a console,
+   recognised by its terminal (`tty1`, `ttyS0`, `hvc0`, `console`), it is
+   accepted, since a person there has seen the machine. So a shell that
+   survived the change, in tmux or under `sudo`, cannot confirm by accident.
+   One limit is stated rather than hidden: a new session from a client on
+   the same link does not use the gateway, so when the gateway changed,
+   confirm checks that the route back to the client (`ip route get`) goes
+   through the new gateway, and says so when it does not rather than
+   claiming the gateway was tested. Being
    its own command, it can be run by a person from a new SSH session or by
    an agent that has just reached the machine again over the new addresses
    (the coordination of decision 0020); a flag on `apply` would serve only
@@ -120,7 +135,9 @@ machine: two LXC containers on the build host's bridge, one with
 neighbours apart, so the breaking change is a wrong address and prefix
 outside the bridge's network: the test checks the machine is unreachable
 from the other container, waits out the window, and checks it is reachable
-again on the old address, with no address of the bad configuration left. A
+again on the old address, with no address of the bad configuration left,
+IPv4 included. A gateway-only change checks that a surviving session cannot
+confirm and that an on-link confirm reports the gateway as untested. A
 second run reboots the machine inside the window and checks the boot unit
 reverted it. A correct change is confirmed from the other container over
 the new address and stays; a confirmation from the old address is refused.
