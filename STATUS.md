@@ -3535,3 +3535,33 @@ machine made from one.
   VM served it at 03:52:56 UTC, fifteen minutes after the push, as
   designed. `analytics.pop.coop` has no AAAA record; IPv6-only visitors
   reach it through NAT64.
+
+### An exception to "never rewrite history", made by the maintainer
+
+The maintainer's rule is that commits carry no attribution to the tooling
+that wrote them; the handbook's commit-msg hook enforces it, but the scratch
+clones the day's work was done in did not have it, and 46 commits in six
+repositories went out with two trailer lines each. At the maintainer's
+explicit request on 2026-09-29, and against BRIEF section 10 for this one
+case, the default branches of handbook, inithooks, common, buildtasks, apt
+and keel were rewritten:
+
+- only commits committed on 2026-09-29 were touched; their parents from
+  before that day were fixed as the boundary, so no older SHA changed;
+- the only change is the two trailer lines, plus the author of five commits
+  that had been made as the local user `navigator` instead of the
+  maintainer;
+- on every branch the final tree is identical to the one before, byte for
+  byte, with the same number of commits and the same first-parent chain;
+- protection was opened only for the push, with a lease on the old tip, and
+  restored to the saved configuration, checked field by field;
+- the merged feature branches that still held the old commits were deleted,
+  and the two open pull request branches that held one (handbook#11,
+  keel-nodejs-nginx#2) were rewritten the same way.
+
+Not rewritten: common 11cde83 (2026-07-31), a TurnKey upstream commit by
+another author that carries such a trailer; it is shared history with
+upstream. What cannot be rewritten from here: GitHub keeps the original
+commits of every merged pull request under refs/pull/N/head, visible in its
+Commits tab; only GitHub support can remove those. No build host checkout
+and no published layer referred to any rewritten commit.
