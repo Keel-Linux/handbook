@@ -341,7 +341,7 @@ the nearer one answers a question about the other. Measured 2026-09-28:
 | Machine | fab | `product.mk` md5 | Unit phases in `root.patched/body` |
 | --- | --- | --- | --- |
 | local `tkldev` container | `1.1.1`, stock | `0657df1a` | one, after the common removelists |
-| fab `1.1.1+keel1` (b07a733) | `1.1.1+keel1` | `c04cb601` | none |
+| fab `1.1.1+keel1` (b07a733) | `1.1.1+keel1` | `c04cb601` | one, after the common removelists, as in stock (the file differs from stock only in `SOURCE_DATE_EPOCH`) |
 | build host | `1.1.1+keel2` | `a06bfe03` | three (overlays, conf scripts, removelists), before the common removelists |
 
 **Fix.** Take the reading from the machine that builds, and name the fab
