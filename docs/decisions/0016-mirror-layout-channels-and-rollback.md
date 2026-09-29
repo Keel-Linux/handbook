@@ -5,6 +5,12 @@ Status: **accepted**, decided by the maintainer 2026-09-28. Implemented in
 Keel-Linux/keel (client) and Keel-Linux/apt (publisher); the client landed
 first on purpose, see "Order of work" below.
 
+What the maintainer decided is the layout and the expiry rule
+(Keel-Linux/apt#13). "Which key signs a channel", and with it an
+unattended signing key on the build host, is key custody, which BRIEF
+section 11 reserves for the maintainer: that section is a proposal until
+the maintainer confirms it, and until then no refresh timer is installed.
+
 ## What was wrong
 
 `https://mirror.keellinux.org/layers/` was flat and mutable. Measured on
@@ -46,7 +52,7 @@ against itself. It is the same reason apt has `InRelease`. The consequence
 is worth stating because it shapes both implementations: clear signing dash
 escapes the body and does not cover trailing whitespace, so the bytes on the
 mirror are not the bytes that were signed. A reader must therefore take the
-body from the verifier's own output and never parse the file — which is what
+body from the verifier's own output and never parse the file, which is what
 made the two verification bugs found in review possible, and what both sides
 now do.
 
@@ -54,8 +60,8 @@ now do.
 
 Versioning by release alone is insufficient because two publications of the
 same release overwrite each other. Our releases are dated, and a second
-publication on one date — a rebuild to pick up a security update, a
-correction to a layer that went out wrong — is exactly the case that matters
+publication on one date (a rebuild to pick up a security update, a
+correction to a layer that went out wrong) is exactly the case that matters
 and exactly the one a date cannot distinguish. The revision is what makes
 `<release>/<rev>` name one set of bytes for good. It is recorded in the
 release's own `MANIFEST`, inside what the release key signs, so the release
@@ -88,6 +94,18 @@ still be assembled. Rolling back is `keel-channel set stable <release>
 <rev>` on the publishing side, and `keel pull --release <release> --rev <N>`
 on a single instance.
 
+A rollback by revision verifies too, and not against a channel, because by
+then no channel names that revision. Each revision keeps the pointer that
+was first signed for it, at `layers/<release>/<rev>/revision`, written by
+the publisher when it installs a channel and never replaced. `keel pull
+--release R --rev N` verifies that file by the same chain and requires it
+to name the revision it is filed under; only its expiry is not enforced,
+because an earlier revision is old on purpose. Two limits follow and are
+accepted: a revision no channel ever named has no such file and cannot be
+pulled by revision, and on the publishing side `set` can move a channel
+back only to a release whose tree is still staged on the build host, since
+the layer digests come from that tree.
+
 The client refuses a *pointer* that goes backwards (exit 20,
 `CHANNEL_ROLLBACK`): a mirror does not move an appliance backwards, an
 operator does, with `--allow-rollback` or by naming the revision. Reclaiming
@@ -104,7 +122,7 @@ The reason is the expiry. A pointer must be re-signed before it expires, and
 with a seven day expiry that is a daily job. The release signing subkey is
 passphrase protected and the agent forgets the passphrase ten minutes after
 it is typed (decision 0005). A design that needs the maintainer at a terminal
-every day is a design that will be bypassed inside a week — by lengthening
+every day is a design that will be bypassed inside a week, by lengthening
 the expiry until it means nothing, which is worse than not having one. So the
 pointer is signed by a key that needs nobody, and a systemd timer does it.
 
@@ -114,7 +132,7 @@ What that key may say is deliberately narrow:
   maintainer staged and signed, and every manifest it names is pinned by its
   sha256 inside the pointer's signature.
 - It can say **which of those is current, and until when.** That is all,
-  and "until when" is bounded — see the ceiling below, without which it is
+  and "until when" is bounded; see the ceiling below, without which it is
   not a narrow claim at all.
 
 This extends decision 0011 rather than contradicting it, and the distinction
@@ -139,7 +157,7 @@ are survivable and a seventh is not. Long enough to sleep through a weekend
 outage, short enough that a build host left broken for a week stops
 appliances updating rather than quietly holding them still.
 `keel-channel-refresh.timer` runs at 04:30 and `refresh` never changes which
-revision a channel names — it re-signs the digests the pointer already
+revision a channel names: it re-signs the digests the pointer already
 carries, so a build tree that has moved on cannot be slipped into the mirror
 by a job nobody watches. Moving a channel is `set`, and `set` is a person.
 
@@ -153,8 +171,8 @@ because the revision does not go backwards. Both the client and the
 publisher accepted that, and `KEEL_CHANNEL_TTL_DAYS=100000000` produced a
 pointer expiring in the year 275817 without a word.
 
-That is this note's own stated failure mode — "lengthening the expiry until
-it means nothing" — offered two paragraphs earlier as the reason a person
+That is this note's own stated failure mode, "lengthening the expiry until
+it means nothing", offered two paragraphs earlier as the reason a person
 must not be in the loop daily. The design identified the lever, removed the
 human who would pull it, and left the lever unguarded.
 
@@ -175,7 +193,7 @@ anything the client must refuse a revoked key, and this is exactly where the
 implementation was wrong: `gpgv` exits 0 for a signature by a revoked or
 expired key and still prints `VALIDSIG`, with "Good signature from" on
 stderr, withholding only `GOODSIG`. Both halves accepted it, so revocation
-did nothing, and a revoked subkey of a pinned primary passed as well —
+did nothing, and a revoked subkey of a pinned primary passed as well,
 which is not hypothetical, since `apt/keys/keel-archive-keyring.asc` already
 carries a signing subkey this project has revoked once. Both now require
 `GOODSIG` and refuse the retirement lines by name. `docs/traps.md` records
@@ -206,7 +224,7 @@ neither is obvious:
 
 - **clock ahead:** every pointer expires, `keel pull --channel` fails on
   every appliance at once, and the first version of the message said only
-  "the mirror is not being updated, or is holding this instance back" — so a
+  "the mirror is not being updated, or is holding this instance back", so a
   fleet-wide NTP failure would send the operator to the mirror. The message
   now prints what the machine thinks the time is and names a wrong local
   clock as one of the three explanations. The appliance is stalled, not
@@ -238,7 +256,7 @@ deferred, because it is a second way to write the public mirror and wants
 its own thinking about who may run it and what it may touch. Until it
 exists the rule is: **a release is published at least as often as the time
 to live, or the time to live is raised to cover the gap, within the thirty
-day ceiling.** The timer is still correct and still wanted — it keeps the
+day ceiling.** The timer is still correct and still wanted: it keeps the
 build host's copy fresh so that a publication has something current to
 carry, and it fails loudly when the key is gone, which is worth knowing
 before a release rather than during one.
@@ -279,7 +297,7 @@ TurnKey; only the project's own repositories use `main`.
 - **How the channel keyring reaches an appliance.** No repository packages
   `keel-channel-keyring.gpg` yet, so `keel pull --channel` on a stock
   appliance refuses for want of a keyring. It fails closed, which is right,
-  but the feature is not usable until the keyring ships — and it must ship
+  but the feature is not usable until the keyring ships, and it must ship
   through the archive, not through the channel it protects, which is the
   same constraint the retirement paragraph above runs into.
 - **A channels-only publication**, which is what the delivery gap above
