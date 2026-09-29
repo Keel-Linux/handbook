@@ -59,6 +59,14 @@ spec as information and not as drift to repair, and `apply` never converges
 the role. On a machine without an election, 0013's rule stands: a promotion
 by hand is drift, and `apply` refuses to silently demote.
 
+Everything that depends on the role follows **the elected role**, not the
+spec's: the source a replica pulls files from, whether the primary's rsync
+module is open, the pull timer, and whether the web tier is read-only.
+`apply` leaves all of them to the election. Otherwise a replica still
+pulling from the old primary's address, where that machine is still
+reachable, would roll back the new primary's files, or with `--delete` erase
+its uploads. Demotion closes the rsync module before anything else.
+
 ## Where each piece lives
 
 The brief keeps fleet orchestration out of this codebase (section 2). The
