@@ -39,11 +39,16 @@ configuration, and `apply --system` converges it. The rest of this note is
 about that case.
 
 **An overlay the appliance creates itself**, the WireGuard interface of
-decision 0020, belongs to the appliance on either kind of machine: the host
-of a container knows nothing about it. It is converged from inside even when
-the uplink is `managed_by: host`, with the same confirmation window below,
-because a management session can run over it. Its fields are 0020's to
-define; this note only fixes who owns it.
+decision 0020, belongs to the appliance on either kind of machine: its
+configuration lives in `/etc/wireguard/`, a file the host of a container
+does not write or regenerate. It is converged from inside even when the
+uplink is `managed_by: host`, with the same confirmation window below, whose
+saved copy then covers `/etc/wireguard/` instead of the interfaces file,
+because a management session can run over it. One thing it does need from
+the host: an unprivileged container cannot load kernel modules, so the host
+must have the `wireguard` module loaded, and inspect reports its absence
+rather than failing half way. Its fields are 0020's to define; this note
+only fixes who owns it.
 
 ## The converge, and why it reverts by itself
 
@@ -61,17 +66,28 @@ with a confirmation window:
    `/etc/network/interfaces` stanza, rendered by the same code `01ipconfig`
    uses (`lib/ipconfig.sh`), so a first boot and a day two write the same
    file for the same spec.
-2. Before touching anything, the run saves the current file and arms a
-   revert: a transient systemd timer (`systemd-run --on-active=`) that
-   restores the saved file and brings the interface up on it. The timer is
-   armed first, so a run that dies half way still reverts.
+2. Before touching anything, the run saves the current file under
+   `/var/lib/keel/network/` with a pending marker, and arms a revert: a
+   transient systemd timer (`systemd-run --on-active=`) that restores the
+   saved file and brings the interface up on it. The timer is armed first,
+   so a run that dies half way still reverts. A transient timer does not
+   survive a reboot, so a unit shipped in the image also runs at boot,
+   before networking: if the pending marker is there and no confirmation was
+   recorded, it restores the saved file. A machine that reboots inside the
+   window comes back on the old network.
 3. The file is written and the interface is brought down and up
    (`ip link set down`, then `ifup`, as `01ipconfig` does; the image ships
-   ifupdown-ng, which has no `ifreload`).
+   ifupdown-ng, which has no `ifreload`). The revert does the same, and
+   flushes the addresses on the interface before `ifup`, so no address the
+   new configuration added survives beside the old ones.
 4. The run then waits for a confirmation that arrives **over the new
    configuration**: `keel network confirm`, its own command, run in a new
-   session. That command cancels the timer. Nothing the old session does can
-   confirm, because the old session is exactly what might be broken. Being
+   session. That command cancels the timer and records the confirmation.
+   It refuses unless it arrives over the new configuration: run from SSH,
+   the local address of the connection (`SSH_CONNECTION`) must be one the
+   change added or kept; from a console it is accepted, since a person at
+   the console has seen the machine. A shell that survived the change, in
+   tmux or because only the gateway moved, cannot confirm by accident. Being
    its own command, it can be run by a person from a new SSH session or by
    an agent that has just reached the machine again over the new addresses
    (the coordination of decision 0020); a flag on `apply` would serve only
@@ -86,7 +102,8 @@ anything is reachable, so there is no session to lose and nothing to confirm.
 ## What it does not do
 
 - Converge a host managed network, for the reason above.
-- Touch more than one interface. `01ipconfig` configures one, and a spec
+- Touch more than one uplink interface (the overlay of 0020 is its own
+  interface, under its own file). `01ipconfig` configures one, and a spec
   declaring several already has "the last block wins" semantics (docs/spec.md
   in keel); the converge keeps them rather than inventing multi interface
   semantics here.
@@ -99,11 +116,15 @@ anything is reachable, so there is no session to lose and nothing to confirm.
 
 The planner under `--root` like every other field. The revert on a real
 machine: two LXC containers on the build host's bridge, one with
-`managed_by: file`, where a test applies a wrong gateway, checks the
-machine is unreachable from the other container, waits out the window, and
-checks it is reachable again on the old address; and a correct change that
-is confirmed from the other container over the new address and stays. No
-Docker, native systemd, IPv6 first (brief section 10).
+`managed_by: file`. On a shared bridge a wrong gateway does not cut two
+neighbours apart, so the breaking change is a wrong address and prefix
+outside the bridge's network: the test checks the machine is unreachable
+from the other container, waits out the window, and checks it is reachable
+again on the old address, with no address of the bad configuration left. A
+second run reboots the machine inside the window and checks the boot unit
+reverted it. A correct change is confirmed from the other container over
+the new address and stays; a confirmation from the old address is refused.
+No Docker, native systemd, IPv6 first (brief section 10).
 
 ## Decided 2026-09-29
 
