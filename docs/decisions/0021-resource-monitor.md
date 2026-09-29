@@ -83,6 +83,13 @@ The rendering follows what monit can express:
   share monit's one resource event, so going from critical back to warn
   could report a false recovery. Each level is its own named check, and
   the tests walk warn, critical, warn, ok.
+- **Units and limits are monit's.** Network rates are in bytes per
+  second there, so `max_mbit: 800` is rendered as 100 MB/s; `for N
+  cycles` stops at 64, so `for_minutes` is rendered against the cycle
+  keel sets and refused when it would exceed that.
+- **Whether monit keeps alerting when its own state file and log cannot
+  be written** is not in its manual; the full-disk test below is what
+  proves it, and the claim above stands only if that test passes.
 - Defaults apply to every check the section leaves out, so
   `enabled: true` with a channel is a useful monitor. Network throughput
   has no default: what is too much depends on the link, so it is watched
@@ -118,7 +125,7 @@ The HTTPS channels work on a full disk, which email does not:
 ```
 blog (2001:db8:1::10): / is 92% full (critical at 90%).
 Grow the disk on the host, then the filesystem here:
-  host (Proxmox, container): pct resize <vmid> rootfs +10G
+  host (for example Proxmox, container): pct resize <vmid> rootfs +10G
   here: nothing more, the container sees the new size
 Largest directories: /var/lib/mysql 18G, /var/log 4.1G.
 ```
