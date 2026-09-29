@@ -4,8 +4,8 @@ Date: 2026-09-29
 Status: **decided 2026-09-29**, in two rounds: the direction first
 ("Decided"), then the questions this note had left open ("Decided,
 second round"). It extends decision 0013 and amends two of its lines and
-one of the brief's (section 2), a change brief section 11 reserves to
-the maintainer: see "What this changes in 0013 and
+one of the brief's (section 2), accepted by the maintainer on
+2026-09-29: see "What this changes in 0013 and
 the brief".
 
 ## What was asked for
@@ -220,7 +220,8 @@ step 4 makes it automatic; step 5 removes the manual DNS and key work.
   independent leaders can disagree, and database, files and web tier must
   be promoted together. Patroni is left out because it wants to own
   PostgreSQL alone. **The third node may be a voter that holds no data**,
-  which makes the minimum of three cheaper. A voter is not an appliance:
+  which makes the minimum of three cheaper. Every data node is a voter as
+  well. A data-less voter is not an appliance:
   it runs etcd and keel-quorum only, has no role in any spec, and is
   installed on its own.
 - **Three choices belong to the operator, made at installation**, on a
