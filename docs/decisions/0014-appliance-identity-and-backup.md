@@ -68,9 +68,10 @@ either file, so the compatibility file always begins `turnkey-` no matter
 what a repository calls its release package.
 
 **Where the files are written.** In `mk/turnkey.mk` of common, in
-`root.patched/post`. That is the only place the version string exists, it
-is shared by every appliance instead of being repeated in each recipe, and
-it runs after every overlay, conf script, patch and removelist of the
+`root.patched/post`, and in its second copy, `mk/turnkey-desktop.mk`, which
+desktop appliances use, both through one script. Those are the only places
+the version string exists, they are shared by every appliance instead of
+being repeated in each recipe, and the step runs after every overlay, conf script, patch and removelist of the
 build, so neither file can be clobbered. An appliance conf script could
 not do it: conf scripts run in `root.patched/body`, before
 `/etc/turnkey_version` is written, so the value they would derive from is
@@ -95,6 +96,16 @@ agnostic, or if the last reader of `/etc/turnkey_version` disappears from
 a Keel image, the compatibility file becomes dead weight and can be
 dropped. Until then it stays, and it stays in the shape its readers
 expect.
+
+**Where a change of this kind lives.** The identity files are written in
+`common` and the login is changed in keel-core, and the two placements
+follow one rule, proposed here so the next case does not need a note of
+its own: **the compatibility surface goes in `common`, the operator facing
+surface goes in the product.** What other software reads (a file, its
+name, its format) is shared by every appliance and belongs where every
+appliance gets it. What the operator is shown is this project's own
+voice, and keeping it out of `common` keeps `common` offerable upstream
+(decision 0008).
 
 ## 2. The appliance says it has no backup, and says it once
 
