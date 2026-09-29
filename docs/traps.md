@@ -329,11 +329,12 @@ files, which are 198 and 182.
 **Hit again** 2026-09-28, in `apt/lib/mirror.sh`: `awk 'NF == 3'` over the
 release MANIFEST's `size sha256 path` lines silently dropped any path with a
 space in it, so the digest check never saw that file while `wget -r` still
-fetched it and the install still published it — a hole in the gate exactly
-where a crafted file name puts one. `NF >= 3` fixes it, because every reader
-already used `read -r size sha path`, which takes the rest of the line. The
-lesson the first entry did not draw: a field **count** is the tell. If a
-format's last field can contain the separator, counting fields is the bug.
+fetched it and the install still published it: a hole in the gate exactly
+where a crafted file name puts one. The fix refuses such a line rather than
+skipping it (`mirror_manifest_odd_files`): the publication stops with exit 3
+and names the path. The lesson the first entry did not draw: a field
+**count** is the tell. If a format's last field can contain the separator,
+counting fields is the bug.
 
 ## gpgv writes the plain text of a document whose signature it refused
 
@@ -359,9 +360,11 @@ raise rather than return text on a refusal, so no caller can reach it.
 function that was doing it is `release_signature_current` in
 `apt/lib/release.sh`, which reads `--status-fd`. The first version of this
 entry named `channel_verified` in `apt/lib/channel.sh` instead, which read
-gpgv's exit status and nothing else — so it recorded as done a thing the
-code it cited did not do. `channel_verified` reads the status fd now, and
-both it and `release_signature_current` apply the rule below.
+gpgv's exit status and nothing else, so it recorded as done a thing the
+code it cited did not do. `channel_verified` reads the status fd now; it,
+`release_signature_current` and the script that installs a pointer on the
+public host all apply the rule below (`gpg_status_good` in
+`apt/lib/common.sh`, and the same test inlined in the generated script).
 
 **An exit status of 0 is not the check, and neither is `VALIDSIG`.** This
 is the part that cost the most, because the first version of this entry
@@ -382,7 +385,7 @@ says which it was.
 
 It is worth knowing why this is not a detail. `VALIDSIG`'s last field is
 the *primary* fingerprint, so pinning a primary as the accepted signer
-also accepts a signature by a revoked subkey of it — and
+also accepts a signature by a revoked subkey of it, and
 `apt/keys/keel-archive-keyring.asc` already carries
 `sub D276B62C2BD16F4E … r`, a signing subkey this project has had to
 revoke once. Revocation is the whole answer to the theft of a signing key,
@@ -390,7 +393,7 @@ and a verifier that accepts `VALIDSIG` makes revocation do nothing.
 
 **A second property:** `gpgv` reads a **binary** keyring only. An ASCII
 armored one, which is the form this project publishes its keys in, gives
-`NO_PUBKEY` and exit 2 — which reads exactly like a wrong key. Dearmor
+`NO_PUBKEY` and exit 2, which reads exactly like a wrong key. Dearmor
 first. A `--keyring` given as a relative path is resolved against
 `$GNUPGHOME` and not the working directory, and a keyring it cannot find
 produces the same `NO_PUBKEY`: three different faults, one message.
@@ -409,7 +412,7 @@ program a check depends on is a package dependency, never an expectation.
 **Found** 2026-09-28, writing the channel pointer verification of decision
 0016, by testing the refusals before writing the code that reads the body.
 **The revoked and expired rows were found in review, after this entry had
-already been written with the wrong rule** — which is the trap this file is
+already been written with the wrong rule**, which is the trap this file is
 for, sprung inside the file itself. An entry that records a fix is worth
 less than no entry if the fix is not the one the code needs, because the
 next reader stops looking. Both implementations now require `GOODSIG`, and
@@ -419,7 +422,7 @@ the shape to check for is: a verifier consulted for its exit status.
 
 **Signature.** A function builds a path out of its own arguments and gets a
 path with a hole in it: `/srv/keel-release/` where `/srv/keel-release/2026-09-28`
-was meant. Under `set -u` in a generated script, the same shape is worse —
+was meant. Under `set -u` in a generated script, the same shape is worse:
 the script dies at the unbound name with no message, the caller reports a
 generic failure, and the step looks like it did nothing.
 
