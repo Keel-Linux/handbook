@@ -3565,3 +3565,68 @@ upstream. What cannot be rewritten from here: GitHub keeps the original
 commits of every merged pull request under refs/pull/N/head, visible in its
 Commits tab; only GitHub support can remove those. No build host checkout
 and no published layer referred to any rewritten commit.
+
+## Day two in apply, and turnkeylinux/tracker#2140 fixed in Keel (2026-09-29, afternoon)
+
+### Day two: apply converges on a running machine (keel#35)
+
+`keel diff` compares eight sections and `apply --system` converged four.
+Four of the five missing fields are done, each with an independent
+review before merge, and each review found something real that a suite at
+100 percent branch coverage had not:
+
+| Field | Pull requests | What the review caught |
+| --- | --- | --- |
+| `security.alerts` | keel#36 | inspect read a stale `SEC_ALERTS` before the machine's alias, holding the field in drift apply could not fix |
+| `instance.hostname` | keel#37 | a host named `mail`, `smtp` or `relay` rewrote postfix parameter names, `smtpd_relay_restrictions` included; a failed `hostnamectl` never retried |
+| `tls.acme` | keel#38, keel#39 | inspect called ACME enabled from the domains file, never the certificate; the first boot would spend Let's Encrypt's failed validation limit; an account of another CA skipped the consent |
+| `hub` | keel#40 | the Hub marker was read into memory to learn only that it existed |
+
+`hub` is a measurement and not a converge: converging it would register
+the machine with hub.turnkeylinux.org on day two, against brief 5.6.
+`tls.acme` requests through confconsole's dehydrated-wrapper only when the
+certificate in use does not carry the domains, needs `tls.acme.agree_tos:
+true` to register an account, refuses `dns-01`, and the first boot defers
+the request (`--defer-certificate`). keel is at 0.8.1. keel#9 to #12 were
+already fixed and were closed.
+
+`network` is the fifth, designed in handbook decision 0018 (handbook#19,
+proposed): a container's network belongs to the host and is not converged
+from inside; a file managed one is applied behind a revert that only a
+confirmation over the new configuration cancels. It waits on the
+maintainer's answers.
+
+### turnkeylinux/tracker#2140, both parts
+
+- **DNS on a static address** (common#15, fixed by common#16): ifupdown-ng
+  never sets `ADDRFAM`, and resolvconf's `000resolvconf` exits without it,
+  so a static stanza's `dns-nameservers` never reached `/etc/resolv.conf`.
+  Measuring found a second loss: with an `inet` and an `inet6` stanza,
+  ifupdown-ng exports only the last list. An if-up.d/if-down.d pair
+  registers the servers per family, asking `ifquery -l -p`, the
+  environment when ifquery fails. Proved against the real ifupdown-ng and
+  resolvconf of the core layer, in an overlay in private namespaces.
+- **Webmin's network module** (common#17): TurnKey had dropped it
+  (turnkeylinux/tracker#2118). Measured: an unchanged save of eth0 drops
+  the `inet6 dhcp` stanza, so dhcpcd turns IPv6 off; Apply calls
+  `/etc/init.d/networking`, which ifupdown-ng lacks. It is back read-only,
+  through its `defaultacl`, for root and every later user, with Module
+  Config closed: the review found that page could point the hosts editor
+  at any root-writable file. The maintainer made read-only the policy
+  (handbook decision 0019): the network is changed in confconsole or at
+  the command line, to keep root actions off an internet-facing panel.
+
+### Found on the build host
+
+- `common` had a commit that existed only there, `897ad4c`, the lines
+  that take the package pool out of every image (load bearing, decision
+  0012). A pull would have dropped it; it is on GitHub now (common#18),
+  and no build host checkout holds an unpushed commit of code.
+- The APT archive's `publish` commits (six, 2026-09-26 to 09-27) exist
+  only in `/srv/keel-apt/apt`: the host has no GitHub credentials, and its
+  `origin` is a stale bundle.
+- `gpg-agent` caches the signing passphrase for ten days
+  (`default-cache-ttl 864000`), not the ten minutes the docs say.
+
+Both are on tracker#1's maintainer list, which now holds everything
+waiting on the maintainer.
