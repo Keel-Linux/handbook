@@ -1,8 +1,10 @@
 # 0018: The network on a running machine
 
 Date: 2026-09-29
-Status: **proposed**. Design before code, as Keel-Linux/keel#35 asks for
-the one field whose converge can cut off the operator who runs it.
+Status: **decided 2026-09-29**. Design before code, as Keel-Linux/keel#35
+asks for the one field whose converge can cut off the operator who runs it.
+The maintainer settled the open points the same day; they are recorded under
+"Decided" at the end, and the text below already reflects them.
 
 ## What is missing
 
@@ -13,10 +15,13 @@ differs from the machine is reported and stays wrong. The other fields of
 keel#35 (alerts, hostname, tls.acme) are now converged by `apply --system`;
 this is the last one.
 
-## Two machines, not one
+## Two owners, split by interface
 
 The spec already separates them with `network.managed_by`, and the converge
-must too, because they have different owners.
+must too, because they have different owners. The split is by interface, not
+by kind of machine: a standalone appliance and one taking part in a
+replicated set (decision 0020) behave the same way, because what owns the
+uplink does not change with the role.
 
 **`managed_by: host`, the container.** The interfaces of an LXC system
 container are configured by the host: Proxmox writes them into the container
@@ -32,6 +37,13 @@ next project, the one that consumes Keel's spec.
 **`managed_by: file`, a VM or an installed system.** Here the file is the
 configuration, and `apply --system` converges it. The rest of this note is
 about that case.
+
+**An overlay the appliance creates itself**, the WireGuard interface of
+decision 0020, belongs to the appliance on either kind of machine: the host
+of a container knows nothing about it. It is converged from inside even when
+the uplink is `managed_by: host`, with the same confirmation window below,
+because a management session can run over it. Its fields are 0020's to
+define; this note only fixes who owns it.
 
 ## The converge, and why it reverts by itself
 
@@ -57,12 +69,16 @@ with a confirmation window:
    (`ip link set down`, then `ifup`, as `01ipconfig` does; the image ships
    ifupdown-ng, which has no `ifreload`).
 4. The run then waits for a confirmation that arrives **over the new
-   configuration**: `keel spec apply --confirm-network`, run by the operator
-   in a new session. That command cancels the timer. Nothing the old session
-   does can confirm, because the old session is exactly what might be broken.
-5. Without a confirmation within the window (proposed default 120 seconds,
-   a flag to change it), the timer restores the previous file, and the next
-   `keel diff` shows the declared network as drift again, with the reason.
+   configuration**: `keel network confirm`, its own command, run in a new
+   session. That command cancels the timer. Nothing the old session does can
+   confirm, because the old session is exactly what might be broken. Being
+   its own command, it can be run by a person from a new SSH session or by
+   an agent that has just reached the machine again over the new addresses
+   (the coordination of decision 0020); a flag on `apply` would serve only
+   the first.
+5. Without a confirmation within the window (default 120 seconds, a flag to
+   change it), the timer restores the previous file, and the next `keel diff`
+   shows the declared network as drift again, with the reason.
 
 A first boot is not a day two and keeps its hook: `01ipconfig` runs before
 anything is reachable, so there is no session to lose and nothing to confirm.
@@ -76,9 +92,8 @@ anything is reachable, so there is no session to lose and nothing to confirm.
   semantics here.
 - Rename interfaces, create bridges or VLANs, or edit IPv4 when the spec has
   no `ipv4` block: IPv4 stays as the machine has it, IPv6 first.
-- Run without a person able to confirm: `--dry-run` shows the plan;
-  a run with no `--confirm-network` window armed refuses rather than
-  changing the network unattended.
+- Change the network without arming the window: `--dry-run` shows the
+  plan, and no run writes the file before the revert timer exists.
 
 ## How it is tested
 
@@ -90,12 +105,14 @@ checks it is reachable again on the old address; and a correct change that
 is confirmed from the other container over the new address and stays. No
 Docker, native systemd, IPv6 first (brief section 10).
 
-## Open for the maintainer
+## Decided 2026-09-29
 
-- The default window, 120 seconds.
-- Whether the confirmation is `apply --confirm-network` or its own
-  command (`keel network confirm`); the first keeps one entry point, the
-  second is easier to type from a phone.
-- Whether a VM without a console should refuse the converge unless
-  `--i-have-a-console` is passed; the revert makes it safe without one,
-  which is the point of the design, so the proposal is no.
+- **The window is 120 seconds** by default, with a flag to change it.
+- **The confirmation is its own command, `keel network confirm`**, so that
+  an agent reaching the machine again can confirm as well as a person.
+- **A machine without a console does not refuse.** The revert is what makes
+  the change safe without one; a VPS reached only over SSH is the case the
+  design exists for.
+- **Ownership is split by interface.** The uplink of a container stays the
+  host's and is only compared; an overlay the appliance creates, the
+  WireGuard interface of decision 0020, is converged from inside.
