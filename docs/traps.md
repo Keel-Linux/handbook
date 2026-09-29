@@ -370,10 +370,14 @@ the 179 noise-floor files are `/var/lib/mysql/**`, which holds
 includes deleting accounts.
 
 **Fix.** Keep the bytes of anything that can hold accounts, credentials, keys
-or database content (`share/layer-state-paths` in `buildtasks`) and subtract
-the floor per line for a text file and per byte offset for a binary one, not
-per path. A clock that moves in every build touches the same line or offset in
-both pairs and cancels; an account row that is gone does not. A file the
+or database content (`share/layer-state-paths` in `buildtasks`) and judge each
+differing state path by its bytes, which is what `bt-layer-measure attribute`
+does. Do not cancel a difference against the controls by position alone: two
+unrelated changes at one line number or one byte offset look alike, and an
+account added on the line a clock moves on would pass. A text line is noise
+only if the controls pin what varies there, the same short length and only
+digits and date punctuation, as a timestamp is; a binary difference is never
+shown to be noise and has to be read and cleared in writing. A file the
 measurement could not read is not a file that did not change, so an unsampled
 state path fails the run.
 
