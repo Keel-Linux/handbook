@@ -8,14 +8,14 @@ Status: decided by the maintainer
 A command an operator types on a Keel appliance carries this project's name.
 Where such a command already exists under a `turnkey-*` name:
 
-- the **Keel name is the real command** — the file with the code in it;
+- the **Keel name is the real command**: the file with the code in it;
 - the **`turnkey-*` name is kept, as a symlink to it**;
 - **both keep working**, and neither is documented as deprecated.
 
 Two details, because the natural choice is wrong in one of them and unstated
 in the other. The Keel name is the `turnkey-` prefix replaced by `keel-` and
 nothing else: `turnkey-wp` becomes `keel-wp`, `turnkey-init` becomes
-`keel-init`. And **the link is relative** — `turnkey-wp -> keel-wp`, not
+`keel-init`. And **the link is relative**: `turnkey-wp -> keel-wp`, not
 `-> /usr/local/bin/keel-wp`. An absolute link does not resolve inside
 `fab-chroot`, so a build time caller such as `conf.d/main` stops finding the
 command; keel-wordpress asserts the relative form for exactly that reason, and
@@ -33,14 +33,14 @@ keeps its name in 0014. Compatibility with TurnKey appliances is a stated
 property of this project (0008: the fork is kept upstream-compatible on
 purpose). An operator who pasted a command out of TurnKey's documentation, or
 who wrote a script against `turnkey-wp` last year, must not silently lose it,
-and a rename with no link is exactly that loss — it fails at the moment the
+and a rename with no link is exactly that loss: it fails at the moment the
 operator needs the command, with `command not found` and no hint of a new
 name.
 
 ## What a `turnkey-*` name owned by somebody else's package does instead
 
 Nothing in this note. This section is about a package **this project does not
-build** — the distinction matters, and getting it the wrong way round is the
+build**; the distinction matters, and getting it the wrong way round is the
 mistake the first version of this note made. A command from a package with a
 `+keel` version is ours, the rule applies to it directly, and it is in the
 table below. What follows is only about the rest.
@@ -98,8 +98,8 @@ and the chain under it is untouched. That is Keel-Linux/keel-wordpress#7.
 
 The third is in this group by where it lives and in the next group by when it
 moves. `unit-mariadb/overlay/usr/local/bin/turnkey-mysql-install-perf-info-schemas`
-is a **byte-identical second copy** of the `common` file — the same git blob,
-`c8f185b2` — so the two move in one change, or an appliance built from the
+is a **byte-identical second copy** of the `common` file (the same git blob,
+`c8f185b2`), so the two move in one change, or an appliance built from the
 unit keeps the old name while one built from `common` does not. Anybody
 renaming that command by following the `common` row alone will rename one of
 two copies.
@@ -152,7 +152,7 @@ from `Keel-Linux/inithooks` and `Keel-Linux/confconsole`, whose trees hold
 `turnkey-init`, `turnkey-sudoadmin`, `turnkey-install-security-updates`,
 `bin/turnkey-init-fence` and `turnkey-lexicon` as their own source files, and
 keel-wordpress's `Makefile` names both among "the project's own packages".
-`turnkey-init` is the most operator-facing command on the machine — it is what
+`turnkey-init` is the most operator-facing command on the machine: it is what
 an operator types to run the first boot configuration again.
 
 They wait on the same rebuild as `common`, and each needs more than a rename.
@@ -213,9 +213,9 @@ This was checked by doing it, not by reading the flags, because
 docs/traps.md records "asserting the configuration is not asserting the
 behaviour" as a defect this project keeps repeating. `tests/wrappers.bats` of
 keel-wordpress copies the overlay with the same `cp -TdR` the build runs,
-**twice** — that recipe applies its overlay twice, once through
+**twice**: that recipe applies its overlay twice, once through
 `COMMON_OVERLAYS` and once as the product-local `ROOT_OVERLAY`, and a second
-copy over an existing link has to leave a link and not a copy of its target —
+copy over an existing link has to leave a link and not a copy of its target;
 and then *runs the copied `turnkey-wp`* and checks the command it produced. A
 further test pins the paragraph above rather than only asserting it in prose:
 a plain `cp -TR`, without `-d`, still yields a working `turnkey-wp`, and
@@ -243,16 +243,16 @@ tested by copying a directory.
    across this organization's repositories, **eleven of them written or built
    by this project**: two by keel-wordpress's own overlay, four by `common`,
    five by `inithooks` and `confconsole`. Thirteen of the fifteen are present
-   on a `wordpress-demo` container, nine of those ours, and `turnkey-init` —
-   what an operator types to run the first boot configuration again — is one
+   on a `wordpress-demo` container, nine of those ours, and `turnkey-init`
+   (what an operator types to run the first boot configuration again) is one
    of them. That is not inherited surface, it is ours, and leaving it is a
    choice we would be making every release.
 2. **Whether a plain rename would do.** No. It breaks every script written
    against the old name and every command in TurnKey's documentation, and it
    breaks them at a distance, long after the upgrade, with an error that does
    not name the replacement. The project's compatibility claim (0008) is not
-   compatible with that. The opposite — keeping the `turnkey-*` name as the
-   real command and adding a Keel alias — was also considered and rejected:
+   compatible with that. The opposite, keeping the `turnkey-*` name as the
+   real command and adding a Keel alias, was also considered and rejected:
    two names with the wrong one authoritative means the documentation, the
    error messages and the tests all keep saying somebody else's name, which
    is the thing being fixed.
@@ -272,7 +272,7 @@ tested by copying a directory.
   they did not run.
 - A call site left on the old name still works, which is exactly why it is
   easy to miss and why the gate cannot catch it. Finding them is `grep -rn`
-  over the repository — README, tests, `conf.d`, overlays — and not a green
+  over the repository (README, tests, `conf.d`, overlays) and not a green
   build.
 - The compatibility names **must be covered** by tests that run them, in
   every repository that has a pair. A test that only reads the link does not
