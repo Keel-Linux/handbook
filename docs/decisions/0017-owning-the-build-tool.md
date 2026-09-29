@@ -40,11 +40,14 @@ shebang normalisation, `#!/usr/bin/python3` to `#! /usr/bin/python3`.
 Nothing was running that was not committed.
 
 And the changelog entry existed. It merged as fab#6 at 2026-09-27T19:58:53Z,
-nine hours before fab#7 was filed. The report that said `1.1.1+keel2`
-appeared nowhere in the history was reading a checkout made before that
-merge, which is the trap handbook#13 is adding as "two machines answer to
-tkldev, and they run different fab", in its other form: reading the wrong
-clone rather than the wrong machine.
+ten hours before fab#7 was filed at 2026-09-28T06:06:20Z. The report that
+said `1.1.1+keel2` appeared nowhere in the history was reading a stale ref:
+the build host's clone at `/root/src/fab` has `HEAD` at `e610377` and
+carries both entries there, but its `remotes/origin/master` is `16730a5`,
+the fab#5 merge, because that clone had not fetched since before fab#6
+landed. That is the trap handbook#13 is adding as "two machines answer to
+tkldev, and they run different fab", in a third form: not the wrong machine,
+not even the wrong clone, but the wrong ref in the right clone.
 
 So the defect was never the missing entry. It was that **a version string
 was the only provenance there was**, and that the version string itself said
@@ -112,13 +115,24 @@ rebuild. A package is native when three things hold: the `Source` starts with
 `keel`, the clone has no `upstream` remote, and neither `debian/watch` nor
 `debian/upstream/metadata` exists. The fab clone already satisfies the last
 two. Naming the source `keel-fab` satisfies the first, so `bin/build-package`
-accepts `0.1.0` on its own and the `+keelN` guard stops applying to fab
-without anyone passing `--native` to override it.
+accepts a plain version on its own and the `+keelN` guard stops applying to
+fab without anyone passing `--native` to override it.
 
 This is the argument for the name rather than a decoration on it: the rule
 that says which version scheme a package gets is keyed on the prefix, so a
 package whose version scheme is ours has to carry the prefix or the tooling
 and the policy disagree.
+
+One of the three conditions is fragile, and this note is the document that
+asserts both halves of the tension, so it says so. "No `upstream` remote" is
+a property of one local clone (`apt/lib/build.sh:83`), while decision 0008
+keeps the fork upstream compatible with cherry-picks in both directions, and
+the ordinary way to cherry-pick is `git remote add upstream`. Whoever does
+that in the clone `bin/build-package` builds from makes it classify
+`keel-fab` as a rebuild and refuse `2.0.0` for lacking `+keelN`. Cherry-pick
+from a separate clone, or fetch upstream by URL without naming the remote,
+until Keel-Linux/apt#15 makes the classification independent of a local
+remote name.
 
 ### The relationships, and what each one is actually for
 
@@ -129,15 +143,68 @@ the next one, which is tracker#13's pair.
 
 | Field | What it is for here |
 | --- | --- |
-| `Conflicts` | The load-bearing one. Both packages ship `/usr/bin/fab` and `/usr/share/fab`; they must never be co-installed, and `Conflicts` is what makes `apt-get install ./keel-fab_0.1.0_all.deb` remove the old one in the same transaction rather than fail on a file clash. |
+| `Conflicts` | The load-bearing one. Both packages ship `/usr/bin/fab` and `/usr/share/fab`; they must never be co-installed, and `Conflicts` is what makes `apt-get install ./keel-fab_2.0.0_all.deb` remove the old one in the same transaction rather than fail on a file clash. |
 | `Replaces` | Lets dpkg hand the shared paths over without reporting a conflict, which `Conflicts` alone does not. |
-| `Provides` | Not what the callers need. `apt-cache rdepends fab` on the build host is empty and no `debian/control` in this organization depends on `fab`. It is there for the two places that install the package *by name*: `tkldev/plan/main:3` and `tkldev-setup:372`. apt installs a virtual package when exactly one real package provides it, so both keep working untouched. |
+| `Provides` | Satisfies a *dependency* on the name `fab`, and nothing else. `apt-cache rdepends fab` on the build host is empty and no `debian/control` in this organization depends on `fab`, so here it does almost nothing. In particular it does **not** protect an install *by name*: see below. |
+
+**`Provides` loses to a real package of the same name.** apt resolves
+`apt-get install fab` to a real package called `fab` whenever one is in an
+enabled archive, and removes `keel-fab` to make room, because of `Conflicts`.
+The build host has one: TurnKey's archive offers `fab 1.1.1` at priority 999.
+Measured on 2026-09-29 with a scratch apt tree holding `keel-fab 2.0.0` as
+installed and a real `fab` served over http:
+
+    $ apt-get install -s fab
+    Remv keel-fab [2.0.0]
+    Inst fab (1.1.1 turnkeylinux:trixie [all])
+
+The version does not matter: a real `fab 3.0.0` above `keel-fab 2.0.0`
+gives the same answer. So the two places that install fab by name are not
+satisfied by `Provides`, and each fails differently:
+
+- `tkldev-setup:372` and `docs/infra-recovery.md:96` run
+  `apt-get install fab`, which **replaces the builder with upstream's**,
+  losing the `SOURCE_DATE_EPOCH` handling and the unit phases, so the next
+  build is wrong rather than broken.
+- `tkldev/plan/main:3` never reaches apt. It goes through `fab-plan-resolve`,
+  whose resolver matches the pool's `.deb` filenames against the literal name
+  and cannot resolve a virtual package, and drops an entry it cannot supply
+  without an error. That is Keel-Linux/tkldev#4.
+
+What does protect the host is a negative pin on the real package, keyed on
+the archive it comes from:
+
+    Package: fab
+    Pin: release o=turnkeylinux
+    Pin-Priority: -1
+
+With it, `apt-get install -s fab` answers `keel-fab is already the newest
+version`, and the way back, `apt-get install /root/src/fab_1.1.1+keel2_all.deb`,
+still works, because a local `.deb` is not from that origin. **`Pin: origin
+""` does not do this job**, although it looks as if it should and it passes a
+test built on a `file:` repository: `origin` matches the host name of the
+source, and `""` is the host name of a local repository only. Against the
+same package served over http it blocks nothing and apt still removes
+`keel-fab`. `Pin: version *` also works and blocks every source, including a
+future one; `o=turnkeylinux` says which archive is the problem, and the
+build host's TurnKey `Release` files carry `Origin: turnkeylinux`.
+
+apt#15 is therefore a **prerequisite of the conversion**, not a neighbour of
+it: the rename creates the exposure, and the pin is what closes it. `apt-get
+upgrade` and `dist-upgrade`, including the host's nightly `cron-apt`, are
+safe either way, because nothing depends on `fab` and nothing pulls it in.
+
+This matters beyond fab. tracker#13's `keel-version` and `keel-sysinfo`
+replace packages that TurnKey's archive keeps offering by the old names, so
+the same negative pin, per name, belongs in the transition package that
+installs them, or the first `apt-get install turnkey-sysinfo` undoes it.
 
 A versioned `Provides: fab (= 1.1.1+keel2)` was considered and rejected. It
 would satisfy a versioned dependency on `fab`, of which there are none
 anywhere in the organization, at the cost of writing upstream's version
 number back into the package whose whole point is not to carry one, and of
-going stale at the first release.
+going stale at the first release. It would not change the answer above
+either.
 
 Note what the relationships do **not** do, because it is the thing most
 likely to be assumed: none of them helps the nine places that read the
@@ -148,21 +215,21 @@ each is somebody's issue.
 ## The commands must not change, and the call sites are why
 
 The maintainer's instruction was to establish the call sites before deciding
-rather than assume. Inventoried across all 31 repositories of the
-organization and the trees on the build host, roughly 380 references:
+rather than assume. Counted across the organization's repositories on
+2026-09-28, excluding `.git/`, in the review of fab#9 (40 repositories; the
+first count, over 31 and the build host's trees, came out 10 to 20 percent
+lower throughout, which is the safe direction for a claim that none of them
+reads the package name):
 
 | Symbol | References | What it is |
 | --- | --- | --- |
-| `fab-chroot` | ~100 | command on `PATH` |
-| `fab-apply-overlay` | 34 | command on `PATH` |
-| `fab-plan-resolve` | 25 | command on `PATH` |
-| `fab-apply-removelist` | 12 | command on `PATH` |
-| the other five `fab-*` tools | 21 | commands on `PATH` |
-| `fab-investigate`, `fab-rewind` | 17 | commands on `PATH` |
-| `FAB_PATH` | ~256 | make variable, `/turnkey/fab-keel` |
-| `FAB_ARCH` | ~92 | make variable |
-| `$(FAB_PATH)/common` | 65 | a git checkout, not a packaged path |
-| `/usr/share/fab` | 9 | packaged path, via `FAB_SHARE_PATH` |
+| `fab-chroot` | 116 | command on `PATH` |
+| `fab-apply-overlay` | 39 | command on `PATH` |
+| `fab-plan-resolve` | 28 | command on `PATH` |
+| the other `fab-*` tools | about 60 | commands on `PATH` |
+| `FAB_PATH` | 298 | make variable, `/turnkey/fab-keel` |
+| `FAB_ARCH` | 111 | make variable |
+| `/usr/share/fab` | 31 | packaged path, mostly via `FAB_SHARE_PATH` |
 | `import fab` | 0 | the module is `fablib`, and always was |
 
 The conclusion is stronger than "they appear everywhere". **Not one of those
@@ -181,7 +248,7 @@ operator facing command carries the Keel name with the `turnkey-*` name kept
 as a relative symlink. `fab-chroot` and its siblings are not operator facing:
 they exist on the build host and inside a build, an appliance never has them,
 and no operator ever types one. 0015's subject is the appliance's surface.
-Extending it to build tools would rename 380 call sites to no operator's
+Extending it to build tools would rename some 700 call sites to no operator's
 benefit, and would do it inside a change whose whole purpose is that the
 build host keeps building.
 
@@ -208,17 +275,24 @@ commit, and a commit has to resolve back to the versions built from it.
 - **Manifest to commit.** A tag per released version, `<source>/<version>`,
   so `fab_version 1.1.1+keel1` becomes `git rev-parse fab/1.1.1+keel1`.
   `bin/check-release-tags` in fab#9 makes that total and CI keeps it so:
-  every changelog entry whose distribution is not `UNRELEASED` is a release,
-  and every release below the newest must have such a tag whose tree carries
-  that version at the top of its changelog. The newest entry is exempt,
-  being the release a pull request is proposing. The source name comes from
+  every changelog entry whose distribution is not `UNRELEASED`, at or above
+  a floor (`--since 1.1.1+keel1`, so upstream's own entries are never
+  demanded), is a release, and each must have such a tag, **annotated** and
+  **an ancestor of the branch**, whose tree carries that version at the top
+  of its changelog. On a pull request the entry at the top of the file is
+  exempt, being the release it proposes; on the default branch
+  `--require-newest` revokes that, so a merged release with no tag turns the
+  branch red instead of becoming the next fab#7. The tag is pushed with the
+  merge. The source name comes from
   the entry, so the two versions released before the rename are tagged
   `fab/1.1.1+keel1` and `fab/1.1.1+keel2`, which now exist and point at
   `b07a733` and `e610377`. That is what makes the two layers already on the
   mirror traceable.
 - **Commit to manifest.** `git describe --match '*/*'` names a commit's
   release and that tag's changelog gives the version a manifest would
-  record. No new machinery.
+  record. No new machinery. `git describe` ignores a lightweight tag, which
+  is why the forward direction refuses one: the two halves are held to the
+  same standard.
 
 The tag namespace is `<source>/<version>` rather than `vX.Y.Z` because
 upstream's tags are `v0.5` through `v1.1.1` in the same repository, and a
@@ -249,23 +323,49 @@ was built, installed or changed on the build host for this work: access was
 read only, no lock was taken, no layer was published or rebuilt.
 
 The package was built in a throwaway `debian:trixie` container instead, and
-its contents compared against the `.deb` the host has installed. `keel-fab
-2.0.0` against `fab 1.1.1+keel2`: **all 28 paths the old package had are
-present and 26 of them are byte identical**, including all nine
-`/usr/bin/fab-*` symlinks and `share/product.mk`. The two that differ are
-`/usr/bin/fab`, by the `get_version` change alone, and
-`runtime.d/*.rtupdate`, by the package name inside it. Two files are new,
-`fablib/version.py` and `/usr/share/fab/version`. Nothing is missing.
+its contents compared against the `.deb` the host has installed, over the
+full file set with nothing excluded. `keel-fab 2.0.0` against `fab
+1.1.1+keel2`: **35 entries in the old package and 37 in the new; 27 at the
+same path, of which 26 are byte identical**, including all nine
+`/usr/bin/fab-*` symlinks and `share/product.mk`; the one that differs is
+`/usr/bin/fab`, by the `get_version` change alone. **8 are renamed, every
+one by debhelper keying on the package name**: the four `dist-info` files,
+the three under `usr/share/doc/fab/`, and `runtime.d/fab.rtupdate`. **2 are
+new**, `fablib/version.py` and `/usr/share/fab/version`. Nothing is dropped.
+Nothing in the organization reads `usr/share/doc/fab` or the `dist-info`
+name.
+
+The four places the package states its version agree: dpkg, the changelog,
+`/usr/share/fab/version` and the `dist-info` metadata (`pyproject.toml` now
+says `keel-fab` `2.0.0`, where it used to say `fab` `1.1.0` and so gave
+`importlib.metadata` a fourth, wrong answer). fab#9's `tests/packaging.sh`
+asserts the agreement.
+
+An earlier version of this paragraph said "all 28 paths the old package had
+are present". That count had quietly left out the `dist-info` and
+`usr/share/doc` files, and every change it did not mention was inside what it
+left out: two of the three were the trap below, debhelper keying on the name.
 
 That measurement is the evidence the conversion is safe, and it is the only
 kind of evidence that can be, since no assertion about `debian/` can prove
 what a build produces.
 
-Forward, once fab#9 is merged and the package is built and published:
+Merging fab#9 changes nothing on the build host: the host runs the `.deb`
+it has installed, and nothing there fetches, builds or installs fab on its
+own. The daily self check rebuilds a layer with the installed fab, and
+`cron-apt` upgrades from the security sources only. The conversion is an
+attended step, in this order:
 
-    apt-get install ./keel-fab_2.0.0_all.deb        # removes fab, Conflicts
-    # /etc/apt/preferences.d/keel-fab becomes  Package: keel-fab
-    #                                          Pin: version 2.*
+1. Keel-Linux/apt#15 first: the negative pin above, verified on the host
+   with `apt-get install -s fab`.
+2. Build `keel-fab 2.0.0` from the merged commit, tag it
+   `keel-fab/2.0.0` (fab's default branch requires the tag), and publish it.
+3. Forward:
+
+       apt-get install ./keel-fab_2.0.0_all.deb        # removes fab, Conflicts
+       # /etc/apt/preferences.d/keel-fab becomes  Package: keel-fab
+       #                                          Pin: version 2.*
+       # plus the negative stanza for fab
 
 Back, at any time, because `fab_1.1.1+keel2_all.deb` stays in `/root/src` and
 nothing deletes it:
@@ -273,20 +373,24 @@ nothing deletes it:
     apt-get install /root/src/fab_1.1.1+keel2_all.deb   # removes keel-fab
     # restore the pin stanza
 
-Either direction is verified with `fab --version`, `dpkg -L keel-fab | grep
-/usr/bin` for the twelve commands, and one `fab-chroot` in a scratch tree.
+Either direction is verified with `fab --version`, `dpkg -S /usr/bin/fab`
+(which package owns the twelve commands), `dpkg -L keel-fab | grep
+/usr/bin`, and one `fab-chroot` in a scratch tree. Ownership is checked with
+`dpkg -S` and not `dpkg -V`: if anybody ever forces the two onto the machine
+together with `dpkg -i --force-conflicts`, `Replaces` being one directional
+leaves `keel-fab` owning the commands, and removing it then deletes them
+while `dpkg -V fab` still exits 0. Never reach for `--force-conflicts` here.
 The old package stays installable indefinitely; that is the property that
-makes this reversible, and it is why the conversion does not have to be
-scheduled alongside anything else.
+makes this reversible.
 
-Two things to settle before scheduling it, both in Keel-Linux/apt#15.
+Also in Keel-Linux/apt#15, and live today whatever happens to this note:
 `/etc/apt/preferences.d/keel-fab` pins `Package: fab` at `1.1.1+keel1*` while
-`1.1.1+keel2` is installed, so **that pin matches nothing today** and only
-Debian version ordering keeps the local build ahead of upstream's `1.1.1` at
-priority 999. That is a live defect independent of this note and it is fixed
-first, renamed second. And `docs/build-host.md` sections 2 and 3 describe the
-package, the pin and the `.deb`, and need the new name at conversion time,
-not before.
+`1.1.1+keel2` is installed, so **that pin matches nothing** and only Debian
+version ordering keeps the local build ahead of upstream's `1.1.1` at
+priority 999. And `docs/build-host.md` sections 2, 3 and 4 (the last is the
+runbook for rebuilding fab, and names `dpkg -l fab`, `apt-cache policy fab`
+and the pin file), plus `docs/infra-recovery.md:96`, need the new name at
+conversion time, not before.
 
 ## Justification (three parts, brief section 10)
 
@@ -317,7 +421,7 @@ not before.
    provenance question gets a total answer in both directions, from a tag
    rather than from a string. And the cost is bounded and was measured rather
    than assumed: no command name changes, no path changes, no recipe changes,
-   380 call sites untouched, and the built package ships the same paths as
+   some 700 call sites untouched, and the built package ships the same paths as
    the one it replaces.
 
 ## Consequences
@@ -346,7 +450,9 @@ not before.
   `keel-version` and `keel-sysinfo`, which take over from packages that
   *do* have a reverse dependency and an operator facing command, so their
   `Provides` will be doing real work that fab's is not. They should not copy
-  the fields without reading why each is here.
+  the fields without reading why each is here, and in particular that
+  `Provides` does not survive an install by name while the old archive still
+  offers the real package: the negative pin does.
 - **The conversion is reversible and unscheduled.** The old `.deb` stays
   installable, the way back is two commands, and nothing in this work leaves
   the build host unable to build.
@@ -369,15 +475,16 @@ not before.
 ## Traps found while writing this
 
 One is the entry handbook#13 is adding, "two machines answer to tkldev, and
-they run different fab", which gained a second face before it reached the
-default branch: a claim measured from the wrong clone reads exactly like a
-claim measured from the wrong machine. The report this note answers stated
-that `1.1.1+keel2` existed in no commit, which was true of the checkout it
-was read from and false of the repository, and that checkout was the build
-host's own `master`, which `git branch -vv` there reports as `behind 4`.
-That entry's fix applies unchanged with one word added: name the clone and
-its head, not only the machine. It is left to handbook#13 rather than
-amended from here, so the two do not collide in the same file.
+they run different fab", which gained another face before it reached the
+default branch. The report this note answers stated that `1.1.1+keel2`
+existed in no commit, which was true of the ref it was read from and false
+of the repository: in the build host's clone `HEAD` was current and
+`origin/master` was not, because the clone had not fetched since before
+fab#6. Naming the machine would not have caught it, and neither would naming
+the clone. That entry's fix applies with a few words added: name the machine,
+the clone **and the ref you measured**, and fetch first. It is left to
+handbook#13 rather than amended from here, so the two do not collide in the
+same file.
 
 The other is new and this note adds it: **debhelper keys its per-package
 files on the binary package name, and dh_python3 finds a private directory
@@ -389,10 +496,13 @@ also the only thing that could have found it.
 ## Implementation
 
 - Package and provenance: Keel-Linux/fab#9, closing fab#8 and fab#7. Four
-  suites, 125 of 125 checks, 100 percent. Tags `fab/1.1.1+keel1` and
-  `fab/1.1.1+keel2` pushed.
-- The pin that matches nothing, and the archive's rebuild example:
-  Keel-Linux/apt#15.
+  suites, 141 of 141 checks. Tags `fab/1.1.1+keel1` and `fab/1.1.1+keel2`
+  pushed; `keel-fab/2.0.0` is pushed with the merge.
+- The pin that matches nothing, the negative pin the conversion needs, and
+  the native classification's dependence on a remote name:
+  Keel-Linux/apt#15, a prerequisite of the conversion.
+- `tkldev/plan/main:3`, which a fab plan cannot resolve through `Provides`:
+  Keel-Linux/tkldev#4, before the archive ever drops `fab`.
 - `fab_commit` in the manifest: Keel-Linux/buildtasks#12, after fab#9.
-- The seven other repositories that ship something and do not gate their
-  changelog: Keel-Linux/tracker#18.
+- The other repositories that ship something and do not gate their
+  changelog: audited in Keel-Linux/tracker#18.

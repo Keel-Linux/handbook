@@ -328,8 +328,9 @@ files, which are 198 and 182.
 
 ## Renaming a Debian package drops whatever debhelper found by its name
 
-**Signature.** A package builds green after a rename, `lintian` is quiet, and
-the package is missing files or paths that the package it replaces had. In the
+**Signature.** A package builds green after a rename, every static check on
+`debian/` passes, and the package is missing files or paths that the package
+it replaces had. In the
 worst shape the build succeeds and the first user of the missing path fails
 much later: a renamed `fab` with no `debian/<newname>.links` ships no
 `/usr/bin/fab-chroot`, and the failure appears at the first `fab-chroot` of
