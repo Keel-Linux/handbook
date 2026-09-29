@@ -299,23 +299,34 @@ testimony and not evidence. The comparison is now `bt-layer-measure` in
     bt-layer-measure capture --dir $M --layer <layer> --parent <parent> --tag control
     # check out the branch that supplies the component through unit.d
     bt-layer-measure capture --dir $M --layer <layer> --parent <parent> --tag unit
-    # check out the control tree again
+    # check out the control tree again, and capture it twice
     bt-layer-measure capture --dir $M --layer <layer> --parent <parent> --tag control-again
-    bt-layer-measure attribute --dir $M \
-        --control control --unit unit --control-again control-again
+    bt-layer-measure capture --dir $M --layer <layer> --parent <parent> --tag control-third
+    bt-layer-measure attribute --dir $M --control control --unit unit \
+        --control-again control-again --control-again control-third
 
-All three captures at one `SOURCE_DATE_EPOCH`, one `common` commit and one
-parent layer, or nothing the comparison prints means anything. `capture` takes
+Three controls, not two: `--control-again` is repeatable and the floor is the
+union over every pair of controls, for the reason under "One control pair is
+not a floor" below. Every capture at one `SOURCE_DATE_EPOCH`, one `common`
+commit and one parent layer, or nothing the comparison prints means anything;
+`attribute` refuses captures that disagree on layer, parent or epoch, or were
+taken against a state path list other than the committed one unless the run
+declares why with `--state-paths-override`. `capture` takes
 `/run/lock/keel-build.lock` with a bounded wait and writes into the directory
 named on the command line, so a reviewer re-runs the same command against the
 same directory rather than trusting a number.
 
 **A pull request extracting a component quotes the block `attribute` prints,
-whole.** It names the command, the three captures with their epoch and capture
-time, the noise floor, the attributable count, every state path with its
-verdict and a PASS or FAIL line. A claim of zero attributable differences that
-does not carry that block is not reviewable, and the extraction is not
+whole.** It names the command, every capture with its epoch and capture time,
+the state path list's digest beside the committed one's, what each single
+control pair would have said, the attributable count, every state path with
+its verdict and the evidence for it, every waiver rule with the paths it
+cleared, and a PASS or FAIL line. A claim of zero attributable differences
+that does not carry that block is not reviewable, and the extraction is not
 approved on it.
+A PASS means that nothing the change did shows up as a difference from the
+controls; it does not mean the layer ships no secret it should not, because
+state identical in every capture is invisible to a differential measurement.
 
 ### What a recount found, 2026-09-28
 
@@ -397,17 +408,22 @@ deleting accounts. So the measurement subtracted, as noise, every file the
 thing being measured would have shown up in. Nothing in it was wrong; nothing
 in it was evidence either.
 
-`bt-layer-measure` closes all three. It takes the three captures the step above
-asks for and reports the residue; it keeps the bytes of every path that can hold
-accounts, credentials, keys or database content
-(`share/layer-state-paths` in `buildtasks`) and compares them in both pairs, per
-line for a text file and per byte offset for a binary one, so the floor is
-subtracted at that level and not per path. A clock that moves in every build
-touches the same line or offset in both pairs and cancels; an account row that
-is gone leaves a line the control pair never produces, and is reported as real
-however deep inside the floor it sits. A state path whose bytes were not kept is
-reported as not sampled and fails the run, because a file the measurement could
-not read is not a file that did not change.
+`bt-layer-measure` closes all three. It takes the captures the step above asks
+for and reports the residue against the union of every control pair; it keeps
+the bytes of every path that can hold accounts, credentials, keys or database
+content (`share/layer-state-paths` in `buildtasks`) and gives each state path
+the unit pair differs at a verdict from those bytes, not from its name. A
+position the controls do not vary at is `real`. A text line at a position they
+do vary at is `noise` only if it has the shape they vary with there and the
+part that varies is pinned: the same short length in every control, digits and
+date punctuation only, as a timestamp is. Anything else there, a password hash,
+a host key, a value copied from one of the controls, is `overlapping`. Bytes
+carry no shape, so a binary file is never `noise`: at best it is
+`overlapping`. `real`, `overlapping` and a state path whose bytes were not kept
+(`not sampled`) all fail the run, because a file the measurement could not read
+is not a file that did not change. Only `overlapping` can be cleared, by a
+committed waiver that names its paths, how many it covers and the captures it
+was justified against, and the block prints the bytes of every path it clears.
 
 It also keys every record on `path<TAB>...` with the path in field 1, rather
 than on `sha256sum`'s default `<hash>` plus two spaces plus `<path>`. That
@@ -418,11 +434,20 @@ differing files where the true counts were 198 and 182 (`docs/traps.md`, "A
 path with a space in it"). A path carrying a tab, a newline or a backslash is
 refused at capture time rather than mis-counted.
 
+The first run of the command, against mariadb with three controls on
+2026-09-28, gives 0 attributable against every single pair and against the
+union, and FAIL on the state paths: 102 `noise`, 33 `overlapping`, 32 `real`.
+The 32 are almost all `*.MAI`, where bytes 180 to 183 of the Aria index header
+are a wall clock Unix second that `SOURCE_DATE_EPOCH` does not touch. No finite
+set of controls spans its carries, so they are open in Keel-Linux/buildtasks#13
+rather than waived.
+
 Neither extraction is being reopened on this. Both layers are built, published
-and boot-tested, and the postgresql residue is a comment. What changes is the
-standard: from here on the block `bt-layer-measure attribute` prints is what a
-component extraction is reviewed on, and a residue is named and explained in
-the pull request rather than absent from it.
+and boot-tested, the postgresql residue is a comment, and in the mariadb run
+the account set in `global_priv` is identical in all four captures. What
+changes is the standard: from here on the block `bt-layer-measure attribute`
+prints is what a component extraction is reviewed on, and a residue is named
+and explained in the pull request rather than absent from it.
 
 ### What it costs either way
 
