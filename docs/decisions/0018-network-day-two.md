@@ -67,32 +67,44 @@ with a confirmation window:
    uses (`lib/ipconfig.sh`), so a first boot and a day two write the same
    file for the same spec.
 2. Before touching anything, the run saves the current file under
-   `/var/lib/keel/network/` with a pending marker that records the time of
-   the change, and arms a revert: a
+   `/var/lib/keel/network/` with a pending marker, and arms a revert: a
    transient systemd timer (`systemd-run --on-active=`) that restores the
    saved file and brings the interface up on it. The timer is armed first,
    so a run that dies half way still reverts. A transient timer does not
    survive a reboot, so a unit shipped in the image also runs at boot,
    before networking (`DefaultDependencies=no`,
-   `RequiresMountsFor=/var/lib/keel`, ordered before `network-pre.target`,
-   `networking.service` and `wg-quick@.service`): if the pending marker is
+   `RequiresMountsFor=/var/lib/keel`, `Wants=` and `Before=`
+   `network-pre.target`, and `Before=networking.service`; the overlay's
+   restore relies on `network-pre.target`, which every `wg-quick@`
+   instance is ordered after, since a template name cannot be ordered
+   against): if the pending marker is
    there and no confirmation was recorded, it restores the saved file, or
    `/etc/wireguard/` for the overlay. A machine that reboots inside the
    window comes back on the old network. Confirming and reverting both
-   remove the marker.
+   remove the marker, and they exclude each other: both take the same lock
+   on the marker, a confirmation refuses once a revert has started, and a
+   revert does nothing once a confirmation is recorded. Stopping the timer
+   alone would not stop a revert already running, and the operator would be
+   told "confirmed" on the old network.
 3. The interface is taken down on the outgoing configuration (`ifdown`, which
    also stops a DHCP client it started and withdraws its resolvconf
    entries), its addresses are flushed, since IPv4 addresses survive a link
    going down, the new file is written, and the interface comes up on it
    (`ifup`; the image ships ifupdown-ng, which has no `ifreload`). The revert
    is the same sequence in the other direction, so neither leaves an address
-   or a DHCP client of the other behind.
+   or a DHCP client of the other behind. The overlay has no `ifdown`: its
+   sequence is `wg-quick down` on the outgoing `/etc/wireguard/` file, then
+   `wg-quick up` on the new one, both directions alike. Only when the
+   interface is up again does the marker record the time of the change, on
+   a clock that does not jump (the boot ID and the time since boot), which
+   is what a session's age is compared with.
 4. The run then waits for a confirmation that arrives **over the new
    configuration**: `keel network confirm`, its own command, run in a new
    session. That command cancels the timer and records the confirmation.
    It refuses unless it arrives over the new configuration. Over SSH, the
-   session must have started after the change (its sshd process is younger
-   than the time in the marker), and its local address must be one the
+   session must have started after the change (its `sshd-session` process,
+   the per-connection process of OpenSSH 10 in Debian 13, is younger than
+   the time in the marker), and its local address must be one the
    change added or kept. The session is found from the process tree or
    `loginctl`, not from the environment, which `sudo` resets. On a console,
    recognised by its terminal (`tty1`, `ttyS0`, `hvc0`, `console`), it is
