@@ -76,8 +76,8 @@ with a confirmation window:
    `RequiresMountsFor=/var/lib/keel`, `Wants=` and `Before=`
    `network-pre.target`, and `Before=networking.service`; the overlay's
    restore relies on `network-pre.target`, which every `wg-quick@`
-   instance is ordered after, since a template name cannot be ordered
-   against): if the pending marker is
+   instance follows through its `After=network-online.target`, since a
+   template name cannot be ordered against): if the pending marker is
    there and no confirmation was recorded, it restores the saved file, or
    `/etc/wireguard/` for the overlay. A machine that reboots inside the
    window comes back on the old network. Confirming and reverting both
