@@ -541,6 +541,73 @@ two facts the change rested on were true in both versions, so the first review
 passed it; the second caught it, and then caught the version string in the
 correction.
 
+## A bats negation that is not last asserts nothing
+
+**Signature.** A negative test passes whatever the code does. Deleting the
+function it refutes, or making it return 0, leaves the suite green. The test
+reads as a list of refusals and the last line is the only one that decides
+anything.
+
+**Cause.** Bash does not apply errexit to a negated command: `! cmd` is
+exempt, by the shell's own rules, precisely so that a script can test a
+command without dying. A bats test body has no assertions of its own; its
+verdict is the exit status of the last command it ran. So `! cmd` decides the
+test when it is the final command and is inert everywhere else, and moving a
+line, or adding one after it, silently changes whether it asserts.
+
+shellcheck grades the two cases apart, which is what makes a sweep possible:
+
+    shellcheck -f gcc --shell=bash tests/*.bats | grep SC2314
+
+`error:` is an inert one. `note:` is one in final position, which does assert
+today and would stop asserting if a line were added after it.
+
+**Fix.** `run ! cmd`, with `bats_require_minimum_version 1.5.0` at the top of
+the file. It asserts wherever it stands. Write every negation that way, not
+only the inert ones: a line whose meaning depends on its position is the trap,
+and a file that mixes the two forms leaves a reader to work out which half is
+real.
+
+Three things to watch when converting. `run` replaces `$output`, `$status`
+and `$lines`, so a body that refutes something and then reads the output of
+the command it was refuting has to keep that output in a local first;
+otherwise the second refutation greps an empty string and passes for a new
+reason. `run` takes a command, not a pipeline: `! a | grep -q b` has to be
+rewritten, not prefixed. And `run !` accepts any non-zero status, so a
+misspelt function (127) or a `grep` of a file that is not there (2) passes
+it; after a conversion, check that each refutation fails with the status
+that means "no", not with one that means "could not ask".
+
+**Enforced** in the `Negations that assert` step of `test-shell.yml` in the
+`.github` repository, which every repository with a bats suite calls at
+`@main`. shellcheck reports the negations at the top level of a test body
+(SC2314 for `! cmd`, SC2315 for `! [[ ... ]]`, severity error only, so the
+final-position ones are not failures). shellcheck does not see a negation
+one level down, `a && ! b`, or `! cmd` inside a loop, a branch, a group or a
+substitution, and bats passes every one of them; a short awk program in the
+same step reports those, on any line of the body but its last. The step runs
+before the coverage work and without a coverage script, because a suite that
+is not asserting is not worth measuring. `keel` runs its bats suite from
+pytest through `test-python.yml`, so the step does not reach it yet.
+
+**Hit** 2026-09-28, everywhere at once: 57 inert negations on the default
+branches of eight repositories, out of the 102 bare negations in the
+organization's bats suites. The worst was `inithooks`
+`tests/test-ipconfig.bats`, where twelve of the thirteen rejection cases of
+"ip6_syntax rejects what is not an IPv6 address" were inert and only the
+last one decided anything: an IPv6 validator's rejection set, in an
+IPv6-first distribution. Closely followed by `keel-wordpress`, where five of
+the six cases of "is_global_ipv6 refuses link local, loopback, multicast and
+IPv4" never ran, and `unit-redis`, where the refutation that the bind
+fragment never says `localhost` (put there by the entry above about Debian
+and `localhost`) was itself inert.
+
+Every predicate turned out to be right, so nothing shipped broken. That is
+luck, not evidence: the one assertion that did fail when it was turned on,
+`keel-nodebb`'s `! grep -q set_real_ip_from` against a file whose own comment
+names the directive, could never have passed for any input, and it sat there
+because nothing ever ran it.
+
 ## Things we did wrong and would do again unless written down
 
 - **Discarding a local commit on a guess.** A checkout on the build host had a
