@@ -1,9 +1,9 @@
 # The appliance manifest, version 1
 
-Proposed in decision [0041](decisions/0041-the-appliance-manifest-version-1.md).
-Nothing here is implemented. This is the format that decision asks the
-maintainer to approve, written as the reference a reader and an author of
-manifests would work from. Every example uses IPv6.
+Decided in [0041](decisions/0041-the-appliance-manifest-version-1.md) by
+the maintainer, 2026-09-30. Nothing here is implemented yet. This is the
+reference a reader and an author of manifests work from. Every example uses
+IPv6.
 
 ## Contents
 
@@ -82,7 +82,7 @@ In the source repositories the files sit at:
 
 | Repository | Path |
 | --- | --- |
-| `common` | `keel/overlays/<name>.yaml`, next to `overlays/<name>/`, `conf/<name>` and the packaging |
+| `common` | `packages/<name>/manifest.yaml`: one Debian source package per overlay (`packages/<name>/debian/`, its own changelog and version, released on its own), beside `overlays/<name>/` and `conf/<name>` |
 | an appliance (`keel-core`, `keel-web`) | `keel/appliance.yaml` |
 
 `common/overlays/<name>/` is the tree fab copies onto the root filesystem,
@@ -340,7 +340,7 @@ declared anywhere.
 
 | Artefact | From the manifest | From the spec | Written to |
 | --- | --- | --- | --- |
-| Monit checks (0040) | every process and check of an overlay or appliance whose state is `enabled` | the state of each overlay; the overlay address for `mesh` checks | `/etc/monit/conf.d/keel-manifest.conf`, beside 0021's `keel.conf` |
+| Monit checks (0040) | every process and check of an overlay or appliance whose state is `enabled` | the state of each overlay; the overlay address for `mesh` checks; `monitor.enabled` | always written to `/etc/keel/monit/keel-manifest.conf`, and included from `/etc/monit/conf.d/` only while `monitor.enabled` is true, so the checks exist, and `diff` compares them, whether the monitor is on or off |
 | Firewall | every `listen` with `expose: public` or `mesh`, of every process whose overlay is `enabled` | the overlay's interface and its UDP port (`network.overlay.wireguard`) | the rules the build writes today from `WEBMIN_FW_TCP_INCOMING`, which the manifest replaces |
 | Backup set (0037) | `data[]` with `backup: dump` or `files`; for an application, `state` and the durable services (appendix) | the backup destination (0037); where each service is | the TKLBAM overrides (`/etc/tklbam/overrides`), whose include, exclude and database lines are what the TKLBAM client already reads |
 | File replication (0032) | an application's `state.replicate` and `state.exclude` (appendix) | the mode (only `cloud_advanced` replicates files, 0028) and the role | one Syncthing folder per path, its ignore list from the excludes, send-only on the primary and receive-only on the standby |
@@ -535,7 +535,7 @@ overlays:
   installer: {simple: enabled,  cloud_simple: enabled,  cloud_advanced: enabled}
   wireguard: {simple: disabled, cloud_simple: enabled,  cloud_advanced: enabled}
   etcd:      {simple: disabled, cloud_simple: disabled, cloud_advanced: enabled}
-  crowdsec:  {simple: disabled, cloud_simple: ask, cloud_advanced: ask}
+  crowdsec:  {simple: disabled, cloud_simple: enabled, cloud_advanced: enabled}
 processes:
   - name: sshd
     unit: ssh.service
@@ -570,7 +570,7 @@ Where each state comes from:
 | installer | enabled | enabled | enabled | 0036: it is what installs |
 | wireguard | disabled | enabled | enabled | 0028: a simple installation has no mesh; 0024: every appliance can join one |
 | etcd | disabled | disabled | enabled | 0036: stopped by default; 0028: the quorum is cloud advanced's |
-| crowdsec | disabled | ask | ask | 0029: installed and disabled in simple; in advanced the installer opens its configuration |
+| crowdsec | disabled | enabled | enabled | 0029: installed and disabled in simple; enabled in the cloud modes (0041, "Resolved") |
 
 **What Core derives, simple installation.**
 
@@ -582,7 +582,7 @@ Where each state comes from:
 | File replication | none |
 | Registry | none: no etcd in a simple installation |
 
-**Cloud advanced**, with CrowdSec answered `enabled`: Monit adds `etcd` with
+**Cloud advanced**: Monit adds `etcd` with
 its `/health` probe, `crowdsec` with the LAPI probe and
 `firewall-bouncer`; the firewall adds 2379 and 2380 on the WireGuard
 interface only, and the overlay's UDP port from the spec on the uplink;
@@ -700,7 +700,7 @@ Its manifest is three lines of states over Core's.
 | installer | core | enabled | enabled | enabled |
 | wireguard | core | disabled | enabled | enabled |
 | etcd | core | disabled | disabled | enabled |
-| crowdsec | core | disabled | ask | ask |
+| crowdsec | core | disabled | enabled | enabled |
 | nginx | web | enabled | enabled | enabled |
 | coraza | web | disabled | enabled | enabled |
 | anubis | web | disabled | enabled | enabled |
@@ -718,7 +718,7 @@ Its manifest is three lines of states over Core's.
 
 **What Web derives.**
 
-| Consumer | Simple installation | Cloud advanced (CrowdSec on) |
+| Consumer | Simple installation | Cloud advanced |
 | --- | --- | --- |
 | Monit | Core's four, and `nginx` with `/keel-health` | also etcd, crowdsec, firewall-bouncer, anubis, and `waf-blocks` every tenth cycle |
 | Firewall | 22, 80, 443, 12320, 12321 | also 2379 and 2380 on the WireGuard interface, and the overlay's UDP port |
@@ -822,8 +822,9 @@ first.
 23. `state` paths follow the rules of the `state.replicate` row; each
     `exclude` is inside a replicated path; an `unless` names a service with
     `required: false`.
-24. A worker's `writes` are inside `state.replicate`; `scaling.default` is
-    at most `scaling.max`; `singleton: true` means `max: 1`.
+24. A worker has a `unit` and no writable path (there is no `writes`
+    field); `scaling.default` is at most `scaling.max`; `singleton: true`
+    means `max: 1`.
 
 **The spec against the manifests** (run by `keel spec validate`)
 
@@ -848,9 +849,9 @@ an omission:
   with data, not a field.
 - **Configuration content.** No manifest field templates `nginx.conf`,
   CrowdSec's acquisitions or etcd's cluster membership.
-- **The VIP.** 0029 configures a VIP in every advanced installation; 0036
-  puts the `vip` overlay in the database appliances only. The examples follow
-  0036 and the question is open (decision 0041).
+- **A VIP outside the database appliances.** For now the `vip` overlay is
+  carried by the database appliances only (0041, "Resolved"), so Core and
+  Web have none.
 - **etcd's key layout, its TLS, and the entry secret of 0026.** The
   registry entry above lists what is announced, not how it is keyed.
 - **More than one application on a machine.**
@@ -889,7 +890,6 @@ workers:
   - name: wp-cron
     unit: wordpress-cron.service
     every: 5min
-    writes: []
 web:
   root: /var/www/wordpress
   routes:
@@ -918,7 +918,7 @@ hooks:
 | `workers[]` | Either `unit` alone (a long running consumer) or `unit` with `every` (a periodic job, rendered as a systemd timer). Workers run only on the active node: the hot standby serves nothing (0031), and a periodic job on it would write into a read-only database |
 | `workers[].queue` | The service the worker reads its work from |
 | `workers[].scaling` | `{default: N, max: M, singleton: bool}`: a hint the installer and the spec's `workers.<name>.instances` are held to |
-| `workers[].writes` | The only paths a worker may write, each inside `state.replicate`. Enforced with `ProtectSystem=strict` and `ReadWritePaths=` in a unit drop-in keel writes. Empty means none. See decision 0041 on how this reads 0034 |
+| (no `writes`) | A worker never writes to local disk (0034, confirmed in 0041's "Resolved"): it reads a queue and writes to data services. There is no field to grant a path; keel's unit drop-in sets `ProtectSystem=strict` and `PrivateTmp=yes` with no `ReadWritePaths=`, so a worker that tries fails loudly instead of writing to one node |
 | `web` | What Keel Web routes to the application: `root`, `routes` (`to: php`, or `to: {port: N}` with `websocket: true` where needed), `max_body` for a runtime that is not PHP (PHP's comes from its `post_max_size`), and one `health` probe through Nginx |
 | `hooks.migrate` | What the package's post-installation runs after an upgrade (0039), on the active node only, after a return point is taken; `needs` names the services that must be writable. A major version of an application is a different package, so apt never crosses one |
 
@@ -986,7 +986,7 @@ state:
     - /var/www/wordpress/wp-content/upgrade
     - /var/www/wordpress/wp-content/upgrade-temp-backup
 workers:
-  - {name: wp-cron, unit: wordpress-cron.service, every: 5min, writes: []}
+  - {name: wp-cron, unit: wordpress-cron.service, every: 5min}
 web:
   root: /var/www/wordpress
   routes: [{path: /, to: php}]
@@ -1057,7 +1057,6 @@ workers:
     unit: odoo-cron.service
     queue: database
     scaling: {default: 1, max: 4, singleton: false}
-    writes: [/var/lib/odoo/filestore]
 web:
   routes:
     - {path: /, to: {port: 8069}}
@@ -1081,9 +1080,12 @@ hooks:
 | Monit | `odoo` with `/web/health`; `odoo-cron`; PostgreSQL's overlay when embedded |
 | Replication | two folders in cloud advanced: the filestore must move with its database (0020, hard part 3), which the promotion of 0032 does |
 
-Odoo is the case where a worker writes to disk: cron jobs create
-attachments, which land in the filestore. `writes` confines it to that
-replicated path.
+Odoo is the case the worker rule bites: cron jobs create attachments, and
+Odoo writes them to the filestore by default. Since a worker never writes to
+disk, the cron worker's attachments have to go to a data service, the
+database (Odoo's `ir_attachment.location` set to `db`) or object storage
+(0038). The manifest cannot set that; the worker's unit refuses the write if
+it is not done, and the first Odoo built from a manifest settles which.
 
 ### Mastodon: Ruby and Node, media, Sidekiq, optional search
 
@@ -1118,14 +1120,9 @@ services:
     rebuild: [/usr/lib/keel-mastodon/tootctl, search, deploy]
   objects:
     engine: s3
-    required: false
-    placement: {simple: none, cloud_simple: none, cloud_advanced: discovered}
+    required: true
+    placement: {simple: embedded, cloud_simple: embedded, cloud_advanced: discovered}
     durable: true
-state:
-  replicate:
-    - {path: /var/lib/mastodon/public/system, unless: objects}
-  exclude:
-    - /var/lib/mastodon/public/system/cache
 processes:
   - name: web
     unit: mastodon-web.service
@@ -1143,7 +1140,6 @@ workers:
     unit: mastodon-sidekiq.service
     queue: redis
     scaling: {default: 1, max: 8, singleton: false}
-    writes: [/var/lib/mastodon/public/system]
 web:
   root: /usr/share/mastodon/public
   routes:
@@ -1167,10 +1163,16 @@ hooks:
 
 | Derived | Result |
 | --- | --- |
-| Backup | the media, without `cache` (remote media, fetched again), unless `objects` is placed, when the media are in object storage and backed up there; PostgreSQL and Redis when embedded, both durable (Sidekiq's queues live in Redis); search never |
-| Monit | `web`, `streaming` and their health endpoints; `sidekiq`; the embedded PostgreSQL and Redis overlays |
-| Replication | the media folder in cloud advanced, and not even that with object storage (0038) |
+| Backup | PostgreSQL, Redis and the object store when embedded, all durable (Sidekiq's queues live in Redis, the media in the object store); search never; no file on the application's disk |
+| Monit | `web`, `streaming` and their health endpoints; `sidekiq`; the embedded PostgreSQL, Redis and object storage overlays |
+| Replication | none by file: Mastodon keeps no state on its own disk |
 | On join | `tootctl search deploy` rebuilds the index on a node that joins with search placed |
+
+Object storage is required, not optional, because of the worker rule:
+Sidekiq downloads and resizes media, and a worker never writes to disk, so
+the media go to the `s3` overlay (Garage, 0038), embedded in the simple
+modes and discovered in cloud advanced. That removes Mastodon's only
+filesystem state, so it has no `state` section at all.
 
 `local_domain` has no default and so is required: Mastodon cannot change
 it after the first account exists, which makes it a choice the installer

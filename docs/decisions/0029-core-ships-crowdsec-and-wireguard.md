@@ -15,6 +15,8 @@ Status: **decided by the maintainer, 2026-09-30** (ADR-007).
   VIP.
 - **Automatic VIP promotion only for database appliances.**
 
+Amended by 0041 (2026-09-30): for now the VIP is configured for database appliances only, not in every advanced installation.
+
 ## What this amends
 
 - **0020, "What Debian 13 gives us"**: keepalived was left out because a

@@ -1,12 +1,14 @@
 # 0041: The appliance manifest, version 1
 
 Date: 2026-09-30
-Status: **proposed**, for the maintainer's approval. It answers the review
-note of 0034 ("the manifest format is not specified, and it is the pivot of
-everything after it"), tracker#39, and the manifest item of Phase 0 of the
-roadmap (tracker#46). The format itself, with every field, the worked
-examples and the validation rules, is [docs/manifest-v1.md](../manifest-v1.md);
-this note is what the maintainer is asked to decide.
+Status: **decided by the maintainer, 2026-09-30** ("I confirm and sign
+off"), with the answers to its open questions under "Resolved". It answers
+the review note of 0034 ("the manifest format is not specified, and it is
+the pivot of everything after it"), tracker#39, and the manifest item of
+Phase 0 of the roadmap (tracker#46). The format itself, with every field,
+the worked examples and the validation rules, is
+[docs/manifest-v1.md](../manifest-v1.md); this note records what was
+decided.
 
 Scope, as the maintainer set it on 2026-09-30: **start from the base.** The
 manifest describes Keel Core and Keel Web first, which is what Phases 1 and
@@ -26,10 +28,9 @@ facts start: Monit's checks, the firewall, the states of CrowdSec, etcd,
 Coraza and Anubis in each installation mode, and what every appliance above
 them inherits.
 
-## Decision (proposed)
+## Decision
 
-The choices the maintainer is asked to approve, each argued in the format
-document.
+The choices the maintainer approved, each argued in the format document.
 
 1. **Two kinds of file, one schema.** An **overlay manifest** ships in each
    overlay's `.deb` (0036, 0039) and says what the overlay runs: its
@@ -79,7 +80,8 @@ document.
 
 7. **Monit's checks, the firewall, the backup set, the Syncthing folders
    and the registry entry are derived, never declared.** Monit's file is
-   `/etc/monit/conf.d/keel-manifest.conf` beside 0021's `keel.conf`; the
+   always written, `/etc/keel/monit/keel-manifest.conf`, and included from
+   `/etc/monit/conf.d/` only while the spec's monitor is enabled; the
    backup set is rendered as the TKLBAM overrides the client already reads
    (0037 keeps TKLBAM); the folders follow 0032's send-only and
    receive-only rule, in cloud advanced only. `keel manifest show
@@ -93,7 +95,8 @@ document.
 
 9. **Where it lives and who reads it.** `/usr/share/keel/overlays/<name>.yaml`
    and `/usr/share/keel/appliances/<name>.yaml`, from packages named
-   `keel-overlay-<name>` and after the appliance (`keel-core`, `keel-web`).
+   `keel-overlay-<name>`, one source package per overlay, and after the
+   appliance (`keel-core`, `keel-web`).
    Read by new commands `keel manifest validate` and `keel manifest show`;
    by `keel spec validate`, which becomes manifest-aware; by `keel spec
    apply --system`, which converges the overlays' units and writes the
@@ -116,7 +119,7 @@ Keel Core (format, "Worked example: Keel Core"):
 | installer | enabled | enabled | enabled | 0036 |
 | wireguard | disabled | enabled | enabled | 0028, 0024 |
 | etcd | disabled | disabled | enabled | 0036, 0028 |
-| crowdsec | disabled | ask | ask | 0029 |
+| crowdsec | disabled | enabled | enabled | 0029, 0041 |
 
 Its own processes: sshd (22), Webmin (12321), the web shell (12320), all
 public, and postfix (25, loopback). In a simple installation Monit watches
@@ -144,11 +147,11 @@ hand.
 | # | Repository | Work | Done when |
 | --- | --- | --- | --- |
 | 1 | keel | `keel.manifest`: the reader, `keel manifest validate` and `keel manifest show`, with no consumer yet | the Core and Web manifests of the format validate as fixtures; each validation rule has a fixture it refuses; `show web --resolved` prints the format's resolved tables; coverage per 0003 |
-| 2 | common | a source package building `keel-overlay-installer` (inithooks, confconsole, keel), `keel-overlay-wireguard` (wireguard-tools 1.0.20210914 from trixie), `keel-overlay-etcd` (etcd-server 3.5.16 from trixie) and `keel-overlay-crowdsec` (crowdsec 1.4.6-10 and crowdsec-firewall-bouncer 0.0.25 from trixie, or a current CrowdSec if 0029's open task decides so), each with its manifest, into the testing track (0039) | installed on a trixie container, each leaves its units in its `simple` state, etcd and both CrowdSec units disabled and inactive whatever the Debian packages' own maintainer scripts did, and its manifest validates on the machine |
+| 2 | common | one source package per overlay, under `packages/<name>/`, each with its own changelog and version: `keel-overlay-installer` (inithooks, confconsole, keel), `keel-overlay-wireguard` (wireguard-tools 1.0.20210914 from trixie), `keel-overlay-etcd` (etcd-server 3.5.16 from trixie) and `keel-overlay-crowdsec` (crowdsec 1.4.6-10 and crowdsec-firewall-bouncer 0.0.25 from trixie, or a current CrowdSec if 0029's open task decides so), each with its manifest, into the testing track (0039) | installed on a trixie container, each leaves its units in its `simple` state, etcd and both CrowdSec units disabled and inactive whatever the Debian packages' own maintainer scripts did, and its manifest validates on the machine |
 | 3 | keel | the spec's `appliance`, `installation` and `overlays`; `apply --system` converges the units and writes the Monit file and the firewall; `inspect` and `diff` read them | on a container with step 2's packages, CrowdSec disabled, enabled, disabled converges each time, a second apply changes nothing, `diff` is clean, the Monit file gains and loses exactly CrowdSec's checks, and `monit -t` accepts every file rendered |
 | 4 | keel-core | the `keel-core` package (its manifest, and `Depends` on the four overlays and on step 3's keel); the recipe installs it | Phase 1's criterion of tracker#46, and on the booted image `keel manifest show --resolved` equals the Core table and Monit watches exactly sshd, Webmin, the web shell and postfix |
 | 5 | new packaging repositories | Coraza's Nginx connector: no Debian package and no ITP, so Keel builds it (0030, 0039) as a dynamic module that depends on `nginx-abi-1.26.3-1`, as trixie's own `libnginx-mod-*` packages do, and is rebuilt whenever trixie's nginx moves to another upstream version. Anubis: ITP #1102132, so it is built from source into the Keel repository in coordination with the ITP's owner (tracker#15), the upstream `.deb` (v1.27.0) as a reference only. nginx 1.26.3 is trixie's, used as it is | both build from source in the Keel repository; the module loads into trixie's nginx (`nginx -t`); a Core Rule Set test payload gets 403 in the package's own test |
-| 6 | common | `keel-overlay-nginx`, `keel-overlay-coraza`, `keel-overlay-anubis`, with their manifests | on Core, nginx answers `/keel-health` with 204 on the loopback only; Coraza and Anubis are installed and off; turned on in the spec, the `waf-blocks` and `anubis` checks pass |
+| 6 | common | `keel-overlay-nginx`, `keel-overlay-coraza`, `keel-overlay-anubis`, a source package each, with their manifests | on Core, nginx answers `/keel-health` with 204 on the loopback only; Coraza and Anubis are installed and disabled; turned on in the spec, the `waf-blocks` and `anubis` checks pass |
 | 7 | keel-web | the `keel-web` package and its recipe, on the Core layer | Phase 3's criterion of tracker#46; `show --resolved` equals the Web table; Monit in simple is Core's plus Nginx, and advanced adds Anubis and the WAF probe |
 
 Not needed for Core and Web, and left for the phases that use them:
@@ -157,7 +160,7 @@ syncthing 1.29.5 (data appliances, 0032), tayga 0.9.2 (rendezvous points,
 libnginx-mod-http-modsecurity 1.0.3, in trixie, which stays the unused
 fallback of 0030 unless a new decision chooses it.
 
-## What this amends, if approved
+## What this amends
 
 - **0034, review note**: answered; the format is docs/manifest-v1.md.
 - **0010, "The three levels"**: the recipe level, "a recipe would declare
@@ -177,34 +180,42 @@ fallback of 0030 unless a new decision chooses it.
   restart limit per process that 0040's "Resolved" asked for.
 - **0027**: the emitted YAML carries the mode and the state of every
   overlay, written out.
-- **0036**: every overlay's `.deb` is named `keel-overlay-<name>` and its
-  manifest lives in `common` at `keel/overlays/<name>.yaml`.
+- **0036**: every overlay is its own Debian source package in `common`
+  (`packages/<name>/`), its `.deb` named `keel-overlay-<name>`, with its
+  manifest beside its `debian/`.
+- **0029, "Decision"**: the VIP is configured for database appliances only,
+  for now, not in every advanced installation (see "Resolved"); 0029
+  carries a one-line note saying so. 0036, which already puts the `vip`
+  overlay only in the database appliances, is unchanged.
+- **0034, workers**: unchanged and confirmed, a worker never writes to
+  local disk; the format has no field that could grant it a path.
 - **0037 and 0032**: the backup manifest of 0037 and the `replicate:` and
   `exclude:` lists of 0032 are the derived backup set and the application
   `state` section.
 
-## Open questions for the maintainer
+## Resolved (maintainer, 2026-09-30)
 
-- [ ] **Does cloud simple run etcd?** 0028 gives the quorum to cloud
-  advanced, and 0036 ships etcd stopped; 0026 has an advanced installation
-  discover over etcd. The Core example sets etcd `disabled` in cloud simple,
-  which leaves a cloud simple replica finding its primary by a typed
-  address, as it does today.
-- [ ] **The VIP.** 0029 configures one in every advanced installation;
-  0036 puts the `vip` overlay only in the database appliances. The examples
-  follow 0036, so Keel Web has no VIP.
-- [ ] **CrowdSec in the cloud modes: `ask` or `enabled`?** 0029 says the
-  installer "opens CrowdSec's configuration"; the example reads that as
-  `ask`.
-- [ ] **Checks when the monitor is off.** 0021 keeps the resource monitor
-  off until a channel is declared; 0040 has Monit restart what it can.
-  Proposed: the manifest's checks are written whenever Monit is installed,
-  so restarts happen, and they alert only through channels the spec
-  declares.
-- [ ] **Workers and the disk.** 0034 says a worker never writes to local
-  disk; Odoo's cron and Mastodon's Sidekiq write attachments and media.
-  The appendix reads 0034 as "only inside the replicated state", enforced
-  by the unit, not as "nowhere".
-- [ ] **Packaging shape.** One source package in `common` building every
-  `keel-overlay-*` binary (proposed), or one source package per overlay,
-  which releases each on its own at the cost of a CI and a changelog each.
+- **Cloud simple runs no etcd.** etcd is for cloud advanced only, which is
+  what the Core table says (`disabled`, `disabled`, `enabled`). A cloud
+  simple replica finds its primary by the address the primary hands it
+  (0028), as it does today; discovery over etcd (0026) is a cloud advanced
+  installation's.
+- **The VIP is only for database appliances, for now.** Core and Web carry
+  no `vip` overlay. This settles the conflict between 0029 (a VIP in every
+  advanced installation) and 0036 (the `vip` overlay in the database
+  appliances only) on 0036's side; 0029 is amended.
+- **CrowdSec is `enabled` in the cloud modes**, not `ask`: the Core and Web
+  tables say `disabled`, `enabled`, `enabled`. The overlay keeps its screen
+  for an operator who wants to change its configuration.
+- **Manifest checks are always written, and inactive while the monitor is
+  off.** The derived file is rendered whatever the spec says, and Monit
+  includes it only while `monitor.enabled` is true, so `diff` compares it
+  either way and turning the monitor on activates checks that already
+  exist.
+- **Workers never write to disk**, as 0034 says. The format has no
+  `writes` field; keel's drop-in gives every worker unit a read-only
+  system. In the appendix this makes object storage required for
+  Mastodon, whose Sidekiq writes media, and has Odoo's cron worker keep its
+  attachments in a data service.
+- **One source package per overlay**, each released on its own with its
+  own changelog and version, at the cost of a CI and a changelog each.

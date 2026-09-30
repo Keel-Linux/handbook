@@ -31,7 +31,7 @@ that changes an earlier one says so under "What this amends".
 | 0021 | A resource monitor | decided |
 | 0022 | An LNPP stack, and Odoo from git | open PR, handbook#23 |
 | 0023 to 0040 | The composition architecture, below | decided 2026-09-30 |
-| [0041](0041-the-appliance-manifest-version-1.md) | The appliance manifest, version 1 (format: [docs/manifest-v1.md](../manifest-v1.md)) | proposed |
+| [0041](0041-the-appliance-manifest-version-1.md) | The appliance manifest, version 1 (format: [docs/manifest-v1.md](../manifest-v1.md)) | decided 2026-09-30 |
 
 ## The composition architecture (0023 to 0040)
 
