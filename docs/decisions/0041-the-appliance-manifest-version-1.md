@@ -121,10 +121,12 @@ Keel Core (format, "Worked example: Keel Core"):
 | etcd | disabled | disabled | enabled | 0036, 0028 |
 | crowdsec | disabled | enabled | enabled | 0029, 0041 |
 
-Its own processes: sshd (22), Webmin (12321), the web shell (12320), all
-public, and postfix (25, loopback). In a simple installation Monit watches
-those four and nothing else, the firewall opens 22, 12320 and 12321, and
-the backup is TKLBAM's system delta as today.
+Its own processes: sshd (22) and Webmin (12321), both public, and postfix
+(25, loopback). In a simple installation Monit watches those three and
+nothing else, the firewall opens 22 and 12321, and the backup is TKLBAM's
+system delta as today. (Errata, 2026-09-30: the web shell on 12320 was
+listed here; TurnKey removed it in 18.0 and the Core image has none, found
+by step 4's image test. See the format, "Worked example: Keel Core".)
 
 Keel Web (format, "Worked example: Keel Web"), on Core:
 
@@ -149,7 +151,7 @@ hand.
 | 1 | keel | `keel.manifest`: the reader, `keel manifest validate` and `keel manifest show`, with no consumer yet | the Core and Web manifests of the format validate as fixtures; each validation rule has a fixture it refuses; `show web --resolved` prints the format's resolved tables; coverage per 0003 |
 | 2 | common | one source package per overlay, under `packages/<name>/`, each with its own changelog and version: `keel-overlay-installer` (inithooks, confconsole, keel), `keel-overlay-wireguard` (wireguard-tools 1.0.20210914 from trixie), `keel-overlay-etcd` (etcd-server 3.5.16 from trixie) and `keel-overlay-crowdsec` (crowdsec 1.4.6-10 and crowdsec-firewall-bouncer 0.0.25 from trixie, or a current CrowdSec if 0029's open task decides so), each with its manifest, into the testing track (0039) | installed on a trixie container, each leaves its units in its `simple` state, etcd and both CrowdSec units disabled and inactive whatever the Debian packages' own maintainer scripts did, and its manifest validates on the machine |
 | 3 | keel | the spec's `appliance`, `installation` and `overlays`; `apply --system` converges the units and writes the Monit file and the firewall; `inspect` and `diff` read them | on a container with step 2's packages, CrowdSec disabled, enabled, disabled converges each time, a second apply changes nothing, `diff` is clean, the Monit file gains and loses exactly CrowdSec's checks, and `monit -t` accepts every file rendered |
-| 4 | keel-core | the `keel-core` package (its manifest, and `Depends` on the four overlays and on step 3's keel); the recipe installs it | Phase 1's criterion of tracker#46, and on the booted image `keel manifest show --resolved` equals the Core table and Monit watches exactly sshd, Webmin, the web shell and postfix |
+| 4 | keel-core | the `keel-core` package (its manifest, and `Depends` on the four overlays and on step 3's keel); the recipe installs it | Phase 1's criterion of tracker#46, and on the booted image `keel manifest show --resolved` equals the Core table and Monit watches exactly sshd, Webmin and postfix (no web shell: errata above) |
 | 5 | new packaging repositories | Coraza's Nginx connector: no Debian package and no ITP, so Keel builds it (0030, 0039) as a dynamic module that depends on `nginx-abi-1.26.3-1`, as trixie's own `libnginx-mod-*` packages do, and is rebuilt whenever trixie's nginx moves to another upstream version. Anubis: ITP #1102132, so it is built from source into the Keel repository in coordination with the ITP's owner (tracker#15), the upstream `.deb` (v1.27.0) as a reference only. nginx 1.26.3 is trixie's, used as it is | both build from source in the Keel repository; the module loads into trixie's nginx (`nginx -t`); a Core Rule Set test payload gets 403 in the package's own test |
 | 6 | common | `keel-overlay-nginx`, `keel-overlay-coraza`, `keel-overlay-anubis`, a source package each, with their manifests | on Core, nginx answers `/keel-health` with 204 on the loopback only; Coraza and Anubis are installed and disabled; turned on in the spec, the `waf-blocks` and `anubis` checks pass |
 | 7 | keel-web | the `keel-web` package and its recipe, on the Core layer | Phase 3's criterion of tracker#46; `show --resolved` equals the Web table; Monit in simple is Core's plus Nginx, and advanced adds Anubis and the WAF probe |
