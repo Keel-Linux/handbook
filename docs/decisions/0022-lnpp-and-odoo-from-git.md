@@ -166,8 +166,16 @@ verticals, and one of these is needed:
 | Package each missing library as a `.deb` in our archive | the most Debian-like; dozens of packages to own, per country |
 | `pip` from PyPI | the fastest; a third party at build and at every vertical chosen later |
 
-Proposed: the first. It is what an Odoo integrator already does, the
-hashes make every install reproducible, and the index is ours.
+Decided by the maintainer on 2026-09-30: **the second**, packaged the
+Debian Python Team way in our archive and offered to Debian over time,
+so the work also makes the project a Debian contributor. The measured
+size of it is in [docs/odoo-python-packaging-map.md](../odoo-python-packaging-map.md):
+Odoo 18.0 itself needs nothing outside trixie; the whole OCA catalogue
+needs 34 libraries more (30 direct, 4 in their closure), all pure
+Python, none with a licence that keeps it out of main; Brazil alone
+accounts for 12, Portugal for none. Sponsorship, not the NEW queue, is
+the wall for sending them to Debian (tracker#15), so they ship from our
+archive first.
 
 ## How it is tested before `stable`
 
@@ -180,8 +188,8 @@ maintainer decides. Nothing high severity open at the end.
 
 ## Open for the maintainer
 
-- Python beyond Debian for the verticals: the proposal above (a virtual
-  environment with hash-pinned wheels from our own index), or another.
+- The order in which the libraries of the map are packaged (the map
+  proposes base first, then Brazil, Spain, Portugal), and which go to Debian first.
 - The catalogue above: add or drop verticals.
 - Whether `Keel-Linux/odoo` mirrors the whole upstream history or only
   the `18.0` branch (proposed: the branch; the full repository is
