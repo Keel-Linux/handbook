@@ -548,7 +548,7 @@ processes:
     listen: [{port: 12320, protocol: tcp, expose: public}]
   - name: postfix
     unit: postfix.service
-    listen: [{port: 25, protocol: tcp, expose: loopback}]
+    listen: [{address: 127.0.0.1, port: 25, protocol: tcp, expose: loopback}]
 checks:
   - {name: sshd, process: sshd, type: protocol, protocol: ssh,
      address: loopback, port: 22, on_failure: restart}
@@ -562,6 +562,13 @@ secrets:
     generate: allowed
     shared: false
 ```
+
+Postfix binds `127.0.0.1` alone on a TurnKey appliance: its `main.cf` says
+`inet_interfaces = localhost`, and Debian resolves `localhost` to the IPv4
+loopback only (docs/spec.md in keel says why). So its port declares that
+literal, as CrowdSec's do, and the SMTP probe connects to `127.0.0.1`; at
+`::1` it failed on every cycle and Monit restarted postfix until its
+restart limit (errata, 2026-09-30, found by step 3's test of 0041).
 
 Where each state comes from:
 
@@ -708,7 +715,7 @@ Its manifest is three lines of states over Core's.
 | Port | Process | From | Exposure |
 | --- | --- | --- | --- |
 | 22/tcp | sshd | core | public |
-| 25/tcp | postfix | core | loopback |
+| 25/tcp | postfix | core | loopback, IPv4 |
 | 80/tcp, 443/tcp | nginx | web (nginx) | public |
 | 2379/tcp, 2380/tcp | etcd | core (etcd) | mesh |
 | 6060/tcp, 8080/tcp | crowdsec | core (crowdsec) | loopback, IPv4 |
