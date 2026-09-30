@@ -115,6 +115,60 @@ and the first are the work that follows if Odoo keeps depending on it.
   `odoo -u all` with a backup first; a major version needs OpenUpgrade
   (brief section 9), and is refused by apply.
 
+## Choosing what Odoo carries: localization, then verticals
+
+Decided by the maintainer on 2026-09-30: the operator chooses in
+confconsole, by business function rather than by repository name, first
+a localization, then the verticals. Each choice is an OCA repository set
+checked out at `18.0`, which makes its modules available in Odoo's Apps
+list; installing a module into a database stays Odoo's own act. The
+screens configure this machine only (decision 0013's rule), and the
+choice is written to the spec, so `keel diff` and a rebuilt machine see
+the same set.
+
+Every repository below had an active `18.0` branch when measured
+(2026-09-30); `l10n-uk` has none and is not offered.
+
+| Screen | Choice | OCA repositories |
+| --- | --- | --- |
+| Localization (one) | Brazil, Spain, Portugal, Italy, France, Germany, Netherlands, Belgium, Switzerland, Mexico, Colombia, Chile, Peru, Ecuador, USA, Canada | `l10n-<country>` |
+| Always, the base | | `server-tools`, `server-ux`, `web`, `reporting-engine`, `queue`, `partner-contact`, `product-attribute` |
+| Verticals (any) | Stock | `stock-logistics-warehouse`, `-workflow`, `-tracking`, `-barcode`, `-reporting`, `delivery-carrier` |
+| | Website | `website`, `web`, `e-commerce` |
+| | Sales | `sale-workflow`, `sale-reporting`, `crm` |
+| | Purchase | `purchase-workflow` |
+| | Accounting | `account-financial-tools`, `account-financial-reporting`, `account-invoicing`, `account-payment`, `bank-payment`, `account-reconcile`, `mis-builder` |
+| | Field Service | `field-service` |
+| | Helpdesk | `helpdesk` |
+| | Projects | `project`, `timesheet` |
+| | People | `hr`, `hr-attendance`, `hr-holidays`, `payroll` |
+| | Manufacturing | `manufacture` |
+| | Point of Sale | `pos` |
+| | Contracts | `contract` |
+| | Documents | `dms` |
+
+A module's `depends` can name a module of a repository the operator did
+not pick; the recent OCA series dropped `oca_dependencies.txt`, so the
+set is closed by reading the manifests of the checked-out repositories
+and adding the repositories that hold the missing modules, and the plan
+says which it added and why.
+
+**Python beyond Debian.** Odoo itself runs on Debian's `python3-*`
+packages, but the OCA repositories carry their own requirements, and not
+all are in Debian: of `l10n-brazil`'s 15, ten are not (`nfelib`, the
+`erpbrasil.*` family, `brazilcep`, `brazilfiscalreport`, `workalendar`
+and others). So "Debian's Python only" holds for Odoo and not for the
+verticals, and one of these is needed:
+
+| Option | Cost |
+| --- | --- |
+| A virtual environment with `--system-site-packages` (Debian's libraries first), the rest installed with `pip --require-hashes` from wheels mirrored in our own archive | the community's way, reproducible, sovereign; a small index to run and refresh |
+| Package each missing library as a `.deb` in our archive | the most Debian-like; dozens of packages to own, per country |
+| `pip` from PyPI | the fastest; a third party at build and at every vertical chosen later |
+
+Proposed: the first. It is what an Odoo integrator already does, the
+hashes make every install reproducible, and the index is ours.
+
 ## How it is tested before `stable`
 
 On the maintainer's VMs, in three places, in a VM and in an LXC
@@ -126,9 +180,9 @@ maintainer decides. Nothing high severity open at the end.
 
 ## Open for the maintainer
 
-- Which OCA repositories are cloned by default (none, a small set such
-  as `server-tools`, `web` and `l10n-brazil`, or a list in the spec), and
-  whether each is mirrored in the organisation like Odoo itself.
+- Python beyond Debian for the verticals: the proposal above (a virtual
+  environment with hash-pinned wheels from our own index), or another.
+- The catalogue above: add or drop verticals.
 - Whether `Keel-Linux/odoo` mirrors the whole upstream history or only
   the `18.0` branch (proposed: the branch; the full repository is
   several gigabytes, and the upgrade to the next series adds its branch
