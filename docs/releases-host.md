@@ -175,7 +175,7 @@ and are edited separately when the signed content lands.
 | `/srv/mirror/bootstrap/` | `bootstrap-trixie-amd64.tar.gz` (81,659,452 bytes) with `.sha256`, `.sha512` and `.sha256.UNSIGNED` | packed on the build host, carried by hand (the subsection below) |
 | `/srv/mirror/selfcheck/` | the daily reproducibility result, `reproducibility.json` and `STATUS` | carried from the build host by the same publication |
 | `/srv/archive/` | `README.txt`, and `staging-unsigned/` with the reprepro `trixie-staging` tree | `bin/keel-publish-mirror --unsigned-staging`; the signed tree goes to the root of `/srv/archive` and needs no flag once the key exists |
-| `/srv/releases/pve/` | `aplinfo.dat`, `aplinfo.dat.gz` and `aplinfo.dat.asc` (or `aplinfo.dat.UNSIGNED` when a release was not signed): one record per appliance published, whatever release published it (below) | the same |
+| `/srv/releases/pve/` | `aplinfo.dat`, `aplinfo.dat.gz` and exactly one of `aplinfo.dat.asc` (signed) or `aplinfo.dat.UNSIGNED` (not signed), since each publication leaves exactly the `pve/` files its `MANIFEST` lists: one record per appliance published, whatever release published it (below) | the same |
 | `/srv/releases/meta/<date>/` | the release `MANIFEST` and its signature or `UNSIGNED` note | the same |
 | `/srv/site/` | git checkout | `keel-site-pull.timer` |
 
@@ -218,9 +218,25 @@ signs again:
 
     keel-release --date 2026-09-28 --resume redis
 
+There is one exception: the last publication installed its index but could
+not write the record on the build host (it warns when that happens). In
+that case the record is older than what is served, so a restage merges onto
+the same old record and is refused again. The refusal says which case it
+is. For this one, publish that last release again. Its index is the one
+served, so it passes the check, and this time the record is written. Then
+restage:
+
+    keel-publish-mirror 2026-09-27
+    ssh root@2804:710:d0:5:bb3f:380a:f07b:7951 '/srv/keel-apt/apt/bin/keel-release --date 2026-09-28 --resume redis'
+
 A record leaves the index only when a release says so:
-`keel-release --drop-from-index keel-<appliance> ...`. An appliance that a
-release does not stage keeps its record.
+`keel-release --drop-from-index keel-<appliance> ...`, which can be given
+more than once. An appliance that a release does not stage keeps its
+record. A name the index has no record of is refused, so a typo drops
+nothing silently. The drops are part of the release: its `MANIFEST` lists
+them as `index_dropped`, and a `--resume` or `--sign-only` of that date
+must give the same ones or it is refused. To change the drops, stage
+another date.
 
 Check from a workstation, over IPv6:
 
@@ -430,9 +446,10 @@ nothing else on the VM was touched.
   `bin/keel-publish-mirror` publishes to the root and needs no flag as soon
   as the release and the archive are signed, and refuses otherwise.
   `staging-unsigned/` is removed the day that happens.
-- `releases.keellinux.org/pve/aplinfo.dat.asc`: written by `bt-aplinfo` as
-  soon as the subkey is in the build host's keyring; `aplinfo.dat` and
-  `.gz` are already served, with an `UNSIGNED` note beside them.
+- `releases.keellinux.org/pve/aplinfo.dat.UNSIGNED`: still served on
+  2026-09-30 next to an `aplinfo.dat.asc` that verifies, left over because
+  the publication used to copy `pve/` without removing anything. The next
+  publication removes it (Keel-Linux/apt#19).
 - Flip the staging header (section 5) and rewrite the three README.txt files
   at the first signed publication; `/srv/mirror/README.txt` also still says
   `/images/` "appears with the first release", which it now has.
