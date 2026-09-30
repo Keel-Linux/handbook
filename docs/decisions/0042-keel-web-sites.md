@@ -1,7 +1,10 @@
 # 0042: Keel Web sites
 
 Date: 2026-09-30
-Status: **proposed**, for the maintainer's approval. It turns Keel Web
+Status: **decided by the maintainer, 2026-09-30**, with two changes to
+the proposal (Nginx's standard layout, and IPv4 on by default) and the
+answers to its open questions, all under "Resolved"; the text below
+already reflects them. It turns Keel Web
 (0030) from "Nginx, Coraza and Anubis are installed" into "an operator
 declares sites and Keel serves them": the sites, how they are declared in
 the spec, what keel renders from them, how the console edits them, and how
@@ -78,15 +81,20 @@ certificate.
 `libnginx-mod-stream`, which depends on `nginx-abi-1.26.3-1` as Coraza's
 module will (0041, step 5).
 
-## Decision (proposed)
+## Decision
 
 1. **A site is declared in the spec, `web.sites[]`, and keel renders it.**
    The console screens are thin writers of the spec, like the Instance
    menu; `keel spec apply --system` renders Nginx from templates that live
-   in keel, beside their tests, into `/etc/nginx/keel/`, which keel owns
-   whole. No site is written by hand, and a hand edit of that tree is drift
-   in `keel diff`. The only free-form input is `extra`, a list of
-   allowlisted directives.
+   in keel, beside their tests, into **Nginx's standard Debian layout**:
+   `sites-available/keel-<site>.conf` with its link in `sites-enabled/`,
+   and the same for the stream side under `streams-available/` and
+   `streams-enabled/`. keel owns only its own files, recognised by name and
+   header (see "What keel renders"); sites an operator wrote by hand
+   coexist and are left alone, `keel diff` reports drift only on keel's
+   files, and `keel inspect` reports the others as present but not
+   declared. No keel site is written by hand. The only free-form input is
+   `extra`, a list of allowlisted directives.
 
 2. **Five modes**, each a different path through Nginx:
 
@@ -136,8 +144,10 @@ module will (0041, step 5).
    site, and a `default_server` that refuses unknown names
    (`ssl_reject_handshake`, 444 on 80).
 
-8. **IPv6 first**: every listener is `[::]`, and IPv4 is added only when
-   the spec says `web.listen.ipv4: true` (or a site does).
+8. **IPv6 first, IPv4 on by default**: every listener is written on
+   `[::]` first and on `0.0.0.0` second. `web.listen.ipv4: false` (or a
+   site's `ipv4: false`) is the operator's opt-out, for an IPv6-only
+   machine.
 
 9. **An application's manifest declares its routes**; the operator's site
    says `routes: manifest` and chooses only names, certificate and
@@ -145,17 +155,17 @@ module will (0041, step 5).
    `/websocket` on port 8072; the spec owns the choice of the name it is
    served under (0041, choice 2).
 
-10. **Apply is test first, keep the old on failure.** keel renders into a
-    new tree, runs `nginx -t` against it, swaps it in, runs `nginx -t`
-    again and reloads; any failure puts the previous tree back and does not
-    reload. The screen shows the generated configuration and the `nginx -t`
+10. **Apply is test first, keep the old on failure.** keel renders its
+    files into a staging copy of `/etc/nginx`, runs `nginx -t` on it,
+    installs them, runs `nginx -t` again and reloads; any failure puts
+    keel's previous files back and does not reload. The screen shows the generated configuration and the `nginx -t`
     output before it commits anything, and restores the previous spec when
     apply fails, so the spec and the running Nginx never disagree.
 
 11. **The version 1 and version 2 cut** is the maintainer's, with the items
     the requirements did not place assigned under "Version 1 and version
     2" (IP allowlist, gzip, SSE, logs and `extra` in version 1; gRPC in
-    version 2). The assignment is part of what is approved.
+    version 2).
 
 ## Sharing port 443
 
@@ -164,8 +174,8 @@ server cannot both listen on `[::]:443`. So when a passthrough site
 exists, the stream module owns 443 and the `http` block moves behind it.
 
 ```nginx
-# /etc/nginx/keel/stream.d/00-front.conf, rendered only while a
-# tls-passthrough site exists
+# /etc/nginx/streams-available/keel-front.conf, linked from
+# streams-enabled/ only while a tls-passthrough site exists
 map $ssl_preread_server_name $keel_route {
     hostnames;
     git.example.org          keel_pt_git;        # passthrough, backend takes PROXY
@@ -177,7 +187,8 @@ upstream keel_pt_git         { server [fd4b:7c1e:30a2::3]:443; }
 upstream keel_pt_vault_strip { server unix:/run/nginx/keel-pt-vault.sock; }
 
 server {
-    listen [::]:443;                 # and 443 when web.listen.ipv4
+    listen [::]:443;                 # IPv6 first
+    listen 0.0.0.0:443;              # unless web.listen.ipv4 is false
     ssl_preread on;
     proxy_pass $keel_route;
     proxy_protocol on;               # always: the next hop learns the client
@@ -195,7 +206,7 @@ server {
 ```
 
 ```nginx
-# /etc/nginx/keel/http.d/erp.conf, an http site behind the front
+# /etc/nginx/sites-available/keel-erp.conf, an http site behind the front
 server {
     listen unix:/run/nginx/keel-https.sock ssl proxy_protocol;
     http2 on;
@@ -229,6 +240,13 @@ Why this shape:
   scanner learns no certificate and no name.
 - **HTTP/3 (version 2) is UDP** and never passes through the TCP front: an
   `http` site with `http3: true` listens `quic` on `[::]:443` directly.
+- **A hand-written site on 443 blocks the front.** Once the front owns
+  TCP 443, an `http` server of the operator's that still listens on 443
+  cannot bind, and `nginx -t` does not catch that (it does not bind). So
+  before linking the front, keel reads `nginx -T` and refuses to add a
+  passthrough site while a file it does not own listens on TCP 443,
+  naming the file; the operator moves that site to a keel site or off
+  443 first.
 
 Port 80 stays in the `http` block in both topologies: it serves the ACME
 challenges and redirects to HTTPS. For a passthrough site's names it
@@ -244,7 +262,7 @@ emitter writes every field out, defaults included (0027).
 ```yaml
 web:
   listen:
-    ipv4: false                 # IPv6 only unless true
+    ipv4: true                  # [::] first, then 0.0.0.0; false opts out
   real_ip:
     source: direct              # direct | proxy_protocol | header
     trusted: []                 # CIDRs of the balancer or proxy in front
@@ -268,7 +286,7 @@ web:
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `web.listen.ipv4` | `false` | `true` adds an IPv4 listener beside every `[::]` one. Nginx's `[::]` listeners are `ipv6only=on`, so without it the machine does not answer on IPv4 at all |
+| `web.listen.ipv4` | `true` | Every listener is written on `[::]` first and on `0.0.0.0` second. Nginx's `[::]` listeners are `ipv6only=on`, so `false`, the operator's opt-out, makes the machine answer on IPv6 only |
 | `web.real_ip.source` | `direct` | `direct`: the TCP peer is the client. `proxy_protocol`: a layer 4 balancer in front sends PROXY v1 or v2, and every public listener requires it. `header`: a layer 7 proxy in front sends `X-Forwarded-For` (see "Real client IP") |
 | `web.real_ip.trusted` | `[]` | CIDRs of that balancer or proxy. Required and non-empty unless `direct` |
 | `web.logs.access` | `per_site` | `off` keeps only the error logs; CrowdSec then has nothing to read, and the screen says so |
@@ -305,7 +323,7 @@ web:
 | `routes[].extra` | `http` | `[]` | See "The `extra` allowlist" |
 | `max_body` | `http` | `16M` | The site's `client_max_body_size` |
 | `protect.waf` | `http` | `enforce` if the `coraza` overlay is enabled, else `off` | `enforce`, `detect` (log only, for a new site) or `off` |
-| `protect.anubis` | `http` | `true` if the `anubis` overlay is enabled, else `false` | Route the site through Anubis (0030) |
+| `protect.anubis` | `http` | `true` if the `anubis` overlay is enabled, else `false` | Route the site through Anubis (0030), under the one global policy the `anubis` overlay ships; `false` is the per-site opt-out. Per-site policies are version 2 |
 | `headers.frame_options` | `http` | `SAMEORIGIN` | `DENY`, `SAMEORIGIN` or `off` |
 | `headers.csp` | `http` | none | A `Content-Security-Policy` value, checked for the characters of the grammar; no default, because a wrong one breaks the application |
 | `headers.referrer_policy` | `http` | `strict-origin-when-cross-origin` | |
@@ -605,9 +623,11 @@ In `Keel-Linux/confconsole`, `plugins.d/Lets_Encrypt/` and
 6. **The cron without `--force`**, so one certificate due does not
    reissue all of them.
 7. **The wildcard check fixed** (`invalid_domains`, above).
-8. **lexicon from the Keel repository**, not from PyPI at run time (0039,
-   and 0013's "every image rebuilds from our own archive"). See the open
-   questions.
+8. **lexicon packaged as a Keel `.deb`**, built in the Keel repository
+   with the provider libraries it needs, never installed with pip at run
+   time (0039, and 0013's "every image rebuilds from our own archive").
+   `dns_01.py` stops installing anything; `turnkey-lexicon` runs the
+   packaged lexicon. See "Resolved".
 
 In `Keel-Linux/keel`: `tls.acme.certificates` and `tls.acme.dns`;
 `apply` accepts `dns-01` once `dns` is present, and decides per
@@ -632,12 +652,12 @@ every topology.
 
 Two limits, stated rather than hidden:
 
-- **`header` with a passthrough site is refused in version 1.** Behind the
-  stream front, the `http` block must read the client from PROXY, and
-  Nginx takes one `real_ip_header` per context; reading
-  `X-Forwarded-For` after trusting `unix:` would let any direct client
-  forge it. A machine behind a layer 7 proxy has no reason to pass TLS
-  through anyway.
+- **`header` with a passthrough site is refused.** Behind the stream
+  front only the PROXY protocol is trusted: the `http` block must read the
+  client from PROXY, and Nginx takes one `real_ip_header` per context;
+  reading `X-Forwarded-For` after trusting `unix:` would let any direct
+  client forge it. A machine behind a layer 7 proxy has no reason to pass
+  TLS through anyway.
 - **CrowdSec's firewall bouncer bans addresses at the packet level.**
   Behind a balancer or proxy the packets come from the balancer, so a ban
   decided from the (correct) logs cannot take effect here. keel adds
@@ -752,26 +772,101 @@ said, and the test catches a value Nginx refuses.
 
 ## What keel renders, and how it applies
 
+**Nginx's standard Debian layout, and `nginx.conf` as Debian ships it.**
+Debian's `nginx.conf` (a conffile of `nginx-common`) includes
+`/etc/nginx/modules-enabled/*.conf` in the main context, and
+`/etc/nginx/conf.d/*.conf` and `/etc/nginx/sites-enabled/*` inside `http`.
+keel uses those include points and never edits the file, so an upgrade of
+`nginx-common` never stops on a conffile question and needs no divert.
+
 | Path | Owner | Content |
 | --- | --- | --- |
-| `/etc/nginx/nginx.conf` | `keel-overlay-nginx` | Loads the modules, `include /etc/nginx/keel/stream.d/*.conf` at the top level and `/etc/nginx/keel/http.d/*.conf` in `http`; nothing from `sites-enabled` |
-| `/etc/nginx/keel-base/` | `keel-overlay-nginx` | The default servers (444 on 80, `ssl_reject_handshake` on 443), `/keel-health` (0041), the ACME location, the `map` for `Connection`, the log formats |
-| `/etc/nginx/keel/` | keel | One file per site in `http.d/` or `stream.d/`, the upstreams, the stream front when needed; each file's first line names the spec's digest |
+| `/etc/nginx/nginx.conf` | `nginx-common`, unchanged | Debian's |
+| `/etc/nginx/sites-available/keel-<site>.conf`, linked from `sites-enabled/keel-<site>.conf` | keel | One `http` site: its servers on 80 and 443, its redirects, its locations |
+| `/etc/nginx/sites-available/keel-default.conf`, linked from `sites-enabled/` | keel | The `default_server` of 80 (444, and the ACME path) and of 443 (`ssl_reject_handshake`), while any `http` site exists; see "Debian's default site" |
+| `/etc/nginx/conf.d/keel-web.conf` | keel | What the `http` sites share: the upstream groups, the `real_ip` settings of the public listeners, the `map` for `Connection`, the log format |
+| `/etc/nginx/conf.d/keel-health.conf` | `keel-overlay-nginx` | `/keel-health` on the loopback addresses (0041) |
+| `/etc/nginx/modules-enabled/90-keel-streams.conf` | `keel-overlay-nginx` | `stream { include /etc/nginx/streams-enabled/*; }` |
+| `/etc/nginx/streams-available/keel-<site>.conf`, `keel-front.conf`, linked from `streams-enabled/` | keel | Stream sites, and the front while a passthrough site exists |
 | `/etc/keel/monit/keel-web.conf` | keel | The upstream checks |
 | `/etc/crowdsec/acquis.d/keel-web.yaml` | `keel-overlay-nginx` | The acquisition |
+
+**Where `stream` goes, and why there.** Debian ships no `stream` include:
+`libnginx-mod-stream` only links `modules-enabled/50-mod-stream.conf`,
+which loads the module, and `conf.d` is inside `http`, where `stream {}`
+is not allowed. The choices were to edit `nginx.conf`, a conffile, or to
+use the one main-context drop-in Debian's layout has, `modules-enabled/`.
+keel uses the drop-in: `90-keel-streams.conf` sorts after
+`50-mod-stream.conf`, so the module is loaded before the block that needs
+it, and it holds nothing but a `stream {}` that includes
+`streams-enabled/*`. The two directories mirror `sites-available` and
+`sites-enabled`, so an operator's hand-written stream servers have the
+same obvious place and coexist the same way. An empty `stream {}` is
+valid, so the file is always there and nothing moves when the first stream
+site is added.
+
+**Which files are keel's.** A file is keel's when its name starts with
+`keel-` **and** its first line is keel's header:
+
+```
+# keel: rendered from /etc/keel/instance.yaml, web.sites.erp, spec digest <sha256>; do not edit
+```
+
+Both, because each alone is weak: a name can be chosen by hand, a header
+can be copied. keel writes, replaces and removes only files that meet both
+(and the links in `*-enabled/` that point to them). A file named `keel-*`
+without the header is not overwritten: the step refuses and names it,
+since it is the operator's work in keel's namespace. Every other file,
+and every link that does not point to a keel file, is the operator's and
+is never touched. Site names are therefore also file names, which rule 1
+already constrains.
+
+**Debian's default site.** `nginx-common` links
+`sites-enabled/default` to `sites-available/default`, which takes
+`default_server` on port 80 (`listen 80` and `[::]:80`). Nginx refuses two
+`default_server` on the same address and port, so keel's
+`keel-default.conf` and Debian's cannot both be enabled. keel removes the
+**link** `sites-enabled/default`, and only the link, only when all of this
+holds:
+
+- `keel-default.conf` is being enabled and takes `default_server` on that
+  port;
+- the link points to `/etc/nginx/sites-available/default`;
+- that file is still the one `nginx-common` shipped, by its conffile
+  checksum (`dpkg-query -W -f='${Conffiles}' nginx-common`).
+
+`sites-available/default` is left in place, and the removal is recorded in
+`/var/lib/keel/web/`, so removing the last keel `http` site restores the
+link. When Debian's file was edited, or another file of the operator's
+takes `default_server` on 80 or 443, keel leaves it alone and renders
+`keel-default.conf` without `default_server` on that port, and `diff` and
+`inspect` say the default server is the operator's; unknown names then
+reach the operator's default, not keel's refusal.
+
+**Coexisting with hand-written sites.** `nginx -t` checks the whole
+configuration, the operator's files included. When it fails in a file
+keel does not own, the step fails without changing anything and says the
+error is outside keel's files. A `server_name` of a keel site that a file
+of the operator's also serves makes Nginx warn and ignore one of them;
+keel treats that warning as a failure, naming both files.
 
 `apply --system` gains a `web` step, after `tls.acme` (so a certificate
 issued in the same run is used) and before `network`:
 
-1. Render the spec into `/etc/nginx/keel.new/`. Unchanged tree: nothing
-   more, the step says `unchanged`.
-2. `nginx -t -c` a copy of the main file that includes `keel.new`. Refused:
-   the step fails with Nginx's output, `keel.new` is removed, nothing else
-   moved.
-3. Swap: `keel` becomes `keel.prev`, `keel.new` becomes `keel`. `nginx -t`
-   on the live file; refused: swap back, fail.
+1. Render keel's files in memory. Identical to keel's files on disk:
+   nothing more, the step says `unchanged`.
+2. Test: copy `/etc/nginx` into a scratch directory, put the rendered
+   files and links in it, and run `nginx -t` in a private mount namespace
+   where the copy is bind-mounted over `/etc/nginx` (`unshare --mount`),
+   because Debian's includes are absolute paths. The live tree is not
+   touched. Refused: the step fails with Nginx's output.
+3. Install: keel's current files and links are copied to
+   `/var/lib/keel/web/previous/`, then the new ones are written (each by
+   rename), the links made, and keel files no longer declared removed with
+   their links. `nginx -t` on the live tree; refused: keel's previous
+   files and links are put back, and the step fails.
 4. `systemctl reload nginx.service` (a reload, never a restart). Failed:
-   swap back and reload the previous tree.
+   put the previous files back and reload them.
 5. Write the Monit file and the firewall rules for `tcp` and `udp` sites,
    derived as 0041 derives them, the site's `port` and `expose` taking the
    place of a manifest `listen`.
@@ -781,13 +876,18 @@ chain, and the firewall only gains the ports of stream sites, so 0018's
 window does not apply (0019's rule holds the same way).
 
 `keel web render [--spec FILE] [--site NAME] [--output DIR]` prints or
-writes the tree without applying it, and `keel web test [--spec FILE]`
-renders into a scratch directory and runs `nginx -t` on it. They are the
-code `apply` uses, so the preview is what will be applied. `keel diff`
-compares the render of the spec with `/etc/nginx/keel/`; `keel inspect`
-writes `web` from the copy of the last applied section that `apply`
-keeps in `/var/lib/keel/web/applied.yaml`, and reports it as inferred
-from that copy.
+writes keel's files without applying them, and `keel web test [--spec
+FILE]` runs step 2. They are the code `apply` uses, so the preview is what
+will be applied.
+
+`keel diff` compares the render of the spec with **keel's files only**:
+a hand edit of a keel file, a keel file missing, or a keel file left for a
+site no longer declared is drift; the operator's files are never drift.
+`keel inspect` writes `web` from the copy of the last applied section that
+`apply` keeps in `/var/lib/keel/web/applied.yaml`, reported as inferred
+from that copy, and lists every enabled site and stream file that is not
+keel's as **present, not declared**, with its file and the names it
+serves (read from `nginx -T`), without writing it into `web.sites`.
 
 ## The console screens
 
@@ -797,14 +897,19 @@ Every screen edits a staged copy of the spec; nothing is written until
 the last screen.
 
 1. **Sites.** The list: name, mode, canonical name, certificate state
-   (issued, expiring, pending, not needed), maintenance mode. Entries: Add
-   site, a site to edit, Upstreams, Settings, Apply.
+   (issued, expiring, pending, not needed), maintenance mode. Below it,
+   read only, the sites Nginx serves from files that are not keel's
+   (`inspect`'s "present, not declared"), with their file, so the
+   operator sees the whole server; the screen never edits them. Entries:
+   Add site, a site to edit, Upstreams, Settings, Apply.
 2. **Add site: name and mode.** A name, then the mode from a menu. The
    version 2 modes are listed, and refused with "version 2" until then.
    Choosing `tls-passthrough` shows, and asks to acknowledge: "TLS reaches
    the backend intact. Coraza, Anubis, security headers, the maintenance
    page and per-path rules do not apply to this site. The backend must
-   protect itself."
+   protect itself." When a file that is not keel's listens on TCP 443,
+   the screen says the passthrough cannot be added until that site moves,
+   and names the file.
 3. **Names.** The canonical name and the others; for `http`, `www`
    handling and old names to redirect.
 4. **Backend.** For `http`: the routes, one line each (path, upstream and
@@ -816,15 +921,19 @@ the last screen.
 5. **Certificate** (`http` only). The certificates that cover the names,
    "request a certificate for these names" (the hand-off above), or
    "self-signed for now".
-6. **Protection** (`http` only). WAF `enforce`, `detect` or `off` and
-   Anubis on or off, each shown only when its overlay is enabled and
-   otherwise explained; HSTS; frame options; CSP; the maintenance mode and
+6. **Protection** (`http` only). WAF `enforce`, `detect` or `off`, and
+   Anubis on or off for this site under the machine's one Anubis policy,
+   each shown only when its overlay is enabled and otherwise explained; HSTS; frame options; CSP; the maintenance mode and
    its bypass.
 7. **Extra** (advanced, `http` only). The allowlisted directives, one per
    line, checked as they are typed against the same list keel uses.
-8. **Review.** A summary of the site in words, then **the generated
-   configuration** (`keel web render --spec <staged> --site <name>`),
-   scrollable, with the lines that differ from what runs now marked.
+8. **Review.** A summary of the site in words, the files it will write
+   (`sites-available/keel-<site>.conf` and its link, and
+   `conf.d/keel-web.conf` or the stream files when they change), then
+   **the generated configuration** (`keel web render --spec <staged>
+   --site <name>`), scrollable, with the lines that differ from what runs
+   now marked. When enabling `keel-default.conf` will remove Debian's
+   `sites-enabled/default` link, the review says so.
 9. **Test.** `keel spec validate` on the staged spec, then `keel web test
    --spec <staged>`, and their output, `nginx -t` included. A failure
    returns to the review with the message; nothing has been written.
@@ -834,8 +943,9 @@ the last screen.
     Nginx configuration; the screen restores the previous spec too and
     says so, so the file and the running server agree.
 
-**Settings** holds `web.listen.ipv4`, `web.real_ip` and `web.logs`, with
-the same review, test and apply. Removing a site asks, then goes through
+**Settings** holds `web.listen.ipv4` (on, with "IPv6 only" as the
+opt-out), `web.real_ip` and `web.logs`, with the same review, test and
+apply; `header` is not offered while a passthrough site exists. Removing a site asks, then goes through
 review, test and apply like any change.
 
 Headless equivalent: edit `web` in `/etc/keel/instance.yaml`, `keel web
@@ -921,7 +1031,7 @@ version 1 the operator adds that route in the spec.
 | Redirects | HTTP to HTTPS, `www`, old names | |
 | Certificates | named certificates through the Certificate feature, HTTP-01 and DNS-01, reload on renewal | mTLS (`client_certificates`) |
 | Security | HSTS, CSP, frame options, nosniff, referrer policy, IP allowlist per path, WAF mode per site, Anubis per site, `default_server` refusal | `limit_req`, `basic_auth` |
-| Other | maintenance page, gzip, per-site logs, IPv6 first, `extra` | `proxy_cache`, HTTP/3 |
+| Other | maintenance page, gzip, per-site logs, IPv6 first with IPv4 on by default, `extra`, one global Anubis policy with a per-site opt-out | `proxy_cache`, HTTP/3, per-site Anubis policies |
 
 Where the requirements named an item for a version, it is there. The
 items they did not place: the IP allowlist, gzip, SSE, logs, `extra` and
@@ -937,23 +1047,24 @@ holds on a built image or package, not on a machine assembled by hand.
 | # | Repository | Work | Done when |
 | --- | --- | --- | --- |
 | 1 | keel | The `web` schema and rules 1 to 12, `tls.acme.certificates` and `tls.acme.dns`, with no renderer yet | Every example of this note validates as a fixture; each rule has a fixture it refuses; coverage per 0003 |
-| 2 | keel | `keel web render` and `keel web test`: the templates for `http` sites (routes, WebSocket, SSE, upstreams, real IP, redirects, headers, maintenance, logs) and for the stream front with passthrough | Golden files for each example; `nginx -t` accepts every rendered tree on trixie's nginx 1.26.3 with `libnginx-mod-stream`, in CI; a tree with an `extra` outside the list is never produced |
-| 3 | common | `keel-overlay-nginx` gains the main file, `keel-base/`, the maintenance page, the CrowdSec acquisition, `deploy.d/50nginx`, the tmpfiles entry for `/run/nginx`, and `Depends: libnginx-mod-stream` | On Core, the default servers answer 444 and refuse an unknown SNI; `/keel-health` still answers 204 on the loopback only; CrowdSec reads a `keel-*.access.log` line as an nginx event |
-| 4 | keel | The `web` step of `apply --system`, with the swap and rollback, `diff` and `inspect` | On a container: the Odoo example applied against a stub backend proxies `/` and upgrades `/websocket`; a second apply is `unchanged`; a spec whose render `nginx -t` refuses leaves the running configuration and the served pages as they were; adding the passthrough example moves 443 to the stream front, and the stub's log shows the client's address, not `unix:`; `diff` reports a hand edit of `/etc/nginx/keel/` |
+| 2 | keel | `keel web render` and `keel web test`: the templates for `http` sites (routes, WebSocket, SSE, upstreams, real IP, redirects, headers, maintenance, logs), `keel-default.conf`, `conf.d/keel-web.conf` and the stream front with passthrough, every listener on `[::]` then `0.0.0.0` | Golden files for each example, with `ipv4` on and off; `nginx -t` accepts every rendered set, laid into trixie's stock `/etc/nginx` (nginx 1.26.3, `libnginx-mod-stream`) beside a hand-written site, in CI; every rendered file carries the header; a set with an `extra` outside the list is never produced |
+| 3 | common | `keel-overlay-nginx` gains `conf.d/keel-health.conf`, `modules-enabled/90-keel-streams.conf`, the `streams-available/` and `streams-enabled/` directories, the maintenance page, the CrowdSec acquisition, `deploy.d/50nginx`, the tmpfiles entry for `/run/nginx`, and `Depends: libnginx-mod-stream`; `nginx.conf` stays Debian's | On Core, installed over a stock nginx: `nginx.conf` is byte for byte `nginx-common`'s, `nginx -t` passes with the empty `stream {}`, Debian's default site still answers; `/keel-health` answers 204 on the loopback only; CrowdSec reads a `keel-*.access.log` line as an nginx event |
+| 4 | keel | The `web` step of `apply --system`: ownership rule, test in a mount namespace, install and rollback, Debian's default link, `diff` and `inspect` | On a container with a hand-written site in `sites-enabled/`: the Odoo example applied against a stub backend proxies `/` and upgrades `/websocket` over IPv6 and IPv4; the hand-written site still answers and its file is unchanged; Debian's `default` link is removed and comes back when the last keel site is removed, and an edited Debian default is left in place; a second apply is `unchanged`; a spec whose render `nginx -t` refuses leaves every file and the served pages as they were; adding the passthrough example links the front, and the stub's log shows the client's address, not `unix:`; it is refused, naming the file, while the hand-written site listens on 443; `diff` reports a hand edit of a `keel-*` file and nothing for the operator's; `inspect` lists the hand-written site as present, not declared |
 | 5 | confconsole | The Certificate changes 1 to 7 | With Let's Encrypt's staging CA: two named certificates and `default` issued on one machine, each with its own files; an HTTP-01 issuance while a site is served drops no request of a client polling it; a renewal forced by `RENEW_DAYS` reloads Nginx and a WebSocket open across it survives; a wildcard with `http-01` is refused on screen |
-| 6 | keel, confconsole | DNS-01 through the spec: `apply` accepts it, with lexicon from the Keel repository (change 8, per the answer to the open question) | A wildcard certificate issued from the staging CA through a test DNS provider, on a machine with no public port 80, with no network access to PyPI |
-| 7 | confconsole | The Keel Web menu, screens 1 to 10, and the hand-off to the Certificate screen | Driven headless in the confconsole test harness: adding the Odoo site produces the same spec as the example; the review shows the render; a failing `nginx -t` is shown and writes nothing; a failed apply restores the previous spec |
+| 6 | new packaging repository, keel, confconsole | lexicon as a Keel `.deb` (change 8), built from source with the provider libraries it needs, into the testing track (0039); `dns_01.py` installs nothing; `apply` accepts DNS-01 through the spec | The package builds in the Keel repository; a wildcard certificate is issued from the staging CA through a test DNS provider, on a machine with no public port 80 and no route to PyPI, and no venv exists under `/usr/local/src` |
+| 7 | confconsole | The Keel Web menu, screens 1 to 10, and the hand-off to the Certificate screen | Driven headless in the confconsole test harness: adding the Odoo site produces the same spec as the example; the list shows a hand-written site as not keel's and offers no edit of it; the review shows the render and the files it writes; a failing `nginx -t` is shown and writes nothing; a failed apply restores the previous spec |
 | 8 | keel-web | The image | Phase 3's criterion of tracker#46 still holds, and on the built image the Odoo and two-upstream examples serve, fail over when the first server stops, and show the maintenance page with 503 when both do |
 | 9 | keel, manifest | `routes: manifest`, with the first application built from a manifest (Phase 4) | On the Odoo or WordPress appliance, a site with `routes: manifest` renders the manifest's routes, and the spec that declared it contains none of them |
 
 Version 2 follows as its own steps once version 1 has run on a real
 machine.
 
-## What this amends, if approved
+## What this amends
 
 - **0030**: Keel Web gains sites, the stream module and the `extra`
-  allowlist; the pipeline order is unchanged, and Anubis stays behind
-  Nginx (the internal unix hop).
+  allowlist, in Debian's standard Nginx layout beside any hand-written
+  site; the pipeline order is unchanged, and Anubis stays behind Nginx
+  (the internal unix hop), with one policy.
 - **0041 and docs/manifest-v1.md**: the firewall and Monit derivations
   gain the spec's stream sites and upstream checks as inputs; the `nginx`
   overlay manifest declares `443/udp` when HTTP/3 lands (version 2); the
@@ -967,26 +1078,35 @@ machine.
 - **confconsole's Let's Encrypt documentation**: multiple certificates,
   Nginx not stopped, `deploy.d`, and the cron without `--force`.
 
-## Open questions for the maintainer
+## Resolved (maintainer, 2026-09-30)
 
-1. **lexicon.** DNS-01 today installs `dns-lexicon[full]` from PyPI into a
-   venv on the machine. Package lexicon (and the provider libraries it
-   needs) in the Keel repository, or ship a venv built by Keel as a
-   `.deb`, or restrict DNS-01 to a few providers whose APIs a small hook
-   calls directly? The first is the cleanest and the largest.
-2. **The stream front only when needed**, as proposed, or always, for one
-   topology to test and a stream log for every connection?
-3. **IPv4 off by default.** The requirement says IPv4 only if the spec
-   asks; most visitors of a public site still arrive over IPv4. Should the
-   installer ask the question with `yes` preselected, so the emitted spec
-   usually says `ipv4: true`, while the default of the field stays
-   `false`?
-4. **Anubis in front of several sites.** Anubis forwards to one target;
-   this note has it forward to Nginx's internal socket, which routes by
-   `Host`. That is Anubis's documented Nginx arrangement, but it is one
-   policy for every site. Is one policy enough for version 1?
-5. **`header` real IP behind a stream front** is refused in version 1.
-   Acceptable, or is there a deployment behind a layer 7 proxy that also
-   passes TLS through?
-6. **The unplaced items**: the IP allowlist, gzip, SSE, logs, `extra` and
-   `routes: manifest` in version 1, gRPC in version 2, as proposed?
+The maintainer decided the note and agreed with the rest, with two
+changes, and answered the open questions as recommended. The text above
+already reflects all of it.
+
+- **Nginx's standard layout, not `/etc/nginx/keel/`.** Sites are rendered
+  to `sites-available/` with links in `sites-enabled/`; keel owns only its
+  own files, named `keel-<site>.conf` and marked by a header, both
+  required; hand-written sites coexist and are left alone; `diff` reports
+  drift only on keel's files and `inspect` reports the others as present
+  but not declared. The stream side uses `streams-available/` and
+  `streams-enabled/`, included by a `stream {}` block in
+  `modules-enabled/90-keel-streams.conf`, the only main-context drop-in
+  Debian's layout has, so `nginx.conf` stays as `nginx-common` ships it.
+  Debian's `sites-enabled/default` link is removed only when
+  `keel-default.conf` takes `default_server` on the same port and Debian's
+  file is unmodified, and it is restored with the last keel site. This
+  replaces the proposal's `/etc/nginx/keel/`, owned whole by keel.
+- **IPv4 on by default, IPv6 first.** Every listener is written on `[::]`
+  first and `0.0.0.0` second; `web.listen.ipv4: false` is the operator's
+  opt-out. This replaces the proposal's IPv4 off by default.
+- **lexicon is packaged as a Keel `.deb`**, never installed with pip at
+  run time.
+- **The stream front runs only while a passthrough site exists.**
+- **One global Anubis policy in version 1**, with `protect.anubis: false`
+  as the per-site opt-out; per-site policies are version 2.
+- **Header-based real IP is refused behind the stream front**; only the
+  PROXY protocol is trusted there.
+- **The items the requirements did not place** stay where the proposal
+  put them: the IP allowlist, gzip, SSE, logs, `extra` and `routes:
+  manifest` in version 1, gRPC in version 2.
