@@ -163,8 +163,11 @@ map "" $keel_distribution {
 After the first signed publication, edit that one line (for example to
 `"release, signed"`), then `nginx -t && systemctl reload nginx`. Header and
 `/STATUS` change together on all three hosts. The README.txt files under
-`/srv/archive`, `/srv/releases` and `/srv/mirror` explain the state in words
-and are edited separately when the signed content lands.
+`/srv/archive`, `/srv/releases` and `/srv/mirror`, and the copies of the
+`/srv/releases` one in `/srv/releases/pve` and `/srv/releases/meta`, explain
+the state in words and are edited separately when the signed content lands.
+They belong to `keel-provision`: publication installs the release files
+beside them and never removes or rewrites them.
 
 ## 6. Content and how it gets there
 
@@ -175,7 +178,7 @@ and are edited separately when the signed content lands.
 | `/srv/mirror/bootstrap/` | `bootstrap-trixie-amd64.tar.gz` (81,659,452 bytes) with `.sha256`, `.sha512` and `.sha256.UNSIGNED` | packed on the build host, carried by hand (the subsection below) |
 | `/srv/mirror/selfcheck/` | the daily reproducibility result, `reproducibility.json` and `STATUS` | carried from the build host by the same publication |
 | `/srv/archive/` | `README.txt`, and `staging-unsigned/` with the reprepro `trixie-staging` tree | `bin/keel-publish-mirror --unsigned-staging`; the signed tree goes to the root of `/srv/archive` and needs no flag once the key exists |
-| `/srv/releases/pve/` | `aplinfo.dat`, `aplinfo.dat.gz` and, while nothing is signed, `aplinfo.dat.UNSIGNED` | the same |
+| `/srv/releases/pve/` | the `pve/` files of the last release `MANIFEST`: `aplinfo.dat`, `aplinfo.dat.gz` and exactly one of `aplinfo.dat.asc` (signed) or `aplinfo.dat.UNSIGNED` (not signed), the index holding one record per appliance published, whatever release published it (below). Also the host's own `README.txt`, a copy of `/srv/releases/README.txt` that `keel-provision` writes and publication never touches | the same |
 | `/srv/releases/meta/<date>/` | the release `MANIFEST` and its signature or `UNSIGNED` note | the same |
 | `/srv/site/` | git checkout | `keel-site-pull.timer` |
 
@@ -192,6 +195,55 @@ is checked against the release `MANIFEST` before anything is installed, and
 the public names are verified afterwards with `keel verify` and
 `bin/verify-repo`. What a push direction would require is written in
 docs/infra-recovery.md.
+
+### The Proxmox index is cumulative
+
+`/srv/releases/pve/aplinfo.dat` lists every appliance the mirror serves,
+not only the ones in the release published last. A release of one appliance
+adds or replaces that appliance's record and leaves every other record byte
+for byte as it was (keel-linux/tracker#11). The records are sorted by
+`Package:`.
+
+The merge happens on the build host, before the index is signed, because
+this host has no key. `bin/keel-release` merges the records of its templates
+onto `/srv/keel-release/published/pve/aplinfo.dat`, the build host's copy of
+the index last published, which `bin/keel-publish-mirror` writes after every
+install. When that record does not exist yet, the release fetches this
+host's index over IPv6 and merges onto it only if `aplinfo.dat.asc` verifies
+against the archive keyring. Otherwise it stops before building (exit 11).
+
+This host only compares. The release `MANIFEST` records the sha256 of the
+index it was merged onto as `index_base`, and the publication refuses
+(exit 6, nothing installed) when that is not the index served here. This
+happens when another release was published after this one was staged. The
+fix is to restage on the build host, which merges onto the new base and
+signs again:
+
+    keel-release --date 2026-09-28 --resume redis
+
+There is one exception: the last publication installed its index but could
+not write the record on the build host (it warns when that happens). In
+that case the record is older than what is served, so a restage merges onto
+the same old record and is refused again. The refusal says which case it
+is. For this one, publish that last release again. Its index is the one
+served, so it passes the check, and this time the record is written. Then
+restage:
+
+    keel-publish-mirror 2026-09-27
+    ssh root@2804:710:d0:5:bb3f:380a:f07b:7951 '/srv/keel-apt/apt/bin/keel-release --date 2026-09-28 --resume redis'
+
+A record leaves the index only when a release says so:
+`keel-release --drop-from-index keel-<appliance> ...`, which can be given
+more than once. An appliance that a release does not stage keeps its
+record. A name the index has no record of is refused, so a typo drops
+nothing silently. The drops are part of the release: its `MANIFEST` lists
+them as `index_dropped`, and a `--resume` or `--sign-only` of that date
+must give the same ones or it is refused. To change the drops, stage
+another date.
+
+Check from a workstation, over IPv6:
+
+    curl -6 -s https://releases.keellinux.org/pve/aplinfo.dat | grep '^Package: '
 
 ### Publishing a layer
 
@@ -397,11 +449,16 @@ nothing else on the VM was touched.
   `bin/keel-publish-mirror` publishes to the root and needs no flag as soon
   as the release and the archive are signed, and refuses otherwise.
   `staging-unsigned/` is removed the day that happens.
-- `releases.keellinux.org/pve/aplinfo.dat.asc`: written by `bt-aplinfo` as
-  soon as the subkey is in the build host's keyring; `aplinfo.dat` and
-  `.gz` are already served, with an `UNSIGNED` note beside them.
-- Flip the staging header (section 5) and rewrite the three README.txt files
-  at the first signed publication; `/srv/mirror/README.txt` also still says
+- `releases.keellinux.org/pve/aplinfo.dat.UNSIGNED`: still served on
+  2026-09-30 next to an `aplinfo.dat.asc` that verifies, left over because
+  the publication used to copy `pve/` without removing anything. The next
+  publication removes it (Keel-Linux/apt#19).
+- Flip the staging header (section 5) and rewrite the README.txt files at
+  the first signed publication: `/srv/archive`, `/srv/mirror` and
+  `/srv/releases`, whose text `keel-provision` also copies to
+  `/srv/releases/pve` and `/srv/releases/meta`, so a rewrite goes through
+  `keel-provision` (or `docs/infra/keel-provision.pending`) and not by
+  hand. `/srv/mirror/README.txt` also still says
   `/images/` "appears with the first release", which it now has.
 - Retiring the build host's temporary mirror on port 8080: done on
   2026-09-26. It listens on the loopback only and the port does not answer
