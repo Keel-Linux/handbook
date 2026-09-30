@@ -101,6 +101,32 @@ one gives way to nothing, before a single line of text is lost. The code reads
 the mark from its file and measures it, so a new drawing needs no code change,
 and no size is assumed anywhere.
 
+## The horizontal lockup
+
+The site's header sets the symbol on its off-white plate beside "Keel
+Linux" in bold, on one line. `site/keel-lockup-horizontal-light.png` (text
+in the site's navy, `#0B1F3A`, for light backgrounds) and
+`site/keel-lockup-horizontal-dark.png` (off-white text, `#F4F7FA`, for dark
+ones; the plate stays off-white, as on the site) are that header at sixteen
+times its size, with the site's own proportions: the symbol at 2rem on a plate
+with a 0.4rem radius, a 0.6rem gap, the name at 1.05rem, weight 700. Both are
+transparent PNGs, 2367 by 640, rendered with headless Chromium on 2026-09-30.
+
+They live in `site/` because they are renders of the site, not exports of the
+master: `export.py` makes every file at the top of this directory and needs no
+font, and these could not be remade by it. The site sets the name in the
+reader's system font (`system-ui`), so they carry the font of the machine that
+rendered them (DejaVu Sans Bold), not one the brand chose.
+
+Two navies sit side by side in them, as they do on the site: the symbol's
+`#0B2847` and the site's text colour `#0B1F3A`. That is the site's choice,
+recorded here rather than corrected in a render.
+
+The horizontal lockup needs 140 pixels of width, the size the site header
+shows it at; below that, use the symbol alone. A vector horizontal lockup,
+with the name in a font the project picks, converted to outlines and in the
+brand's navy, is the version to draw when one is needed for print.
+
 ## What not to do
 
 - Do not recolour the mark, and do not add a second blue.
@@ -123,7 +149,8 @@ and no size is assumed anywhere.
 | `keel-mark-dark.svg` | the symbol for dark backgrounds |
 | `keel-mark-mono.svg` | one colour, waterline as a gap |
 | `keel-mark-*.png` | raster exports, 16 to 1024 |
-| `keel-lockup-*.png` | symbol with the wordmark |
+| `keel-lockup-light.png`, `keel-lockup-dark.png`, `keel-lockup*.svg` | symbol with the wordmark, stacked |
+| `site/keel-lockup-horizontal-light.png`, `site/keel-lockup-horizontal-dark.png` | symbol and "Keel Linux" side by side, the site header's lockup, 2367 by 640, transparent; renders of the site, not exports (see "The horizontal lockup" above) |
 | `keel-social-1200x630.png` | link preview card |
 | `banner.txt`, `banner-small.txt` | the console marks, in keel-core's overlay |
 | `trace.py` | traces the vectors off the master |
