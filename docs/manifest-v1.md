@@ -770,8 +770,13 @@ first.
 
 **Processes and checks**
 
-5. A unit ends in `.service`. On a machine, and in the package build, the
-   unit file exists.
+5. A unit is a systemd unit name (systemd.unit(5): no `/`) ending in
+   `.service`. On a machine, and in the package build, the unit file
+   exists, or an init script of the same name in `/etc/init.d/`, a
+   regular executable file, from which systemd's SysV generator makes
+   the unit at boot. trixie's shellinabox, Core's `webshell`, ships only
+   `/etc/init.d/shellinabox`. A systemd that drops SysV support will
+   need a unit file shipped by Keel for such a package.
 6. A port is between 1 and 65535. A literal `address` is `::1` or
    `127.0.0.1`; `localhost`, `ip6-localhost` and every name are refused,
    with docs/spec.md's reason.
@@ -787,10 +792,17 @@ first.
 10. `requires` names overlays that are installed, and the graph has no
     cycle.
 11. `data[].replication` is `native` or `none`; `data[].backup` is `dump`,
-    `files` or `none`; `dump` only with a `provides` engine that has one.
+    `files` or `none`; `dump` only with a `provides` engine that has one,
+    which in version 1 is `mariadb` (`mariadb-dump`) and `postgresql`
+    (`pg_dump`). `redis`, `opensearch`, `elasticsearch` and `s3` keep
+    their data as files (`backup: files`) or not at all (`none`).
 12. `hooks.first_boot` entries are under
     `/usr/lib/inithooks/firstboot.d/`, exist, are executable, are owned by
-    root and are not writable by group or others.
+    root and are not writable by group or others. In a package build the
+    check runs on the tree `dh_fixperms` leaves, under `fakeroot`
+    (`dpkg-buildpackage` uses it by default), where the files read as
+    owned by root just as they will be installed; a build without
+    fakeroot cannot pass the owner check and must not skip it.
 
 **Appliances**
 
@@ -923,7 +935,9 @@ hooks:
 | `hooks.migrate` | What the package's post-installation runs after an upgrade (0039), on the active node only, after a return point is taken; `needs` names the services that must be writable. A major version of an application is a different package, so apt never crosses one |
 
 **Derived for an application.** Backup: the `state.replicate` paths minus
-the excludes, plus a dump of every `durable` service that is `embedded`; a
+the excludes, plus every `durable` service that is `embedded`, kept as its
+overlay's `data[].backup` says (a dump for `mariadb` and `postgresql`, the
+files for the others, rule 11); a
 `discovered` service is backed up by its own appliance, from its standby
 (0037), and the application's backup records which service and which
 database it used. File replication: one Syncthing folder per replicated
@@ -970,6 +984,8 @@ name: wordpress
 title: WordPress
 summary: Blog and site publishing
 base: php
+overlays:
+  mariadb: {simple: enabled, cloud_simple: enabled, cloud_advanced: disabled}
 services:
   database:
     engine: mariadb
@@ -1011,6 +1027,12 @@ hooks:
 | Replication | one folder, `wp-content`, in cloud advanced |
 | Firewall | nothing added: MariaDB's 3306 is `loopback` when embedded |
 
+The `mariadb` overlay is carried because the database is `embedded` in the
+two simple modes, and rule 21 needs an overlay that provides the engine
+`enabled` wherever a service is embedded. It is `disabled` in cloud
+advanced, where the database is `discovered` on another node; it is in the
+image all the same (0013), so an operator can still turn it on.
+
 `auth_salts` is `shared` because a visitor logged in on the primary is
 logged out by a standby that signed its cookies with other salts.
 `wp-cron` is a worker rather than a cron line so that it runs on the active
@@ -1026,6 +1048,8 @@ name: odoo
 title: Odoo
 summary: Odoo Community with the OCA (0022)
 base: python
+overlays:
+  postgresql: {simple: enabled, cloud_simple: enabled, cloud_advanced: disabled}
 services:
   database:
     engine: postgresql
@@ -1042,7 +1066,6 @@ services:
     durable: false
 state:
   replicate: [/var/lib/odoo/filestore, /var/lib/odoo/addons]
-  exclude: [/var/lib/odoo/sessions]
 processes:
   - name: odoo
     unit: odoo.service
@@ -1076,9 +1099,19 @@ hooks:
 
 | Derived | Result |
 | --- | --- |
-| Backup | the filestore and the addons, without `sessions`; the `odoo` database when embedded; Redis never, it is not durable |
+| Backup | the filestore and the addons; the `odoo` database when embedded; Redis never, it is not durable |
 | Monit | `odoo` with `/web/health`; `odoo-cron`; PostgreSQL's overlay when embedded |
 | Replication | two folders in cloud advanced: the filestore must move with its database (0020, hard part 3), which the promotion of 0032 does |
+
+Only `postgresql` is carried: the `sessions` service is never `embedded`,
+so rule 21 asks for no `redis` overlay.
+
+Odoo's `data_dir` (`/var/lib/odoo` in Debian's package) holds three
+directories: `filestore/` (attachments, per database), `addons/` (modules
+installed from the interface) and `sessions/`. Only the first two are
+replicated. `sessions/` needs no exclude, since it is inside neither
+replicated path (rule 23), and it is not state to move: sessions live in
+the database or in Redis (0032).
 
 Odoo is the case the worker rule bites: cron jobs create attachments, and
 Odoo writes them to the filestore by default. Since a worker never writes to
@@ -1098,6 +1131,9 @@ summary: The reference appliance of the composition model (0035)
 base: ruby
 overlays:
   nodejs: {simple: enabled, cloud_simple: enabled, cloud_advanced: enabled, version: ">= 20"}
+  postgresql: {simple: enabled, cloud_simple: enabled, cloud_advanced: disabled}
+  redis: {simple: enabled, cloud_simple: enabled, cloud_advanced: disabled}
+  s3: {simple: enabled, cloud_simple: enabled, cloud_advanced: disabled}
 services:
   database:
     engine: postgresql
@@ -1163,7 +1199,7 @@ hooks:
 
 | Derived | Result |
 | --- | --- |
-| Backup | PostgreSQL, Redis and the object store when embedded, all durable (Sidekiq's queues live in Redis, the media in the object store); search never; no file on the application's disk |
+| Backup | PostgreSQL, Redis and the object store when embedded, all durable (Sidekiq's queues live in Redis, the media in the object store): PostgreSQL by its dump, Redis and the object store by their files (`backup: files` in their overlays, since neither engine has a dump in the sense of rule 11); search never; no file on the application's disk |
 | Monit | `web`, `streaming` and their health endpoints; `sidekiq`; the embedded PostgreSQL, Redis and object storage overlays |
 | Replication | none by file: Mastodon keeps no state on its own disk |
 | On join | `tootctl search deploy` rebuilds the index on a node that joins with search placed |
