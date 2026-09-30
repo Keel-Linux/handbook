@@ -122,7 +122,7 @@ Two navies sit side by side in them, as they do on the site: the symbol's
 `#0B2847` and the site's text colour `#0B1F3A`. That is the site's choice,
 recorded here rather than corrected in a render.
 
-The horizontal lockup needs 160 pixels of width, the size the site header
+The horizontal lockup needs 140 pixels of width, the size the site header
 shows it at; below that, use the symbol alone. A vector horizontal lockup,
 with the name in a font the project picks, converted to outlines and in the
 brand's navy, is the version to draw when one is needed for print.
