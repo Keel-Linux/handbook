@@ -101,6 +101,22 @@ one gives way to nothing, before a single line of text is lost. The code reads
 the mark from its file and measures it, so a new drawing needs no code change,
 and no size is assumed anywhere.
 
+## The horizontal lockup
+
+The site's header sets the symbol on its off-white plate beside "Keel
+Linux" in bold, on one line. `keel-lockup-horizontal-light.png` (navy text,
+`#0B1F3A`, for light backgrounds) and `keel-lockup-horizontal-dark.png`
+(off-white text, `#F4F7FA`, for dark ones) are that header at sixteen times
+its size, with the site's own proportions: the symbol at 2rem on a plate with
+a 0.4rem radius, a 0.6rem gap, the name at 1.05rem, weight 700. Both are
+transparent PNGs, 2367 by 640, rendered with headless Chromium on 2026-09-30.
+
+The site sets the name in the reader's system font (`system-ui`), so these
+files carry the font of the machine that rendered them (DejaVu Sans Bold),
+not one the brand chose. Use them where a horizontal mark is wanted today;
+a vector horizontal lockup, with the name in a font the project picks and
+converted to outlines, is the version to draw when one is needed for print.
+
 ## What not to do
 
 - Do not recolour the mark, and do not add a second blue.
@@ -123,7 +139,8 @@ and no size is assumed anywhere.
 | `keel-mark-dark.svg` | the symbol for dark backgrounds |
 | `keel-mark-mono.svg` | one colour, waterline as a gap |
 | `keel-mark-*.png` | raster exports, 16 to 1024 |
-| `keel-lockup-*.png` | symbol with the wordmark |
+| `keel-lockup-light.png`, `keel-lockup-dark.png`, `keel-lockup*.svg` | symbol with the wordmark, stacked |
+| `keel-lockup-horizontal-light.png`, `keel-lockup-horizontal-dark.png` | symbol and "Keel Linux" side by side, the site header's lockup, 2367 by 640, transparent (see below) |
 | `keel-social-1200x630.png` | link preview card |
 | `banner.txt`, `banner-small.txt` | the console marks, in keel-core's overlay |
 | `trace.py` | traces the vectors off the master |
