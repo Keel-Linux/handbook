@@ -58,10 +58,28 @@ appliance.
   PostgreSQL; Odoo's row above is its application.
 - **0006, item 2**: the appliance list changes as above.
 
-## Review notes (open points for the maintainer)
+## Resolved (maintainer, 2026-09-30)
 
-- [ ] **The unit repositories that already exist** under 0010
-  (`unit-redis`, and the mariadb and postgresql extractions in
-  keel-mariadb#14 and keel-postgresql#10) either fold back into `common`
-  as overlays or become the source of the overlay's `.deb`. To be decided
-  before those PRs are rebased.
+- **The decision defines where a component lives: an overlay in
+  `common`.** The unit work that already exists under 0010 (`unit-redis`,
+  and the mariadb and postgresql extractions in keel-mariadb#14 and
+  keel-postgresql#10) follows it: its content moves into `common` as
+  overlays, shipped as `.deb` under 0039. 0010's one-repository-per-
+  component layout is superseded on that point.
+
+## Packages the overlays rest on (checked 2026-09-30 against the Debian archive and WNPP)
+
+| Overlay | Debian | Keel |
+| --- | --- | --- |
+| wireguard | wireguard-tools 1.0.20210914 in trixie | uses it |
+| etcd | etcd-server 3.5.16 in trixie | uses it |
+| syncthing | syncthing 1.29.5 in trixie | uses it |
+| crowdsec | crowdsec 1.4.6-10 and crowdsec-firewall-bouncer 0.0.25 in trixie; upstream is at 1.8.1 | see 0029 |
+| coraza | no package and no ITP | packages it (0039) |
+| anubis | not in Debian; ITP #1102132, being packaged; upstream publishes a `.deb` (v1.27.0) | packages it (0039) |
+| s3 (Garage) | not in Debian; ITP #1118368, being packaged | packages it (0039) |
+| NAT64 at rendezvous points (0024; not in the overlay list above) | tayga 0.9.2 in trixie | uses it |
+
+Anubis and Garage are candidates for Keel to contribute to Debian
+through the existing Debian packaging effort (tracker#15), coordinating
+with the owners of their ITPs.

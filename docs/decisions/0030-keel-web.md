@@ -27,19 +27,30 @@ every web appliance: Nginx, Coraza (a WAF as an Nginx module) and Anubis
   Odoo; that nginx is now Keel Web.
 - **0019** is unaffected (Webmin and the network).
 
-## Review notes (open points for the maintainer)
+## Resolved (maintainer, 2026-09-30)
 
-- [ ] **The Coraza Nginx connector is still experimental.** The mature
-  alternative with the same OWASP Core Rule Set is ModSecurity v3 with the
-  Nginx connector, which Debian 13 ships: `libmodsecurity3t64
-  3.0.14-1+deb13u1`, `libnginx-mod-http-modsecurity 1.0.3-2+b2`,
-  `modsecurity-crs 3.3.7-1+deb13u2` (CRS 3.3; Coraza is usually run with
-  CRS 4). The other way to keep Coraza is as a proxy in front of the
-  application (coraza-caddy or coraza-proxy); Debian's `caddy 2.6.2` does
-  not include the Coraza module, so that too would be a build of ours.
-- [ ] **Not in Debian 13 at usable versions**, measured with
-  `apt-cache policy` on this Debian 13.7 machine, 2026-09-30: Anubis
-  (absent), Coraza (absent), Garage (absent, see 0038), CrowdSec
-  (`1.4.6-10+b4`, well behind upstream). Each needs a Keel package in the
-  Keel repository under 0039, built and signed like the rest, which keeps
-  0013's claim that every image rebuilds from our own archive.
+- **Coraza stays, as the Nginx module.** The decision stands. The risk
+  that its Nginx connector is still experimental is recorded as an
+  implementation task, not as a reason to change the decision: the
+  connector is built, tested against the OWASP Core Rule Set in the Keel
+  Web gate, and its maturity is watched. The fallbacks known today, if the
+  task finds the connector unusable, are ModSecurity v3 with the same
+  Rule Set (`libnginx-mod-http-modsecurity` 1.0.3 is in trixie) or Coraza
+  run as a proxy (coraza-caddy, coraza-proxy); choosing one would be a new
+  decision.
+
+## Packages (checked 2026-09-30 against the Debian archive and WNPP)
+
+| Piece | Debian | What Keel does |
+| --- | --- | --- |
+| nginx | in trixie | uses it |
+| Coraza | no package and no ITP | packages it under 0039 |
+| Anubis | not in Debian; ITP #1102132, being packaged; upstream publishes a `.deb` (v1.27.0) | packages it under 0039 |
+| libnginx-mod-http-modsecurity | 1.0.3 in trixie | the fallback above, not used |
+| crowdsec | 1.4.6-10 in trixie (upstream 1.8.1), with crowdsec-firewall-bouncer 0.0.25 | see 0029 |
+
+Every Keel package is built and signed in the Keel repository like the
+rest, which keeps 0013's claim that every image rebuilds from our own
+archive. **Anubis is a candidate for Keel to contribute to Debian**,
+through the existing Debian packaging effort (tracker#15), coordinating
+with the owner of ITP #1102132 rather than packaging in parallel.

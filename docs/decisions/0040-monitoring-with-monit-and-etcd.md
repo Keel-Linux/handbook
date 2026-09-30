@@ -27,8 +27,10 @@ Status: **decided by the maintainer, 2026-09-30** (ADR-017).
 - **0021, "The monitor: monit, configured from the spec"**: unchanged for
   a machine; for an application, the checks also come from its manifest.
 
-## Review notes (open points for the maintainer)
+## Resolved (maintainer, 2026-09-30)
 
-- [ ] Which services Monit may restart, and how many times before it
-  stops and alerts, should be in the manifest per service, so that a
-  restart loop is reported rather than hidden.
+- **Monit restarts what it can.** 0021's "never restarts a service" is
+  superseded on that point. As an implementation detail, which services
+  Monit restarts and how many times before it stops and alerts come from
+  the manifest per service, so that a restart loop is reported rather
+  than hidden.

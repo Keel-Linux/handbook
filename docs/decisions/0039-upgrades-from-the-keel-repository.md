@@ -26,15 +26,31 @@ Status: **decided by the maintainer, 2026-09-30** (ADR-016).
   built; unchanged.
 - **0020, "Order"**: "upgrade a replica, promote, upgrade the old primary"
   becomes the handover above, with automatic return after catch-up.
-- **0022** (open, handbook#23): see the review note.
+- **0022** (open, handbook#23): superseded on how Odoo is updated; see
+  "Resolved".
 
-## Review notes (open points for the maintainer)
+## Resolved (maintainer, 2026-09-30)
 
-- [ ] **0022 installs Odoo from a git checkout and upgrades it by moving
-  the checkout**, with Odoo-only Python libraries in a virtual
-  environment. This note makes `apt upgrade` the only update mechanism.
-  Either the checkout's revision and the wheels are wrapped in a `.deb`
-  whose post-install hook runs the update, or 0022 is amended. To settle
-  before Odoo is built from a manifest.
-- [ ] Anubis, Coraza, Garage and a current CrowdSec (0029, 0030, 0038) are
-  the first packages this note requires Keel to build.
+- **`apt upgrade` is the only update path, Odoo included.** 0022 installs
+  Odoo from a git checkout and upgrades it by moving the checkout, with
+  Odoo-only Python libraries in a virtual environment. That point of 0022
+  is superseded: Odoo from git becomes a **Keel-maintained package**. The
+  package is built from the organisation's git mirror at a fixed
+  revision, carries the Odoo-only wheels, and its post-install hook runs
+  the module update. What 0022 decided about the source (the mirror, the
+  series, the OCA layout, Debian's Python first, never pip into the
+  system Python) stands; only the delivery changes.
+
+## The first packages this requires (checked 2026-09-30 against the Debian archive and WNPP)
+
+| Piece | Debian | Keel |
+| --- | --- | --- |
+| Coraza (0030) | no package and no ITP | builds it |
+| Anubis (0030) | not in Debian; ITP #1102132, being packaged; upstream publishes a `.deb` (v1.27.0) | builds it |
+| Garage (0038) | not in Debian; ITP #1118368, being packaged | builds it |
+| CrowdSec (0029) | 1.4.6-10 in trixie, upstream 1.8.1 | trixie's or a current one, an implementation task of 0029 |
+| Odoo (0022) | not applicable | builds it from its git mirror |
+
+Anubis and Garage are candidates for Keel to contribute to Debian through
+the existing Debian packaging effort (tracker#15), coordinating with the
+owners of their ITPs.

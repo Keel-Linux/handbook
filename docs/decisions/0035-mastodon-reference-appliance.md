@@ -17,11 +17,12 @@ Mastodon appliance exists and is ported.
 - **0006, item 2**: `keel-mastodon` was already named as a future
   appliance; it now has a role.
 
-## Review notes (open points for the maintainer)
+## Resolved (maintainer, 2026-09-30)
 
-- [ ] **Mastodon is the heaviest application of the set**: Ruby, Node.js
-  for its assets and streaming, PostgreSQL, Redis, Sidekiq, and usually
-  object storage for media and a search engine. That makes it a good
-  final proof of the composition model and a risky first target. The
-  roadmap puts it last in its phase, after WordPress, Odoo and Nextcloud
-  have been built from manifests.
+- **Mastodon remains the reference appliance.** It is the heaviest
+  application of the set (Ruby, Node.js for its assets and streaming,
+  PostgreSQL, Redis, Sidekiq, and usually object storage for media and a
+  search engine), which is why it is the proof of the composition model.
+  The roadmap builds it last in its phase, after WordPress, Odoo and
+  Nextcloud have been built from manifests; that is an order of work, not
+  a change of reference.

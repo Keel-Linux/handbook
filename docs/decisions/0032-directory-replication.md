@@ -16,7 +16,8 @@ Status: **decided by the maintainer, 2026-09-30** (ADR-010).
   databases, search indexes.
 - **Rejected: Lsyncd.**
 
-Debian 13 has `syncthing 1.29.5~ds1-2`.
+Debian 13 (trixie) has `syncthing` 1.29.5 (checked against the archive,
+2026-09-30).
 
 ## What this amends
 
@@ -24,7 +25,7 @@ Debian 13 has `syncthing 1.29.5~ds1-2`.
   file copy was rsync, pulled by each replica from the primary on a timer,
   and Syncthing was left out as "made for syncing both ways, which one
   writer does not want". Syncthing replaces the rsync pull. The one-writer
-  rule is kept by the folder types in the review note below.
+  rule is kept by the folder types under "Resolved" below.
 - **0020, lsyncd**: rejected there and here, for 0013's reason (a pushing
   tool needs the primary to list its replicas) and now also because a
   generic service is wanted.
@@ -34,14 +35,16 @@ Debian 13 has `syncthing 1.29.5~ds1-2`.
   together): unchanged, and the folder flip below is part of that one
   operation.
 
-## Review notes (open points for the maintainer)
+## Resolved (maintainer, 2026-09-30)
 
-- [ ] **Syncthing in both directions produces conflict files**
+- **Syncthing stands, one way per role, as the implementation detail.**
+  Syncthing in both directions produces conflict files
   (`*.sync-conflict-*`) when both sides change a file. With a hot standby
   (0031) there is one writer, so the folders are **send-only on the
   primary and receive-only on the standby**, and the types are flipped on
   promotion, in the same step that promotes the database. A receive-only
   folder that finds local changes reports them rather than sending them,
-  which is also what 0020's rejoin needs to see.
-- [ ] Object storage (0038) shrinks what is replicated by file to what an
+  which is also what 0020's rejoin needs to see. 0020's rsync pull is
+  superseded.
+- Object storage (0038) shrinks what is replicated by file to what an
   application insists on keeping on a filesystem.

@@ -21,11 +21,14 @@ Status: **decided by the maintainer, 2026-09-30** (ADR-015).
 - **0002, "Consequences"**: the `s3-endpoint-url` option for duplicity
   gets its target.
 - **0032**: fewer paths to replicate by file.
-- **0013's sovereignty claim**: Garage is not in Debian 13 (see the review
-  note), so it ships as a Keel package.
+- **0013's sovereignty claim**: Garage is not in Debian (see below), so it
+  ships as a Keel package.
 
-## Review notes (open points for the maintainer)
+## Packages (checked 2026-09-30 against the Debian archive and WNPP)
 
-- [ ] **Garage is absent from Debian 13**, measured with `apt-cache
-  policy` on this Debian 13.7 machine, 2026-09-30. It needs a Keel package
-  built from source into the Keel repository under 0039.
+- **Garage is not in Debian.** It has an ITP, #1118368, and is being
+  packaged. Until a package reaches Debian, Keel builds it from source
+  into the Keel repository under 0039.
+- **Garage is a candidate for Keel to contribute to Debian**, through the
+  existing Debian packaging effort (tracker#15), coordinating with the
+  owner of ITP #1118368 rather than packaging in parallel.

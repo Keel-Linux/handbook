@@ -44,9 +44,10 @@ Apache's retirement and the web tier are 0030.
   system's composition model, which that note named as what would make
   offering changes back harder. The reason is stated here, as 0008 asks.
 
-## Review notes (open points for the maintainer)
+## Resolved (maintainer, 2026-09-30)
 
-- [ ] The WordPress work in progress (Templates A and B, keel-wordpress)
-  is built on Apache, on the LAMP layer. It is not rewritten now: the
-  migration to Keel PHP happens when Keel Web (0030) exists, and until
-  then the Apache-based images are what gets tested and published.
+- **Apache is retired appliance by appliance.** The WordPress work in
+  progress (Templates A and B, keel-wordpress) is built on Apache, on the
+  LAMP layer, and is not rewritten now. It migrates to Keel PHP when Keel
+  Web (0030) exists; until then the Apache-based images are what gets
+  tested and published.

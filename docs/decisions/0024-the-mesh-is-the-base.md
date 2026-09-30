@@ -15,8 +15,8 @@ Status: **decided by the maintainer, 2026-09-30** (ADR-002).
   addressing.** Which nodes, and how many, is an operational matter and is
   not recorded here.
 
-Debian 13 carries both pieces: `wireguard-tools 1.0.20210914-3` and
-`tayga 0.9.2-10+deb13u1` (`apt-cache policy`, 2026-09-30).
+Debian 13 (trixie) carries both pieces: `wireguard-tools 1.0.20210914`
+and `tayga 0.9.2` (checked against the archive, 2026-09-30).
 
 ## What this amends
 

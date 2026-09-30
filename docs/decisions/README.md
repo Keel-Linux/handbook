@@ -48,7 +48,7 @@ are kept only as this mapping; the handbook refers to the note numbers.
 | ADR-006 | [0028](0028-installation-modes.md) | Installation modes at first boot | 0013, 0020 |
 | ADR-007 | [0029](0029-core-ships-crowdsec-and-wireguard.md) | Keel Core ships CrowdSec and WireGuard, and a VIP on the mesh | 0020, 0018 |
 | ADR-008 | [0030](0030-keel-web.md) | Keel Web: Nginx, Coraza and Anubis | 0013, 0022 |
-| ADR-009 | [0031](0031-database-failover-semantics.md) | Database failover semantics | 0020 (failback default), 0013 |
+| ADR-009 | [0031](0031-database-failover-semantics.md) | Database failover semantics | 0020 (synchronous replication; automatic failback implemented, the operator's choice and its manual default kept), 0013 |
 | ADR-010 | [0032](0032-directory-replication.md) | Directory replication is a generic mesh service | 0020, brief section 4.2 |
 | ADR-011 | [0033](0033-data-services-are-first-class.md) | Data services are first-class appliances | 0013, 0010 |
 | ADR-012a | [0034](0034-application-appliance-contract.md) | The application appliance contract | 0010, brief section 4.2, 0021, 0014 |
@@ -59,10 +59,15 @@ are kept only as this mapping; the handbook refers to the note numbers.
 | ADR-016 | [0039](0039-upgrades-from-the-keel-repository.md) | Upgrades come from the Keel repository | 0016, 0020, 0022 |
 | ADR-017 | [0040](0040-monitoring-with-monit-and-etcd.md) | Monitoring per machine with Monit, aggregated in etcd | 0021 |
 
-Each note carries "Review notes": technical caveats raised when the
-decisions were recorded, left open for the maintainer. They do not change
-the decisions. The one that orders the rest is in 0034: the manifest
-format is not yet specified, and it is proposed as the first deliverable.
+Technical caveats raised when the decisions were recorded were answered
+by the maintainer on 2026-09-30, and each note carries them under
+"Resolved": the new decision stands, and the earlier note it amends is
+superseded on that point. The one exception is failback in 0031: the
+operator keeps 0020's choice, with manual as the default, and Keel
+implements automatic failback after full catch-up. Points that are not
+doubts about a decision stay open under "Review notes": the entry secret
+(0026), the manifest format proposed as the first deliverable (0034), and
+the two open items below.
 
 Open architecture items of the same session, not yet decided: the
 successor to HubDNS for nodes behind NAT whose IPv6 prefix changes (likely
