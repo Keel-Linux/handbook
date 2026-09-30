@@ -163,8 +163,11 @@ map "" $keel_distribution {
 After the first signed publication, edit that one line (for example to
 `"release, signed"`), then `nginx -t && systemctl reload nginx`. Header and
 `/STATUS` change together on all three hosts. The README.txt files under
-`/srv/archive`, `/srv/releases` and `/srv/mirror` explain the state in words
-and are edited separately when the signed content lands.
+`/srv/archive`, `/srv/releases` and `/srv/mirror`, and the copies of the
+`/srv/releases` one in `/srv/releases/pve` and `/srv/releases/meta`, explain
+the state in words and are edited separately when the signed content lands.
+They belong to `keel-provision`: publication installs the release files
+beside them and never removes or rewrites them.
 
 ## 6. Content and how it gets there
 
@@ -175,7 +178,7 @@ and are edited separately when the signed content lands.
 | `/srv/mirror/bootstrap/` | `bootstrap-trixie-amd64.tar.gz` (81,659,452 bytes) with `.sha256`, `.sha512` and `.sha256.UNSIGNED` | packed on the build host, carried by hand (the subsection below) |
 | `/srv/mirror/selfcheck/` | the daily reproducibility result, `reproducibility.json` and `STATUS` | carried from the build host by the same publication |
 | `/srv/archive/` | `README.txt`, and `staging-unsigned/` with the reprepro `trixie-staging` tree | `bin/keel-publish-mirror --unsigned-staging`; the signed tree goes to the root of `/srv/archive` and needs no flag once the key exists |
-| `/srv/releases/pve/` | `aplinfo.dat`, `aplinfo.dat.gz` and exactly one of `aplinfo.dat.asc` (signed) or `aplinfo.dat.UNSIGNED` (not signed), since each publication leaves exactly the `pve/` files its `MANIFEST` lists: one record per appliance published, whatever release published it (below) | the same |
+| `/srv/releases/pve/` | the `pve/` files of the last release `MANIFEST`: `aplinfo.dat`, `aplinfo.dat.gz` and exactly one of `aplinfo.dat.asc` (signed) or `aplinfo.dat.UNSIGNED` (not signed), the index holding one record per appliance published, whatever release published it (below). Also the host's own `README.txt`, a copy of `/srv/releases/README.txt` that `keel-provision` writes and publication never touches | the same |
 | `/srv/releases/meta/<date>/` | the release `MANIFEST` and its signature or `UNSIGNED` note | the same |
 | `/srv/site/` | git checkout | `keel-site-pull.timer` |
 
@@ -450,8 +453,12 @@ nothing else on the VM was touched.
   2026-09-30 next to an `aplinfo.dat.asc` that verifies, left over because
   the publication used to copy `pve/` without removing anything. The next
   publication removes it (Keel-Linux/apt#19).
-- Flip the staging header (section 5) and rewrite the three README.txt files
-  at the first signed publication; `/srv/mirror/README.txt` also still says
+- Flip the staging header (section 5) and rewrite the README.txt files at
+  the first signed publication: `/srv/archive`, `/srv/mirror` and
+  `/srv/releases`, whose text `keel-provision` also copies to
+  `/srv/releases/pve` and `/srv/releases/meta`, so a rewrite goes through
+  `keel-provision` (or `docs/infra/keel-provision.pending`) and not by
+  hand. `/srv/mirror/README.txt` also still says
   `/images/` "appears with the first release", which it now has.
 - Retiring the build host's temporary mirror on port 8080: done on
   2026-09-26. It listens on the loopback only and the port does not answer
