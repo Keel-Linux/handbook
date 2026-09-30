@@ -175,7 +175,7 @@ and are edited separately when the signed content lands.
 | `/srv/mirror/bootstrap/` | `bootstrap-trixie-amd64.tar.gz` (81,659,452 bytes) with `.sha256`, `.sha512` and `.sha256.UNSIGNED` | packed on the build host, carried by hand (the subsection below) |
 | `/srv/mirror/selfcheck/` | the daily reproducibility result, `reproducibility.json` and `STATUS` | carried from the build host by the same publication |
 | `/srv/archive/` | `README.txt`, and `staging-unsigned/` with the reprepro `trixie-staging` tree | `bin/keel-publish-mirror --unsigned-staging`; the signed tree goes to the root of `/srv/archive` and needs no flag once the key exists |
-| `/srv/releases/pve/` | `aplinfo.dat`, `aplinfo.dat.gz` and, while nothing is signed, `aplinfo.dat.UNSIGNED` | the same |
+| `/srv/releases/pve/` | `aplinfo.dat`, `aplinfo.dat.gz` and `aplinfo.dat.asc` (or `aplinfo.dat.UNSIGNED` when a release was not signed): one record per appliance published, whatever release published it (below) | the same |
 | `/srv/releases/meta/<date>/` | the release `MANIFEST` and its signature or `UNSIGNED` note | the same |
 | `/srv/site/` | git checkout | `keel-site-pull.timer` |
 
@@ -192,6 +192,39 @@ is checked against the release `MANIFEST` before anything is installed, and
 the public names are verified afterwards with `keel verify` and
 `bin/verify-repo`. What a push direction would require is written in
 docs/infra-recovery.md.
+
+### The Proxmox index is cumulative
+
+`/srv/releases/pve/aplinfo.dat` lists every appliance the mirror serves,
+not only the ones in the release published last. A release of one appliance
+adds or replaces that appliance's record and leaves every other record byte
+for byte as it was (keel-linux/tracker#11). The records are sorted by
+`Package:`.
+
+The merge happens on the build host, before the index is signed, because
+this host has no key. `bin/keel-release` merges the records of its templates
+onto `/srv/keel-release/published/pve/aplinfo.dat`, the build host's copy of
+the index last published, which `bin/keel-publish-mirror` writes after every
+install. When that record does not exist yet, the release fetches this
+host's index over IPv6 and merges onto it only if `aplinfo.dat.asc` verifies
+against the archive keyring. Otherwise it stops before building (exit 11).
+
+This host only compares. The release `MANIFEST` records the sha256 of the
+index it was merged onto as `index_base`, and the publication refuses
+(exit 6, nothing installed) when that is not the index served here. This
+happens when another release was published after this one was staged. The
+fix is to restage on the build host, which merges onto the new base and
+signs again:
+
+    keel-release --date 2026-09-28 --resume redis
+
+A record leaves the index only when a release says so:
+`keel-release --drop-from-index keel-<appliance> ...`. An appliance that a
+release does not stage keeps its record.
+
+Check from a workstation, over IPv6:
+
+    curl -6 -s https://releases.keellinux.org/pve/aplinfo.dat | grep '^Package: '
 
 ### Publishing a layer
 
