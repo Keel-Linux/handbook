@@ -1,7 +1,7 @@
 # 0022: An LNPP stack, and Odoo installed and upgraded from git
 
 Date: 2026-09-30
-Status: **proposed**. The direction was set by the maintainer on
+Status: **proposed, mostly decided**. The direction was set by the maintainer on
 2026-09-30 and is listed under "Decided"; the questions at the end are
 open.
 
@@ -26,6 +26,26 @@ git.
 - **Odoo from git, not from a package.** Installed as a checkout of the
   source at a fixed revision, and upgraded by moving that checkout, which
   is what the Odoo community does. Not Odoo's apt repository.
+- **Odoo 18.0, Community, with the OCA ready** (decided the same day):
+  the addons path is laid out for OCA repositories checked out at their
+  `18.0` branches, so adding an OCA module is a clone and an install, not
+  a rebuild. 18.0 over 19.0 for the maturity of the OCA's 18.0 branches;
+  Odoo supports 18.0 until about October 2027, so the move to the next
+  series is the orchestrated upgrade's first real case, with OpenUpgrade.
+- **wkhtmltopdf: the patched upstream package, pinned, from our
+  archive.** TurnKey's own Trixie work (the `wish/odoo-v19-trixie`
+  branch of the fork, `docs/v19.0-testing.md`) measured that
+  `wkhtmltox 1:0.12.6.1-3.bookworm` installs and renders on Debian 13,
+  its old library names being provided by Trixie's `t64` packages; it
+  pins the package by SHA-256
+  (`98ba0d157b50d36f23bd0dedf4c0aa28c7b0c50fcdcdc54aa5b6bbba81a3941d`)
+  and checks its name, version, architecture and `--version` ("with
+  patched qt"). Keel does the same with one difference: the package is
+  copied into archive.keellinux.org, signed there like everything else,
+  so a build downloads nothing from a third party. It is still an
+  unmaintained binary, and the appliance documentation says so; it runs
+  as Odoo's user and renders pages Odoo produced, so a sandbox of its
+  own is a follow-up, not a blocker.
 
 ## Why a new stack, and why this one
 
@@ -77,9 +97,9 @@ free:
 | Run it isolated (its own unprivileged user, no network, a systemd sandbox), whichever binary | reduces the exposure, not the maintenance |
 | Wait for Odoo's own replacement, if its current series has one | depends on Odoo, not on us |
 
-This note proposes the second and third together for the first release,
-stated plainly in the appliance's documentation, with the first as the
-work that follows if Odoo keeps depending on it.
+Decided: the second, pinned and served from our archive (see
+"Decided"), stated plainly in the appliance's documentation; the third
+and the first are the work that follows if Odoo keeps depending on it.
 
 ## What the appliance does, and what apply converges
 
@@ -106,8 +126,10 @@ maintainer decides. Nothing high severity open at the end.
 
 ## Open for the maintainer
 
-- The Odoo series to ship (the current stable one), and whether the
-  community edition only.
-- wkhtmltopdf: the proposal above, or another.
+- Which OCA repositories are cloned by default (none, a small set such
+  as `server-tools`, `web` and `l10n-brazil`, or a list in the spec), and
+  whether each is mirrored in the organisation like Odoo itself.
 - Whether `Keel-Linux/odoo` mirrors the whole upstream history or only
-  the shipped series' branch (the full repository is several gigabytes).
+  the `18.0` branch (proposed: the branch; the full repository is
+  several gigabytes, and the upgrade to the next series adds its branch
+  then).
