@@ -166,10 +166,36 @@ verticals, and one of these is needed:
 | Package each missing library as a `.deb` in our archive | the most Debian-like; dozens of packages to own, per country |
 | `pip` from PyPI | the fastest; a third party at build and at every vertical chosen later |
 
-**Not decided yet.** The maintainer leans towards the second, packaged
-the Debian Python Team way in our archive and offered to Debian over
-time, and asked for its size to be measured before deciding whether it
-is worth it. The measurement is in
+**Decided by the maintainer on 2026-09-30: both, split by who else the
+library serves.**
+
+- **Debian packages, in our archive and offered to Debian**, for the
+  libraries with a use outside Odoo: `pdf2image`, `pyzbar`, `xsdata`,
+  `altcha`, `numpy-financial`, `requests-pkcs12`, `brazilcep`, `xmlsig`,
+  `pygount`. They go through the dated pool of decision 0012, the project's
+  signature and `apt upgrade`, like the rest of the system.
+- **A virtual environment for Odoo** for the rest (`openupgradelib`, the
+  `erpbrasil.*` family, `py3o.*` and the other Odoo-only libraries):
+  `python3 -m venv --system-site-packages`, so Debian's libraries are used
+  where they fit, and the Odoo-only ones installed with
+  `pip --require-hashes` from wheels kept in Keel's archive, so the image
+  still rebuilds from what is ours.
+- **Never `pip` into the system Python**, with `--break-system-packages`
+  or by removing Debian's `EXTERNALLY-MANAGED` marker, even in an
+  unprivileged container. The host is safe there; the container's own
+  system is not: pip would overwrite files of the `python3-*` packages that
+  confconsole, inithooks, keel and `python3-apt` import, and the next
+  `apt upgrade` would overwrite pip's in turn. TurnKey reached the same
+  answer for its appliances since 18.x (turnkeylinux.org blog, "Python
+  externally managed environment", 2024-07-29): a venv with
+  `--system-site-packages`. Its caveat, a system library satisfying a
+  dependency by accident, is closed here by the hash-pinned requirements,
+  which install the exact version in the venv, ahead of the system's.
+
+Checked the same day: all 34 libraries are on PyPI at the versions Odoo
+needs, 30 with wheels and source, `pysftp`, `ach` and `zplgrf` as source
+only, and `pyzbar` as a wheel only (its Debian package builds from the
+upstream repository). The size of the packaging work was measured in
 [docs/odoo-python-packaging-map.md](../odoo-python-packaging-map.md):
 Odoo 18.0 itself needs nothing outside trixie; the whole OCA catalogue
 needs 34 libraries more (30 direct, 4 in their closure), all pure
@@ -188,9 +214,9 @@ maintainer decides. Nothing high severity open at the end.
 
 ## Open for the maintainer
 
-- How the verticals get the Python Debian lacks: the three options above,
-  measured in the map; and, if packages, in which order.
-- The catalogue above: add or drop verticals.
+- The catalogue above: add or drop verticals. (Chile, Peru and Canada
+  have no module at 18.0 yet, per the map; they stay listed only once
+  they do.)
 - Whether `Keel-Linux/odoo` mirrors the whole upstream history or only
   the `18.0` branch (proposed: the branch; the full repository is
   several gigabytes, and the upgrade to the next series adds its branch
