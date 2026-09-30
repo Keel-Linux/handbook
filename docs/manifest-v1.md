@@ -1066,7 +1066,6 @@ services:
     durable: false
 state:
   replicate: [/var/lib/odoo/filestore, /var/lib/odoo/addons]
-  exclude: [/var/lib/odoo/sessions]
 processes:
   - name: odoo
     unit: odoo.service
@@ -1100,12 +1099,19 @@ hooks:
 
 | Derived | Result |
 | --- | --- |
-| Backup | the filestore and the addons, without `sessions`; the `odoo` database when embedded; Redis never, it is not durable |
+| Backup | the filestore and the addons; the `odoo` database when embedded; Redis never, it is not durable |
 | Monit | `odoo` with `/web/health`; `odoo-cron`; PostgreSQL's overlay when embedded |
 | Replication | two folders in cloud advanced: the filestore must move with its database (0020, hard part 3), which the promotion of 0032 does |
 
 Only `postgresql` is carried: the `sessions` service is never `embedded`,
 so rule 21 asks for no `redis` overlay.
+
+Odoo's `data_dir` (`/var/lib/odoo` in Debian's package) holds three
+directories: `filestore/` (attachments, per database), `addons/` (modules
+installed from the interface) and `sessions/`. Only the first two are
+replicated. `sessions/` needs no exclude, since it is inside neither
+replicated path (rule 23), and it is not state to move: sessions live in
+the database or in Redis (0032).
 
 Odoo is the case the worker rule bites: cron jobs create attachments, and
 Odoo writes them to the filestore by default. Since a worker never writes to
