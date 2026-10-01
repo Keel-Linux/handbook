@@ -794,7 +794,9 @@ first.
    regular executable file, from which systemd's SysV generator makes
    the unit at boot. trixie's shellinabox, for one, ships only
    `/etc/init.d/shellinabox`. A systemd that drops SysV support will
-   need a unit file shipped by Keel for such a package.
+   need a unit file shipped by Keel for such a package. An instance of
+   a template unit (`anubis@keel.service`) is found by its template's
+   file (`anubis@.service`), which is how instances ship.
 6. A port is between 1 and 65535. A literal `address` is `::1` or
    `127.0.0.1`; `localhost`, `ip6-localhost` and every name are refused,
    with docs/spec.md's reason.
