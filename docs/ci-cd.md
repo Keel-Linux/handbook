@@ -177,11 +177,17 @@ Rules for the number:
         echo '{"allows_public_repositories":true}' \
           | gh api --method PATCH /orgs/keel-linux/actions/runner-groups/1 --input -
 
-  **Still to do, and it matters:** a self-hosted runner that serves public
-  repositories must never run code from an unreviewed fork. Set the fork pull
-  request policy to require approval for all outside contributors. Every pull
-  request so far comes from a branch of the repository itself, not a fork, so
-  nothing unreviewed has run, but the setting is what keeps that true.
+  A self-hosted runner that serves public repositories must never run code
+  from an unreviewed fork. Until 2026-10-01 the fork pull request policy
+  only held back first-time contributors; it now requires approval for all
+  outside contributors:
+
+        gh api -X PUT orgs/keel-linux/actions/permissions/fork-pr-contributor-approval \
+          -f approval_policy=all_external_contributors
+
+  Every pull request until then came from a branch of the repository itself,
+  not a fork, so nothing unreviewed has run. Section 6 says what else
+  changed on the runner that day.
 - **A queued job carries the workflow definition it was queued with.** The
   runs that had piled up against the closed runner group were expanded from
   the old `test-appliance.yml` and ran `bt-layer` when they were finally let
@@ -201,8 +207,9 @@ systemd, LXC for boot tests and outbound IPv4 for the GitHub API (which has
 no IPv6). Commands as root unless stated.
 
 1. Packages: `lxc lxc-templates kcov bats shellcheck python3-yaml zstd git
-   curl libicu76 file`. User `runner` with sudo limited to `apt-get` and the
-   `lxc-*` commands (`/etc/sudoers.d/runner`).
+   curl libicu76 file`, and `uidmap` since 2026-10-01. User `runner`, which
+   had sudo for `apt-get` and the `lxc-*` commands until 2026-10-01 and has
+   none now (see "Without sudo" below).
 2. Runner 2.337.0 unpacked in `/home/runner/actions-runner` (tarball from
    `github.com/actions/runner/releases`, version read with
    `gh api repos/actions/runner/releases/latest --jq .tag_name`).
@@ -238,7 +245,9 @@ host (docs/build-host.md). What that cost, and how it was settled on
   `keel pull` into a scratch cache and `keel verify` (0, 8 and 9 pass; 6 and
   7 fail), then hands the assemble, the boot and the checks to the
   repository's `tests/boot-test.sh`, run as root through
-  `/usr/local/sbin/keel-ci-boot-test`. Every run gets its own container name
+  `/usr/local/sbin/keel-ci-boot-test` until 2026-10-01 and as root of a user
+  namespace through `bin/unprivileged-lxc` of `keel-linux/.github` since
+  (see "Without sudo" below). Every run gets its own container name
   and scratch tree, `keel-<appliance>-ci-<run id>-<attempt>`, and a cleanup
   step with `if: always()` destroys both. When the manifest is not on the
   mirror the job passes with a notice and an "Appliance test skipped"
@@ -256,15 +265,12 @@ host (docs/build-host.md). What that cost, and how it was settled on
   signed, the two lines that clone become an `apt-get install keel`.
 - `build-deb.yml` still needs `build-essential devscripts equivs fakeroot
   dpkg-dev` on the runner host; not installed.
-- What the runner needed beyond the packages it already had: `apparmor`
-  (4.1.0, already present, `lxc-start` needs it for the generated profile);
-  `/var/tmp/keel-ci` owned by `runner`; two root-owned entry points,
-  `keel-ci-boot-test` and `keel-ci-cleanup`, added to
-  `/etc/sudoers.d/runner` next to `apt-get` and the `lxc-*` commands, each
-  checking that it acts only on a workspace under
-  `/home/runner/actions-runner/_work` and a scratch tree under
-  `/var/tmp/keel-ci`. No blanket sudo. Both are written by
-  `keel-provision` (docs/releases-host.md section 7).
+- What the runner needed beyond the packages it already had, on
+  2026-09-26: `apparmor` (4.1.0, already present); `/var/tmp/keel-ci` owned
+  by `runner`; two root-owned entry points, `keel-ci-boot-test` and
+  `keel-ci-cleanup`, added to `/etc/sudoers.d/runner` next to `apt-get` and
+  the `lxc-*` commands. That sudo policy was root-equivalent, and on
+  2026-10-01 it was removed together with both entry points (below).
 - Address family for the mirror: the probe and `keel pull` let the resolver
   choose rather than forcing IPv6. The mirror is served by the same VM the
   runner runs on, and that VM resolves its own public names to itself
@@ -313,6 +319,113 @@ build and not stripping the finished layer: buildtasks issue #6. The gate
 found a real defect on its first run, which is what it is for; until the
 layer is rebuilt, `appliance / build-and-boot` is not a required status on
 keel-nodebb.
+
+### Without sudo (2026-10-01)
+
+Every command the runner could run through sudo was root-equivalent:
+`apt-get` installs any `.deb`, `lxc-start` takes a config that mounts any
+host path, `lxc-attach` enters whatever it is pointed at. So any job on
+`keel-lxc-1` could become root on the VM that serves keellinux.org, the
+archive, the mirror and the releases. The runner now has no sudo at all and
+boots unprivileged containers. Commands as root on the VM.
+
+What changed on the host, file by file (backups of every file before the
+change in `/root/keel-runner-hardening-2026-10-01/`, with `dpkg -l` and the
+linger state as they were):
+
+| Path | Change |
+| --- | --- |
+| `/etc/sudoers.d/runner` | removed; `sudo -l -U runner` answers "not allowed to run sudo" |
+| `/usr/local/sbin/keel-ci-boot-test`, `keel-ci-cleanup` | removed |
+| `/usr/local/sbin/keel-provision` | the users and appliance gate sections no longer write the sudoers file and the helpers; they remove them and write what follows. `docs/infra/keel-provision.pending` carries the same change |
+| `/etc/subuid`, `/etc/subgid` | unchanged: `runner:165536:65536` was already there, given by `useradd` |
+| `/etc/lxc/lxc-usernet` | new, `runner veth lxcbr0 10` |
+| `/home/runner/.config/lxc/default.conf` | new: veth on `lxcbr0`, `lxc.idmap` u and g `0 165536 65536`, `lxc.apparmor.profile = lxc-container-default-with-nesting` |
+| `/var/lib/systemd/linger/runner` | `loginctl enable-linger runner`, so `user@1001.service` runs without a login and its cgroup is delegated to `runner` |
+| `actions-runner.service` | unchanged, never restarted |
+
+Installed: `uidmap` (and its library `libsubid5`), nothing else.
+`dbus-user-session` is not needed: LXC's own attempt to create a scope over
+D-Bus fails harmlessly, and the scope comes from `systemd-run --user`,
+which talks to the user manager over its private socket. None of the build
+packages (`build-essential devscripts equivs fakeroot dpkg-dev lintian
+git-buildpackage pristine-tar autopkgtest`) is on the host; package builds
+belong in unprivileged containers.
+
+Three things an unprivileged container needs here, each found by failing:
+
+- The AppArmor profile. `/etc/lxc/default.conf` says `generated`, which
+  needs `mac_admin`; `lxc-container-default-cgns` loads but denies the
+  `rbind` mounts systemd uses to sandbox its services, so networkd,
+  resolved and udevd fail and the container has no DNS.
+  `lxc-container-default-with-nesting`, preloaded by `apparmor.service`,
+  allows exactly those. What still fails in the container is the usual set
+  for an unprivileged one (`dev-mqueue`, `run-lock`, `sys-kernel-config`,
+  `sys-kernel-debug` and `tmp` mounts), so it reports `degraded`.
+- A cgroup it may write. The runner's jobs live in
+  `system.slice/actions-runner.service`, owned by root. `lxc-start` runs in
+  `systemd-run --user --scope -p Delegate=yes`, and `lxc-attach` in
+  `systemd-run --user --scope`, because attaching moves the process into
+  the container's cgroup and that needs write access to a common ancestor.
+  `XDG_RUNTIME_DIR=/run/user/1001` is all the job needs to reach the user
+  manager.
+- Device nodes. A user namespace may not `mknod`, so the extract of a layer
+  fails on the nine nodes under `/dev`. LXC mounts its own `/dev` over the
+  rootfs, so they are never seen.
+
+The appliance boot test. Each of the nine appliance repositories carries its
+own `tests/boot-test.sh`, and every one insists on root. Rather than change
+nine repositories, `test-appliance.yml` runs the test through
+`bin/unprivileged-lxc` of `keel-linux/.github` (`profile/WORKFLOWS.md`
+there, "Without root on the runner"): the test is root in a user namespace
+mapped onto `165536`-`231071` plus the runner's own uid at 65536, so the
+assembled rootfs has the owners the container sees; its `lxc-*` commands
+are forwarded to a broker outside the namespace that adds the idmap and the
+profile to `lxc-start`; and `tar` forgives only the device node refusal.
+
+Proof, in this order:
+
+- A Debian trixie container made with `lxc-create -t download -- -d debian
+  -r trixie -a amd64` as `runner` booted systemd (`degraded`, for the mounts
+  above), got `fc42:5009:ba4b:5ab0:308a:4aff:febd:97ed/64` by SLAAC, with
+  DNS from the bridge, and ran `apt-get install hello`. The container ran
+  as uid 165536 under `lxc-container-default-with-nesting (enforce)`.
+- keel-core's `tests/boot-test.sh` by hand as `runner`, against the published
+  `core` layer: passed in 27 s, `keel diff` 6 same, 0 drift.
+- keel-core run 36814690796, a temporary caller pointed at the
+  `ci/unprivileged-boot-test` branch of `keel-linux/.github`, with sudo
+  still in place and unused: `appliance / boot-published-layer` green in
+  44 s.
+- The sudoers file and the helpers removed, then keel-core run 36814955977,
+  same caller: green in 44 s, address in 6 s, first boot 5 s later, 0
+  monitors left, scratch tree gone.
+
+GitHub settings changed the same day: the fork pull request policy (section
+5). Runner group 1 already has `visibility: all`, which for an organization
+runner group means every repository of the organization and nothing else;
+the API also offers `private` (private repositories only, which would shut
+out the 40 public ones), `selected` with an explicit list of repositories,
+and `restricted_to_workflows` with a list of workflow refs. None of those was
+applied: a hand-kept list breaks the gate of every new repository.
+
+What could not be done unprivileged: nothing the appliance gate needs.
+`build-deb.yml` still calls `sudo apt-get` for build dependencies; nothing
+calls it, and it has to move into an unprivileged container before anything
+does.
+
+Rollback, as root on the VM, if the unprivileged path has to be abandoned:
+
+    D=/root/keel-runner-hardening-2026-10-01
+    install -m 0440 -o root -g root $D/etc/sudoers.d/runner /etc/sudoers.d/runner && visudo -c
+    install -m 0755 -o root -g root $D/usr/local/sbin/keel-ci-boot-test $D/usr/local/sbin/keel-ci-cleanup /usr/local/sbin/
+    install -m 0755 -o root -g root $D/usr/local/sbin/keel-provision /usr/local/sbin/keel-provision
+    rm -f /etc/lxc/lxc-usernet /home/runner/.config/lxc/default.conf
+    loginctl disable-linger runner
+    apt-get purge uidmap libsubid5
+
+and revert the `keel-linux/.github` pull request that introduced
+`bin/unprivileged-lxc`, since the workflow before it calls the helpers
+through sudo. The fork pull request policy is independent and should stay.
 
 ## 7. CD: what is published where today
 

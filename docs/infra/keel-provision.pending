@@ -57,84 +57,46 @@ nft list ruleset | grep -q 'tcp dport { 22, 80, 443 } accept' && log "firewall a
 log users
 id site >/dev/null 2>&1 || useradd -r -m -d /var/lib/keel-site -s /usr/sbin/nologin site
 id runner >/dev/null 2>&1 || useradd -m -s /bin/bash runner
-cat > /etc/sudoers.d/runner << 'SUDO'
-# The GitHub Actions runner (docs/releases-host.md section 7). No blanket
-# sudo: the package tool, the LXC commands the appliance gate uses, and the
-# two root entry points of that gate, which check their own arguments.
-runner ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/lxc-create, /usr/bin/lxc-start, /usr/bin/lxc-stop, /usr/bin/lxc-destroy, /usr/bin/lxc-attach, /usr/bin/lxc-ls, /usr/bin/lxc-info, /usr/bin/lxc-wait, /usr/local/sbin/keel-ci-boot-test, /usr/local/sbin/keel-ci-cleanup
-SUDO
-chmod 0440 /etc/sudoers.d/runner
-visudo -c -f /etc/sudoers.d/runner >/dev/null
+# The runner has no sudo since 2026-10-01 (docs/ci-cd.md section 6 of the
+# keel repository): apt-get and the lxc-* commands it was allowed were each
+# root-equivalent, on the host that serves every public name.
+rm -f /etc/sudoers.d/runner
 
 # ---------------------------------------------------------- appliance gate
-# Root entry points of test-appliance.yml (keel-linux/.github). Assembling a
-# rootfs and starting a container need root; the runner user reaches them
-# through these two commands only, and each checks where it is allowed to
-# act before doing anything.
+# test-appliance.yml (keel-linux/.github) boots the published layer in an
+# unprivileged container started by the runner itself, through
+# bin/unprivileged-lxc of that repository. What the runner needs for that:
+# subordinate ids (given by useradd), newuidmap (package uidmap), a quota
+# of veths on lxcbr0, LXC defaults of an unprivileged user, and a systemd
+# user manager that outlives logins, for the delegated cgroup scopes. No
+# root entry points: the two that existed until 2026-10-01 are removed.
 log appliance-gate
+command -v newuidmap >/dev/null || { echo "keel-provision: install uidmap first" >&2; exit 1; }
+SUB_UID=$(awk -F: '$1 == "runner" && $3 >= 65536 { print $2; exit }' /etc/subuid)
+SUB_GID=$(awk -F: '$1 == "runner" && $3 >= 65536 { print $2; exit }' /etc/subgid)
+if [ -z "$SUB_UID" ] || [ -z "$SUB_GID" ]; then
+	echo "keel-provision: runner has no range of 65536 ids in /etc/subuid and /etc/subgid" >&2
+	exit 1
+fi
+echo 'runner veth lxcbr0 10' > /etc/lxc/lxc-usernet
+chmod 0644 /etc/lxc/lxc-usernet
+install -d -m 0755 -o runner -g runner /home/runner/.config /home/runner/.config/lxc
+cat > /home/runner/.config/lxc/default.conf << LXCDEF
+# Unprivileged containers of the CI runner (docs/ci-cd.md section 6).
+# The generated AppArmor profile of /etc/lxc/default.conf needs mac_admin,
+# which an unprivileged user does not have. The preloaded nesting profile
+# allows the rbind mounts systemd services use for their sandboxing.
+lxc.net.0.type = veth
+lxc.net.0.link = lxcbr0
+lxc.net.0.flags = up
+lxc.apparmor.profile = lxc-container-default-with-nesting
+lxc.idmap = u 0 $SUB_UID 65536
+lxc.idmap = g 0 $SUB_GID 65536
+LXCDEF
+chown runner:runner /home/runner/.config/lxc/default.conf
+loginctl enable-linger runner
 install -d -m 0755 -o runner -g runner /var/tmp/keel-ci
-cat > /usr/local/sbin/keel-ci-boot-test << 'GATE'
-#!/bin/sh
-# keel-ci-boot-test WORKSPACE SCRATCH APPLIANCE [tests/boot-test.sh options]
-# Runs the appliance repository's own boot test as root, with the keel
-# checkout of the same job first in PATH.
-set -eu
-WORK_ROOT=/home/runner/actions-runner/_work
-SCRATCH_ROOT=/var/tmp/keel-ci
-workspace=${1:?usage: keel-ci-boot-test WORKSPACE SCRATCH APPLIANCE [options]}
-scratch=${2:?usage: keel-ci-boot-test WORKSPACE SCRATCH APPLIANCE [options]}
-appliance=${3:?usage: keel-ci-boot-test WORKSPACE SCRATCH APPLIANCE [options]}
-shift 3
-for path in "$workspace" "$scratch"; do
-	case "$path" in
-		*..*) echo "keel-ci-boot-test: '..' is not allowed in a path" >&2; exit 2 ;;
-	esac
-done
-case "$workspace" in
-	"$WORK_ROOT"/*) ;;
-	*) echo "keel-ci-boot-test: the workspace must be under $WORK_ROOT" >&2; exit 2 ;;
-esac
-case "$scratch" in
-	"$SCRATCH_ROOT"/*) ;;
-	*) echo "keel-ci-boot-test: the scratch directory must be under $SCRATCH_ROOT" >&2; exit 2 ;;
-esac
-case "$appliance" in
-	''|*[!a-z0-9-]*) echo "keel-ci-boot-test: '$appliance' is not an appliance name" >&2; exit 2 ;;
-esac
-[ -x "$workspace/tests/boot-test.sh" ] || {
-	echo "keel-ci-boot-test: $workspace/tests/boot-test.sh is missing or not executable" >&2
-	exit 2
-}
-PATH="$workspace/.keel/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-TERM=dumb
-export PATH TERM
-exec "$workspace/tests/boot-test.sh" "$appliance" "$@"
-GATE
-chmod 0755 /usr/local/sbin/keel-ci-boot-test
-cat > /usr/local/sbin/keel-ci-cleanup << 'CLEAN'
-#!/bin/sh
-# keel-ci-cleanup NAME SCRATCH: stop the boot test container and remove the
-# scratch tree of one run. Safe to call twice and after a failure.
-set -u
-SCRATCH_ROOT=/var/tmp/keel-ci
-name=${1:?usage: keel-ci-cleanup NAME SCRATCH}
-scratch=${2:?usage: keel-ci-cleanup NAME SCRATCH}
-case "$name" in
-	''|*[!a-z0-9.-]*) echo "keel-ci-cleanup: '$name' is not a container name" >&2; exit 2 ;;
-esac
-case "$scratch" in
-	*..*) echo "keel-ci-cleanup: '..' is not allowed in a path" >&2; exit 2 ;;
-esac
-case "$scratch" in
-	"$SCRATCH_ROOT"/*) ;;
-	*) echo "keel-ci-cleanup: the scratch directory must be under $SCRATCH_ROOT" >&2; exit 2 ;;
-esac
-lxc-stop -P "$scratch/lxc" -n "$name" -k >/dev/null 2>&1 || true
-lxc-destroy -P "$scratch/lxc" -n "$name" -f >/dev/null 2>&1 || true
-rm -rf "$scratch"
-echo "keel-ci-cleanup: $name stopped, $scratch removed"
-CLEAN
-chmod 0755 /usr/local/sbin/keel-ci-cleanup
+rm -f /usr/local/sbin/keel-ci-boot-test /usr/local/sbin/keel-ci-cleanup
 
 # ---------------------------------------------------------------- trees
 log trees
