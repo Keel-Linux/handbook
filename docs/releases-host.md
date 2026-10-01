@@ -376,10 +376,10 @@ later, the signing subkey. `test-appliance.yml` in `keel-linux/.github` was
 rewritten on 2026-09-26 to match: it fetches the layers from
 `https://mirror.keellinux.org/layers` over IPv6, verifies them, assembles the
 chain into a scratch rootfs, boots it and runs the appliance repository's
-`tests/boot-test.sh` against it. It builds nothing. `build-deb.yml`
-(dpkg-buildpackage) still needs `build-essential devscripts equivs fakeroot
-dpkg-dev` on this host; they are not installed and should be added when the
-first package job is enabled.
+`tests/boot-test.sh` against it. It builds nothing. Debian packages are
+built by `lxc-trixie.yml` (Keel-Linux/.github#17) inside an unprivileged
+container, which retires `build-deb.yml`; no build package goes on this
+host.
 
 ### What the appliance gate may do here
 
@@ -495,7 +495,6 @@ the root helper of that time; nothing else on the VM was touched.
   requires approval for all outside contributors (docs/ci-cd.md section 5),
   and a job that does reach the runner is no longer root on this VM
   (section 7).
-- `build-deb.yml` build dependencies on the runner host (section 7).
 - IPv4: the A records point at addresses that do not forward 80 and 443 to
   the VM; either the cluster adds the forwarding or the A records go.
 

@@ -7,10 +7,10 @@ and 3. Coverage standard: decisions 0003 and 0004.
 
 | Piece | Where | State |
 | --- | --- | --- |
-| Reusable workflows | `keel-linux/.github`, `.github/workflows/` | `test-python.yml`, `test-shell.yml`, `test-appliance.yml`, `build-deb.yml`; documented in `profile/WORKFLOWS.md` |
+| Reusable workflows | `keel-linux/.github`, `.github/workflows/` | `test-python.yml`, `test-shell.yml`, `test-appliance.yml`, and `lxc-trixie.yml` once Keel-Linux/.github#17 merges (it retires `build-deb.yml`); documented in `profile/WORKFLOWS.md` |
 | Unit tests and coverage gate | hosted `ubuntu-latest` runners (plain virtual machines, no `container:` jobs, no images) | active in eight repositories |
 | Appliance boot test | self-hosted runner `keel-lxc-1`, labels `self-hosted, keel-lxc`, on the public services VM (docs/releases-host.md) | online since 2026-09-26. `test-appliance.yml` fetches the layers from `https://mirror.keellinux.org/layers`, verifies, assembles, boots in LXC and runs the repository's `tests/boot-test.sh`; it builds nothing, because the runner has no fab, deck or buildtasks. Callers: keel-core and keel-nodebb. First green CI run on keel-core 2026-09-26, 39 seconds; required on `master` since |
-| Debian packages | the same runner | `build-deb.yml` unchanged and still inactive: `build-essential devscripts equivs fakeroot dpkg-dev` are not installed on the runner host |
+| Debian packages | the same runner, inside an unprivileged trixie container per job | `lxc-trixie.yml` (Keel-Linux/.github#17), which retires `build-deb.yml`; no build package is installed on the runner host itself |
 | Site | GitHub Pages, `keel-linux/keel-linux.github.io`, branch `main`, path `/`; the same checkout served at `https://www.keellinux.org/` and the apex by the public services VM (pull every 15 minutes) | published |
 
 Each repository carries one ten-line caller, `.github/workflows/tests.yml`,
@@ -35,8 +35,8 @@ An appliance repository carries a second caller job, `appliance`, which calls
 
     appliance / build-and-boot
 
-The remaining name, for later: `package / deb` (build-deb.yml, caller job id
-`package`).
+The package check comes from `lxc-trixie.yml` (Keel-Linux/.github#17), which
+retires `build-deb.yml` and its `package / deb`.
 
 ## 3. Per-repository thresholds
 
@@ -163,8 +163,8 @@ Rules for the number:
   carries the same protection as the other repositories.
 - **Runner registration**: done 2026-09-26, section 6.
 - **Organization variable `KEEL_LXC_RUNNER`** was set to `true` on
-  2026-09-26 after the runner showed online. Callers of `build-deb.yml` and
-  `test-appliance.yml` gate on `if: vars.KEEL_LXC_RUNNER == 'true'` so no job
+  2026-09-26 after the runner showed online. Callers of the `keel-lxc`
+  workflows gate on `if: vars.KEEL_LXC_RUNNER == 'true'` so no job
   sits queued for 24 hours against a label no runner carries; set it back to
   `false` if the runner goes away.
 - **Runner group: public repositories, opened 2026-09-26.** Runner group 1
@@ -250,10 +250,13 @@ host (docs/build-host.md). What that cost, and how it was settled on
   (see "Without sudo" below). Every run gets its own container name
   and scratch tree, `keel-<appliance>-ci-<run id>-<attempt>`, and a cleanup
   step with `if: always()` destroys both. When the manifest is not on the
-  mirror the job passes with a notice and an "Appliance test skipped"
-  section in the job summary, so a repository whose layer was never
-  published does not fail forever. Only a 404 is a skip: a name that does
-  not resolve, a refused connection or a 5xx fails the job, because a skip
+  mirror the job fails, since 2026-09-28: it used to pass with a notice, and
+  a notice is not a conclusion, so a repository whose layer was never
+  published read green having booted nothing. A repository whose first
+  layer does not exist yet says so with `allow_unpublished: true`, which
+  becomes an error once the layer is published. Only a 404 means "not
+  published": a name that does not resolve, a refused connection or a 5xx
+  fails the job either way, because reading an outage as "not published"
   on an outage is a green check that tested nothing. That distinction was
   added after a rehearsal on the runner skipped for the wrong reason
   (`.github` pull request #4).
@@ -263,8 +266,9 @@ host (docs/build-host.md). What that cost, and how it was settled on
   install. The checkout needs only python3 and PyYAML, both on the runner,
   and the job summary records the commit it resolved to. When the archive is
   signed, the two lines that clone become an `apt-get install keel`.
-- `build-deb.yml` still needs `build-essential devscripts equivs fakeroot
-  dpkg-dev` on the runner host; not installed.
+- Debian packages are built by `lxc-trixie.yml` (Keel-Linux/.github#17)
+  inside an unprivileged container, which retires `build-deb.yml`; no build
+  package is installed on the runner host.
 - What the runner needed beyond the packages it already had, on
   2026-09-26: `apparmor` (4.1.0, already present); `/var/tmp/keel-ci` owned
   by `runner`; two root-owned entry points, `keel-ci-boot-test` and
@@ -410,9 +414,9 @@ GitHub settings changed the same day: the fork pull request policy (section
 5), and, after the security review below, the runner group.
 
 What could not be done unprivileged: nothing the appliance gate needs.
-`build-deb.yml` still calls `sudo apt-get` for build dependencies; nothing
-calls it, and it has to move into an unprivileged container before anything
-does.
+`build-deb.yml` called `sudo apt-get` for build dependencies; nothing
+called it, and `lxc-trixie.yml` (Keel-Linux/.github#17), which builds in an
+unprivileged container, retires it.
 
 ### After the security review (2026-10-01)
 
@@ -441,14 +445,13 @@ things to fix.
   `@ci/lxc-trixie`. Once #17 is merged and the callers use `@main`, the
   list is the org's reusable workflows that target `keel-lxc`, at
   `refs/heads/main` only (a branch is writable by any member with write
-  access). `build-deb.yml` is on it only while it exists; nothing calls it.
+  access). `build-deb.yml` is not on it: #17 deletes it.
   Any new reusable workflow that targets `keel-lxc` gets the runner only
   once it is on this list. To set it, send the whole list:
 
         gh api -X PATCH orgs/keel-linux/actions/runner-groups/1 --input - <<'JSON'
         {"restricted_to_workflows": true, "selected_workflows": [
           "Keel-Linux/.github/.github/workflows/test-appliance.yml@refs/heads/main",
-          "Keel-Linux/.github/.github/workflows/build-deb.yml@refs/heads/main",
           "Keel-Linux/.github/.github/workflows/lxc-trixie.yml@refs/heads/main"]}
         JSON
 
@@ -534,11 +537,16 @@ credential that can register runners, every time. Options, none applied:
    an App: like option 1, but tied to a person and their account's fate.
    Not recommended.
 
-Until one of those is in place the residual risk is: anyone who can get a
-job onto this runner, which after the changes above means a member with
-write access to `Keel-Linux/.github` or to the main branch of an appliance
-repository, can take over the runner registration and see later jobs. They
-cannot reach root, the sites' files or the LAN.
+Until one of those is in place the residual risk is wider than the fork
+guard suggests. While runner group 1 is not restricted to workflows, any
+member who can push a branch to any repository of the organization can
+point a workflow at `keel-lxc` and get a job onto this VM. Restricted or
+not, the appliance gate runs the branch's own `tests/boot-test.sh` as uid
+1001, so a branch of any appliance repository runs arbitrary code here; that
+code can read `.credentials` and `.credentials_rsaparams`, ptrace
+`Runner.Listener` (`ptrace_scope` is 0) and modify the runner, and so take
+over the registration and see every later job and its tokens. What it
+cannot do is reach root, the sites' files or the LAN.
 
 Two disruptions while this was done. A manual run of `job-reset` while the
 runner was busy stopped the container of coreruleset run 36815956699 (CI
@@ -562,12 +570,12 @@ workflow restriction. The fork pull request policy stays.
 | Artifact | Published to | Mechanism | State |
 | --- | --- | --- | --- |
 | Organization site | `https://keel-linux.github.io/` | GitHub Pages from `main` at `/` (build type legacy, `.nojekyll`, HTTPS enforced); a push to `main` is the deployment | live, `GET /repos/keel-linux/keel-linux.github.io/pages` reports `status: built`. If it is ever disabled: `POST /repos/keel-linux/keel-linux.github.io/pages` with `{"source": {"branch": "main", "path": "/"}}` |
-| Debian packages | workflow artifacts only (`build-deb.yml`, artifact `deb`, 30 days) | `dpkg-buildpackage -us -uc -b` on the LXC runner | inactive until the runner exists; nothing is signed |
+| Debian packages | workflow artifacts only (`lxc-trixie.yml`, Keel-Linux/.github#17) | built inside an unprivileged trixie container on the LXC runner | in review; nothing is signed |
 | APT repository | `https://archive.keellinux.org/` (README only) | `bin/publish` in repos/apt, target to be switched from Pages to this host | blocked on the signing key (decision 0005) |
 | Appliance layers and manifests | `https://mirror.keellinux.org/layers/` (staging, unsigned, header `X-Keel-Distribution`) | staged on the build host and published by `bin/keel-publish-mirror` (docs/releases-host.md section 6, publishing a layer) | `core`, `lamp`, `nodejs-nginx` and `nodebb` served; `nodebb` published 2026-09-26 so the appliance gate had something to boot; signed manifests blocked on the key |
 
 The APT repository, the keyring package and layer publication follow the
 decision 0005 outcome; when it lands, the publication step is added to
-`build-deb.yml` (upload of the signed `.deb` and `Release` to the chosen
+the reusable package workflow (upload of the signed `.deb` and `Release` to the chosen
 host over IPv6, `archive.keellinux.org` at `[2804:710:d0:5::13]`), not to the
 callers.
