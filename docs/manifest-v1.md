@@ -543,9 +543,6 @@ processes:
   - name: webmin
     unit: webmin.service
     listen: [{port: 12321, protocol: tcp, expose: public}]
-  - name: webshell
-    unit: shellinabox.service
-    listen: [{port: 12320, protocol: tcp, expose: public}]
   - name: postfix
     unit: postfix.service
     listen: [{address: 127.0.0.1, port: 25, protocol: tcp, expose: loopback}]
@@ -570,6 +567,13 @@ literal, as CrowdSec's do, and the SMTP probe connects to `127.0.0.1`; at
 `::1` it failed on every cycle and Monit restarted postfix until its
 restart limit (errata, 2026-09-30, found by step 3's test of 0041).
 
+Core has no web shell. TurnKey removed shellinabox (port 12320) in 18.0,
+Webmin's own terminal taking its place, and common 19.x installs none. A
+`webshell` process naming `shellinabox.service` failed `keel manifest
+validate` on the built Core image (rule 5: no unit file), and with it every
+spec naming the appliance, so it is not declared (errata, 2026-09-30,
+found by step 4's image test of 0041).
+
 Where each state comes from:
 
 | Overlay | simple | cloud simple | cloud advanced | Source |
@@ -583,8 +587,8 @@ Where each state comes from:
 
 | Consumer | Result |
 | --- | --- |
-| Monit | `sshd`, `webmin`, `webshell`, `postfix`: four unit checks, and the ssh, HTTPS and SMTP probes above. Nothing for etcd or CrowdSec, which are off |
-| Firewall | 22, 12320, 12321 incoming, which is what `WEBMIN_FW_TCP_INCOMING` of the Core recipes says today |
+| Monit | `sshd`, `webmin`, `postfix`: three unit checks, and the ssh, HTTPS and SMTP probes above. Nothing for etcd or CrowdSec, which are off |
+| Firewall | 22 and 12321 incoming. The Core recipe's `WEBMIN_FW_TCP_INCOMING` says 22, 80, 443 and 12321 today, which the derived firewall replaces |
 | Backup | TKLBAM's system delta, as today (`/etc`, the spec and its secret files among it, and the package list). etcd and CrowdSec contribute nothing (`backup: none`) |
 | File replication | none |
 | Registry | none: no etcd in a simple installation |
@@ -720,15 +724,14 @@ Its manifest is three lines of states over Core's.
 | 2379/tcp, 2380/tcp | etcd | core (etcd) | mesh |
 | 6060/tcp, 8080/tcp | crowdsec | core (crowdsec) | loopback, IPv4 |
 | 8923/tcp | anubis | web (anubis) | loopback |
-| 12320/tcp | webshell | core | public |
 | 12321/tcp | webmin | core | public |
 
 **What Web derives.**
 
 | Consumer | Simple installation | Cloud advanced |
 | --- | --- | --- |
-| Monit | Core's four, and `nginx` with `/keel-health` | also etcd, crowdsec, firewall-bouncer, anubis, and `waf-blocks` every tenth cycle |
-| Firewall | 22, 80, 443, 12320, 12321 | also 2379 and 2380 on the WireGuard interface, and the overlay's UDP port |
+| Monit | Core's three, and `nginx` with `/keel-health` | also etcd, crowdsec, firewall-bouncer, anubis, and `waf-blocks` every tenth cycle |
+| Firewall | 22, 80, 443, 12321 | also 2379 and 2380 on the WireGuard interface, and the overlay's UDP port |
 | Backup | Core's; Web adds nothing: its configuration is in `/etc`, already in TKLBAM's delta | the same |
 | File replication | none | none: nothing Web holds is data |
 | Secrets | `root_password` | also `anubis_signing_key`, shared, generated on the primary |
@@ -781,7 +784,7 @@ first.
    `.service`. On a machine, and in the package build, the unit file
    exists, or an init script of the same name in `/etc/init.d/`, a
    regular executable file, from which systemd's SysV generator makes
-   the unit at boot. trixie's shellinabox, Core's `webshell`, ships only
+   the unit at boot. trixie's shellinabox, for one, ships only
    `/etc/init.d/shellinabox`. A systemd that drops SysV support will
    need a unit file shipped by Keel for such a package.
 6. A port is between 1 and 65535. A literal `address` is `::1` or
