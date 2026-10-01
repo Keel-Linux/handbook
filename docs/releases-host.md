@@ -18,13 +18,17 @@ described state.
 - Access: `ssh -6 popsolutions@keellinux.org`, passwordless sudo, root login
   refused. No other accounts log in; `site` and `runner` are service users.
 - Firewall: nftables (`/etc/nftables.conf`), inbound policy drop, accepting
-  22, 80, 443 on both families, ICMP and ICMPv6, DHCP client replies and the
-  LXC bridge `lxcbr0` of the CI runner. Forwarding only for `lxcbr0`.
+  22, 80, 443 on both families, ICMP and ICMPv6 and DHCP client replies.
+  From `lxcbr0`, the bridge of the CI runner's containers, only DNS and DHCP
+  reach the host (sshd and nginx do not); forwarding only from `lxcbr0`, to
+  the internet, not to private ranges, ULA, link local or
+  `2804:710:d0:5::/64` (since 2026-10-01, docs/ci-cd.md section 6).
 - Time: systemd-timesyncd, synchronized. Updates: unattended-upgrades with
   `APT::Periodic::Unattended-Upgrade "1"` (daily timers active).
 - Packages added: nginx-light, dehydrated, nftables, rsync, zstd, gnupg,
   ca-certificates, git, wget, curl, bind9-host, and for the runner lxc,
-  lxc-templates, kcov, bats, shellcheck, python3-yaml, libicu76, file.
+  lxc-templates, kcov, bats, shellcheck, python3-yaml, libicu76, file, and
+  uidmap (with libsubid5, 2026-10-01, for unprivileged containers).
   No Docker, no Kubernetes.
 
 ## 2. Names and what each serves
@@ -362,8 +366,7 @@ GitHub Actions runner 2.337.0 at `/home/runner/actions-runner`, user
 `actions-runner.service` (`User=runner`, `run.sh`, `Restart=always`),
 enabled. `gh api orgs/keel-linux/actions/runners` showed it online on
 2026-09-26 and the organization variable `KEEL_LXC_RUNNER` was then set to
-`true`. Sudo for `runner` is limited to `apt-get`, the `lxc-*` commands and
-the two appliance gate entry points below (`/etc/sudoers.d/runner`);
+`true`. `runner` has no sudo since 2026-10-01 (below);
 `lxc-net` provides `lxcbr0` for boot tests.
 
 What the runner host does not have, on purpose: fab, deck, buildtasks, the
@@ -373,27 +376,41 @@ later, the signing subkey. `test-appliance.yml` in `keel-linux/.github` was
 rewritten on 2026-09-26 to match: it fetches the layers from
 `https://mirror.keellinux.org/layers` over IPv6, verifies them, assembles the
 chain into a scratch rootfs, boots it and runs the appliance repository's
-`tests/boot-test.sh` against it. It builds nothing. `build-deb.yml`
-(dpkg-buildpackage) still needs `build-essential devscripts equivs fakeroot
-dpkg-dev` on this host; they are not installed and should be added when the
-first package job is enabled.
+`tests/boot-test.sh` against it. It builds nothing. Debian packages are
+built by `lxc-trixie.yml` (Keel-Linux/.github#17) inside an unprivileged
+container, which retires `build-deb.yml`; no build package goes on this
+host.
 
 ### What the appliance gate may do here
 
-Assembling a rootfs and starting a container need root, and the boot test is
-code from the appliance repository, so the rule is that the runner user may
-start two fixed commands and nothing else. Both are written by
-`keel-provision` and both check their own arguments before acting:
+Nothing as root. Until 2026-10-01 the runner reached root through
+`/etc/sudoers.d/runner` (`apt-get`, the `lxc-*` commands and two entry
+points, `keel-ci-boot-test` and `keel-ci-cleanup`), every one of them
+root-equivalent. All of that is gone. The runner starts its own
+unprivileged containers: subordinate ids `165536`-`231071`
+(`/etc/subuid`, `/etc/subgid`), ten veths on `lxcbr0`
+(`/etc/lxc/lxc-usernet`), the defaults in
+`/home/runner/.config/lxc/default.conf` (idmap and the AppArmor profile
+`lxc-container-default-with-nesting`) and a lingering user manager,
+`user@1001.service`, whose delegated cgroup the containers run in. The
+appliance's boot test runs as root of a user namespace through
+`bin/unprivileged-lxc` of `keel-linux/.github`. `keel-provision` writes all
+of it. How it was done, the proof and the rollback: docs/ci-cd.md section 6,
+"Without sudo".
 
-| Command | What it does |
-| --- | --- |
-| `/usr/local/sbin/keel-ci-boot-test WORKSPACE SCRATCH APPLIANCE [options]` | runs `WORKSPACE/tests/boot-test.sh` as root with the job's keel checkout (`WORKSPACE/.keel/bin`) first in `PATH`. Refuses a workspace outside `/home/runner/actions-runner/_work`, a scratch directory outside `/var/tmp/keel-ci`, any path holding `..`, an appliance name outside `[a-z0-9-]`, and a missing or non executable boot test |
-| `/usr/local/sbin/keel-ci-cleanup NAME SCRATCH` | `lxc-stop -k`, `lxc-destroy -f` and `rm -rf` of that one scratch tree. Same path and name checks. Safe to call twice and after a failure, which is how the workflow's cleanup step uses it |
+`/var/tmp/keel-ci` is owned by `runner`, so a job creates its own scratch
+tree without root, and each run uses its own container name and its own tree
+(`keel-<appliance>-ci-<run id>-<attempt>`), so two runs never collide. The
+rootfs in it belongs to the subordinate ids, so it is removed through the
+same user namespace (`unprivileged-lxc cleanup`).
 
-There is no `ALL` command in `/etc/sudoers.d/runner`. `/var/tmp/keel-ci` is
-owned by `runner`, so a job creates its own scratch tree without root, and
-each run uses its own container name and its own tree
-(`keel-<appliance>-ci-<run id>-<attempt>`), so two runs never collide.
+Around every job, and as root before every start of the service, the
+runner's home, user units, containers, leftover processes, temporary files
+and work tree are reset (`keel-hardening.conf` drop-in of
+`actions-runner.service`, `job-reset.sh`, `keel-runner-start-reset`). That is
+hygiene, not a boundary: a job runs as the same uid as the runner and can
+read its registration credentials. docs/ci-cd.md section 6, "What a job can
+still do", says what that leaves and the options to close it.
 
 Container networking: the boot test joins `lxcbr0`. The dnsmasq `lxc-net`
 starts runs with `--dhcp-range=fc42:5009:ba4b:5ab0::1,ra-only`, so a container
@@ -405,7 +422,8 @@ VM's public `2804:710:d0:5::/64`, as the build host does for its long lived
 containers, but a host cannot talk to its own macvlan children, so those
 checks would have nowhere to run from; the bridge is the right choice for a
 throwaway CI container and it adds no MAC to the public segment. `apparmor`
-4.1.0 is installed, which `lxc-start` needs for the generated profile.
+4.1.0 is installed and loads the `lxc-container-default-with-nesting`
+profile the runner's containers use.
 
 One thing to know about this host: it resolves its own public names to
 itself. `resolvectl query mirror.keellinux.org` answers `127.0.1.1`, `Data
@@ -422,8 +440,8 @@ started with a global IPv6 address in 5 s, first boot finished 5 s later,
 `keel diff` 6 same and 0 drift, 30 s for the whole job. Against `nodebb`:
 `keel pull` of the three layers, 598 MB, 7 s, assemble 43 s, container up in
 5 s, then a real failure of the published layer (docs/ci-cd.md section 7).
-Both containers and both scratch trees were removed with `keel-ci-cleanup`;
-nothing else on the VM was touched.
+Both containers and both scratch trees were removed with `keel-ci-cleanup`,
+the root helper of that time; nothing else on the VM was touched.
 
 ## 8. Units and timers
 
@@ -433,7 +451,8 @@ nothing else on the VM was touched.
 | `nftables.service` | firewall |
 | `dehydrated.timer` -> `dehydrated.service` | daily renewal check |
 | `keel-site-pull.timer` -> `keel-site-pull.service` | site checkout, every 15 minutes, user `site` |
-| `actions-runner.service` | GitHub Actions runner |
+| `actions-runner.service` | GitHub Actions runner; drop-in `keel-hardening.conf` (reset before every start, job hooks) |
+| `user@1001.service` | the runner's user manager, kept by linger; its delegated scopes hold the CI containers |
 | `lxc.service`, `lxc-net.service`, `lxc-monitord.service` | LXC for the runner |
 | `apt-daily.timer`, `apt-daily-upgrade.timer` | unattended-upgrades |
 
@@ -472,13 +491,10 @@ nothing else on the VM was touched.
   passes `sh -n` and shellcheck and only has to be installed:
   `install -m 0755 -o root -g root keel-provision.pending
   /usr/local/sbin/keel-provision`. Until then, do not run `keel-provision`.
-- **Fork pull requests.** The Default runner group was opened to public
-  repositories on 2026-09-26 so the appliance gate could run, which means a
-  workflow from a fork could in principle reach this VM. Set the fork pull
-  request policy to require approval for all outside contributors. Every pull
-  request so far comes from a branch of the repository itself, so nothing
-  unreviewed has run here, but the setting is what keeps that true.
-- `build-deb.yml` build dependencies on the runner host (section 7).
+- **Fork pull requests**: done on 2026-10-01. The fork pull request policy
+  requires approval for all outside contributors (docs/ci-cd.md section 5),
+  and a job that does reach the runner is no longer root on this VM
+  (section 7).
 - IPv4: the A records point at addresses that do not forward 80 and 443 to
   the VM; either the cluster adds the forwarding or the A records go.
 

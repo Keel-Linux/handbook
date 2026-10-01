@@ -7,10 +7,10 @@ and 3. Coverage standard: decisions 0003 and 0004.
 
 | Piece | Where | State |
 | --- | --- | --- |
-| Reusable workflows | `keel-linux/.github`, `.github/workflows/` | `test-python.yml`, `test-shell.yml`, `test-appliance.yml`, `build-deb.yml`; documented in `profile/WORKFLOWS.md` |
+| Reusable workflows | `keel-linux/.github`, `.github/workflows/` | `test-python.yml`, `test-shell.yml`, `test-appliance.yml`, and `lxc-trixie.yml` once Keel-Linux/.github#17 merges (it retires `build-deb.yml`); documented in `profile/WORKFLOWS.md` |
 | Unit tests and coverage gate | hosted `ubuntu-latest` runners (plain virtual machines, no `container:` jobs, no images) | active in eight repositories |
 | Appliance boot test | self-hosted runner `keel-lxc-1`, labels `self-hosted, keel-lxc`, on the public services VM (docs/releases-host.md) | online since 2026-09-26. `test-appliance.yml` fetches the layers from `https://mirror.keellinux.org/layers`, verifies, assembles, boots in LXC and runs the repository's `tests/boot-test.sh`; it builds nothing, because the runner has no fab, deck or buildtasks. Callers: keel-core and keel-nodebb. First green CI run on keel-core 2026-09-26, 39 seconds; required on `master` since |
-| Debian packages | the same runner | `build-deb.yml` unchanged and still inactive: `build-essential devscripts equivs fakeroot dpkg-dev` are not installed on the runner host |
+| Debian packages | the same runner, inside an unprivileged trixie container per job | `lxc-trixie.yml` (Keel-Linux/.github#17), which retires `build-deb.yml`; no build package is installed on the runner host itself |
 | Site | GitHub Pages, `keel-linux/keel-linux.github.io`, branch `main`, path `/`; the same checkout served at `https://www.keellinux.org/` and the apex by the public services VM (pull every 15 minutes) | published |
 
 Each repository carries one ten-line caller, `.github/workflows/tests.yml`,
@@ -35,8 +35,8 @@ An appliance repository carries a second caller job, `appliance`, which calls
 
     appliance / build-and-boot
 
-The remaining name, for later: `package / deb` (build-deb.yml, caller job id
-`package`).
+The package check comes from `lxc-trixie.yml` (Keel-Linux/.github#17), which
+retires `build-deb.yml` and its `package / deb`.
 
 ## 3. Per-repository thresholds
 
@@ -163,8 +163,8 @@ Rules for the number:
   carries the same protection as the other repositories.
 - **Runner registration**: done 2026-09-26, section 6.
 - **Organization variable `KEEL_LXC_RUNNER`** was set to `true` on
-  2026-09-26 after the runner showed online. Callers of `build-deb.yml` and
-  `test-appliance.yml` gate on `if: vars.KEEL_LXC_RUNNER == 'true'` so no job
+  2026-09-26 after the runner showed online. Callers of the `keel-lxc`
+  workflows gate on `if: vars.KEEL_LXC_RUNNER == 'true'` so no job
   sits queued for 24 hours against a label no runner carries; set it back to
   `false` if the runner goes away.
 - **Runner group: public repositories, opened 2026-09-26.** Runner group 1
@@ -177,11 +177,17 @@ Rules for the number:
         echo '{"allows_public_repositories":true}' \
           | gh api --method PATCH /orgs/keel-linux/actions/runner-groups/1 --input -
 
-  **Still to do, and it matters:** a self-hosted runner that serves public
-  repositories must never run code from an unreviewed fork. Set the fork pull
-  request policy to require approval for all outside contributors. Every pull
-  request so far comes from a branch of the repository itself, not a fork, so
-  nothing unreviewed has run, but the setting is what keeps that true.
+  A self-hosted runner that serves public repositories must never run code
+  from an unreviewed fork. Until 2026-10-01 the fork pull request policy
+  only held back first-time contributors; it now requires approval for all
+  outside contributors:
+
+        gh api -X PUT orgs/keel-linux/actions/permissions/fork-pr-contributor-approval \
+          -f approval_policy=all_external_contributors
+
+  Every pull request until then came from a branch of the repository itself,
+  not a fork, so nothing unreviewed has run. Section 6 says what else
+  changed on the runner that day.
 - **A queued job carries the workflow definition it was queued with.** The
   runs that had piled up against the closed runner group were expanded from
   the old `test-appliance.yml` and ran `bt-layer` when they were finally let
@@ -201,8 +207,9 @@ systemd, LXC for boot tests and outbound IPv4 for the GitHub API (which has
 no IPv6). Commands as root unless stated.
 
 1. Packages: `lxc lxc-templates kcov bats shellcheck python3-yaml zstd git
-   curl libicu76 file`. User `runner` with sudo limited to `apt-get` and the
-   `lxc-*` commands (`/etc/sudoers.d/runner`).
+   curl libicu76 file`, and `uidmap` since 2026-10-01. User `runner`, which
+   had sudo for `apt-get` and the `lxc-*` commands until 2026-10-01 and has
+   none now (see "Without sudo" below).
 2. Runner 2.337.0 unpacked in `/home/runner/actions-runner` (tarball from
    `github.com/actions/runner/releases`, version read with
    `gh api repos/actions/runner/releases/latest --jq .tag_name`).
@@ -238,13 +245,18 @@ host (docs/build-host.md). What that cost, and how it was settled on
   `keel pull` into a scratch cache and `keel verify` (0, 8 and 9 pass; 6 and
   7 fail), then hands the assemble, the boot and the checks to the
   repository's `tests/boot-test.sh`, run as root through
-  `/usr/local/sbin/keel-ci-boot-test`. Every run gets its own container name
+  `/usr/local/sbin/keel-ci-boot-test` until 2026-10-01 and as root of a user
+  namespace through `bin/unprivileged-lxc` of `keel-linux/.github` since
+  (see "Without sudo" below). Every run gets its own container name
   and scratch tree, `keel-<appliance>-ci-<run id>-<attempt>`, and a cleanup
   step with `if: always()` destroys both. When the manifest is not on the
-  mirror the job passes with a notice and an "Appliance test skipped"
-  section in the job summary, so a repository whose layer was never
-  published does not fail forever. Only a 404 is a skip: a name that does
-  not resolve, a refused connection or a 5xx fails the job, because a skip
+  mirror the job fails, since 2026-09-28: it used to pass with a notice, and
+  a notice is not a conclusion, so a repository whose layer was never
+  published read green having booted nothing. A repository whose first
+  layer does not exist yet says so with `allow_unpublished: true`, which
+  becomes an error once the layer is published. Only a 404 means "not
+  published": a name that does not resolve, a refused connection or a 5xx
+  fails the job either way, because reading an outage as "not published"
   on an outage is a green check that tested nothing. That distinction was
   added after a rehearsal on the runner skipped for the wrong reason
   (`.github` pull request #4).
@@ -254,17 +266,15 @@ host (docs/build-host.md). What that cost, and how it was settled on
   install. The checkout needs only python3 and PyYAML, both on the runner,
   and the job summary records the commit it resolved to. When the archive is
   signed, the two lines that clone become an `apt-get install keel`.
-- `build-deb.yml` still needs `build-essential devscripts equivs fakeroot
-  dpkg-dev` on the runner host; not installed.
-- What the runner needed beyond the packages it already had: `apparmor`
-  (4.1.0, already present, `lxc-start` needs it for the generated profile);
-  `/var/tmp/keel-ci` owned by `runner`; two root-owned entry points,
-  `keel-ci-boot-test` and `keel-ci-cleanup`, added to
-  `/etc/sudoers.d/runner` next to `apt-get` and the `lxc-*` commands, each
-  checking that it acts only on a workspace under
-  `/home/runner/actions-runner/_work` and a scratch tree under
-  `/var/tmp/keel-ci`. No blanket sudo. Both are written by
-  `keel-provision` (docs/releases-host.md section 7).
+- Debian packages are built by `lxc-trixie.yml` (Keel-Linux/.github#17)
+  inside an unprivileged container, which retires `build-deb.yml`; no build
+  package is installed on the runner host.
+- What the runner needed beyond the packages it already had, on
+  2026-09-26: `apparmor` (4.1.0, already present); `/var/tmp/keel-ci` owned
+  by `runner`; two root-owned entry points, `keel-ci-boot-test` and
+  `keel-ci-cleanup`, added to `/etc/sudoers.d/runner` next to `apt-get` and
+  the `lxc-*` commands. That sudo policy was root-equivalent, and on
+  2026-10-01 it was removed together with both entry points (below).
 - Address family for the mirror: the probe and `keel pull` let the resolver
   choose rather than forcing IPv6. The mirror is served by the same VM the
   runner runs on, and that VM resolves its own public names to itself
@@ -314,17 +324,258 @@ found a real defect on its first run, which is what it is for; until the
 layer is rebuilt, `appliance / build-and-boot` is not a required status on
 keel-nodebb.
 
+### Without sudo (2026-10-01)
+
+Every command the runner could run through sudo was root-equivalent:
+`apt-get` installs any `.deb`, `lxc-start` takes a config that mounts any
+host path, `lxc-attach` enters whatever it is pointed at. So any job on
+`keel-lxc-1` could become root on the VM that serves keellinux.org, the
+archive, the mirror and the releases. The runner now has no sudo at all and
+boots unprivileged containers. Commands as root on the VM.
+
+What changed on the host, file by file (backups of every file before the
+change in `/root/keel-runner-hardening-2026-10-01/`, with `dpkg -l` and the
+linger state as they were):
+
+| Path | Change |
+| --- | --- |
+| `/etc/sudoers.d/runner` | removed; `sudo -l -U runner` answers "not allowed to run sudo" |
+| `/usr/local/sbin/keel-ci-boot-test`, `keel-ci-cleanup` | removed |
+| `/usr/local/sbin/keel-provision` | the users and appliance gate sections no longer write the sudoers file and the helpers; they remove them and write what follows. `docs/infra/keel-provision.pending` carries the same change |
+| `/etc/subuid`, `/etc/subgid` | unchanged: `runner:165536:65536` was already there, given by `useradd` |
+| `/etc/lxc/lxc-usernet` | new, `runner veth lxcbr0 10` |
+| `/home/runner/.config/lxc/default.conf` | new: veth on `lxcbr0`, `lxc.idmap` u and g `0 165536 65536`, `lxc.apparmor.profile = lxc-container-default-with-nesting` |
+| `/var/lib/systemd/linger/runner` | `loginctl enable-linger runner`, so `user@1001.service` runs without a login and its cgroup is delegated to `runner` |
+| `actions-runner.service` | unchanged, never restarted |
+
+Installed: `uidmap` (and its library `libsubid5`), nothing else.
+`dbus-user-session` is not needed: LXC's own attempt to create a scope over
+D-Bus fails harmlessly, and the scope comes from `systemd-run --user`,
+which talks to the user manager over its private socket. None of the build
+packages (`build-essential devscripts equivs fakeroot dpkg-dev lintian
+git-buildpackage pristine-tar autopkgtest`) is on the host; package builds
+belong in unprivileged containers.
+
+Three things an unprivileged container needs here, each found by failing:
+
+- The AppArmor profile. `/etc/lxc/default.conf` says `generated`, which
+  needs `mac_admin`; `lxc-container-default-cgns` loads but denies the
+  `rbind` mounts systemd uses to sandbox its services, so networkd,
+  resolved and udevd fail and the container has no DNS.
+  `lxc-container-default-with-nesting`, preloaded by `apparmor.service`,
+  allows exactly those. What still fails in the container is the usual set
+  for an unprivileged one (`dev-mqueue`, `run-lock`, `sys-kernel-config`,
+  `sys-kernel-debug` and `tmp` mounts), so it reports `degraded`.
+  AppArmor is not the boundary here, and nothing should rely on it: the job
+  writes its own LXC config and can name any profile it likes, `unconfined`
+  included. The boundary is uid 1001 and the user namespace: container root
+  is uid 165536 on the host, with no capability outside the namespace, and
+  `runner` itself has no sudo, no group and no setuid helper beyond
+  `newuidmap`, `newgidmap` and `lxc-user-nic`.
+- A cgroup it may write. The runner's jobs live in
+  `system.slice/actions-runner.service`, owned by root. `lxc-start` runs in
+  `systemd-run --user --scope -p Delegate=yes`, and `lxc-attach` in
+  `systemd-run --user --scope`, because attaching moves the process into
+  the container's cgroup and that needs write access to a common ancestor.
+  `XDG_RUNTIME_DIR=/run/user/1001` is all the job needs to reach the user
+  manager.
+- Device nodes. A user namespace may not `mknod`, so the extract of a layer
+  fails on the nine nodes under `/dev`. LXC mounts its own `/dev` over the
+  rootfs, so they are never seen.
+
+The appliance boot test. Each of the nine appliance repositories carries its
+own `tests/boot-test.sh`, and every one insists on root. Rather than change
+nine repositories, `test-appliance.yml` runs the test through
+`bin/unprivileged-lxc` of `keel-linux/.github` (`profile/WORKFLOWS.md`
+there, "Without root on the runner"): the test is root in a user namespace
+mapped onto `165536`-`231071` plus the runner's own uid at 65536, so the
+assembled rootfs has the owners the container sees; its `lxc-*` commands
+are forwarded to a broker outside the namespace that adds the idmap and the
+profile to `lxc-start`; and `tar` forgives only the device node refusal.
+
+Proof, in this order:
+
+- A Debian trixie container made with `lxc-create -t download -- -d debian
+  -r trixie -a amd64` as `runner` booted systemd (`degraded`, for the mounts
+  above), got `fc42:5009:ba4b:5ab0:308a:4aff:febd:97ed/64` by SLAAC, with
+  DNS from the bridge, and ran `apt-get install hello`. The container ran
+  as uid 165536 under `lxc-container-default-with-nesting (enforce)`.
+- keel-core's `tests/boot-test.sh` by hand as `runner`, against the published
+  `core` layer: passed in 27 s, `keel diff` 6 same, 0 drift.
+- keel-core run 36814690796, a temporary caller pointed at the
+  `ci/unprivileged-boot-test` branch of `keel-linux/.github`, with sudo
+  still in place and unused: `appliance / boot-published-layer` green in
+  44 s.
+- The sudoers file and the helpers removed, then keel-core run 36814955977,
+  same caller: green in 44 s, address in 6 s, first boot 5 s later, 0
+  monitors left, scratch tree gone.
+
+GitHub settings changed the same day: the fork pull request policy (section
+5), and, after the security review below, the runner group.
+
+What could not be done unprivileged: nothing the appliance gate needs.
+`build-deb.yml` called `sudo apt-get` for build dependencies; nothing
+called it, and `lxc-trixie.yml` (Keel-Linux/.github#17), which builds in an
+unprivileged container, retires it.
+
+### After the security review (2026-10-01)
+
+A review after Keel-Linux/.github#16 merged found no path to root on the
+host and no reach to signing keys (there are none on this VM), and four
+things to fix.
+
+**Fork code on the VM.** A fork's pull request, once someone clicked
+"Approve and run", still ran here. Three layers now:
+
+- The workflows (Keel-Linux/.github#18). The `keel-lxc` jobs of
+  `test-appliance.yml` and `build-deb.yml` skip `pull_request_target` and
+  any `pull_request` whose head repository is not the repository itself,
+  as `lxc-trixie.yml` already did. A skipped job reports success and
+  branch protection counts a skipped required check as passed, so on a
+  fork's pull request `appliance / boot-published-layer` shows as skipped,
+  not failed. `test-appliance.yml` therefore also runs `fork-not-booted` on
+  a hosted runner in exactly that case, which fails with the reason; it
+  blocks a merge only where `appliance / fork-not-booted` is a required
+  check (harmless to require: it is skipped on every other pull request).
+- The runner group: **not yet restricted.** `restricted_to_workflows` was
+  switched on briefly (05:00 to 05:17 UTC) and lifted again at the
+  coordinator's request, because the API refuses a workflow that does not
+  exist at the ref, and the CI migration's `lxc-trixie.yml`
+  (Keel-Linux/.github#17) is not on `main` yet while its callers point at
+  `@ci/lxc-trixie`. Once #17 is merged and the callers use `@main`, the
+  list is the org's reusable workflows that target `keel-lxc`, at
+  `refs/heads/main` only (a branch is writable by any member with write
+  access). `build-deb.yml` is not on it: #17 deletes it.
+  Any new reusable workflow that targets `keel-lxc` gets the runner only
+  once it is on this list. To set it, send the whole list:
+
+        gh api -X PATCH orgs/keel-linux/actions/runner-groups/1 --input - <<'JSON'
+        {"restricted_to_workflows": true, "selected_workflows": [
+          "Keel-Linux/.github/.github/workflows/test-appliance.yml@refs/heads/main",
+          "Keel-Linux/.github/.github/workflows/lxc-trixie.yml@refs/heads/main"]}
+        JSON
+
+- The runner is not ephemeral, see "What a job can still do" below.
+
+**The firewall.** `lxcbr0` used to be accepted wholesale. Now a container
+reaches this host only on DNS (53, UDP and TCP) and DHCP (67, 547); sshd,
+nginx and everything else on the host are dropped from `lxcbr0`, through
+the bridge address and through the public one alike. Forwarding from
+`lxcbr0` drops private IPv4 (10/8, which holds the LAN 10.88.5.0/24,
+172.16/12, 192.168/16, 169.254/16, 100.64/10), ULA, link local and
+`2804:710:d0:5::/64`, the public segment this VM shares with the build host
+and the forum appliance; everything else, the internet, is allowed.
+`/etc/nftables.conf` and `keel-provision` carry the same rules. The live
+change was made by handle, not with `nft -f /etc/nftables.conf`, whose
+`flush ruleset` would also drop the NAT tables of `lxc-net`. Checked from an
+unprivileged trixie container: `apt-get install hello` and github.com:443
+work; host :22 (bridge IPv4 and IPv6, public IPv6, LAN IPv4), host :443,
+10.88.5.1 and the build host on the public segment are all blocked. The
+sites kept answering 200 throughout.
+
+**Job hygiene.** Two layers, written by `keel-provision`:
+
+- `ACTIONS_RUNNER_HOOK_JOB_STARTED` and `_COMPLETED`, set in
+  `/etc/systemd/system/actions-runner.service.d/keel-hardening.conf`, run
+  `/usr/local/libexec/keel-runner/job-reset.sh` (root owned; the runner
+  refuses a hook path that does not end in `.sh`) as `runner` around
+  every job. It stops every user unit, timer, socket and container scope,
+  removes `~/.config/systemd` and `~/.local/share/systemd`, kills processes
+  in the service's cgroup that are not the hook's own ancestors, resets the
+  home directory to the skeleton dotfiles, the LXC defaults and the
+  runner's `.env` (from `/usr/local/share/keel-runner/`), removes the
+  runner's files in `/tmp`, `/var/tmp`, `/dev/shm` and `/var/tmp/keel-ci`,
+  and after the job empties `_work` except `_temp`, which takes the cached
+  actions and the checkouts with it.
+- `ExecStartPre=+/usr/local/sbin/keel-runner-start-reset`, as root, before
+  every start of the service: stops `user@1001.service` (every container
+  with it), kills every process of uid runner, resets the home directory,
+  `.env`, `_work`, the scratch root and the runner's temporary files, and
+  starts the user manager again. A job that kills the runner to dodge the
+  hooks lands here.
+
+Verified: keel-core run 36772014959, attempt 3, `appliance /
+boot-published-layer` green in 43 s from `test-appliance.yml@main`, with
+both hooks in the log ("stopping user units", "work tree emptied").
+
+### What a job can still do
+
+Honestly: a job on `keel-lxc-1` runs as uid 1001, the same uid as
+`Runner.Listener`. It cannot become root and cannot reach the web roots,
+the other services or the LAN, but within uid 1001:
+
+- It can read `/home/runner/actions-runner/.credentials` and
+  `.credentials_rsaparams`, the runner's registration with the
+  organization, and so impersonate `keel-lxc-1` from anywhere and receive
+  later jobs, with their tokens, until the runner is removed. There is no
+  way to keep a file from a process of the same uid that the listener must
+  read, and `kernel.yama.ptrace_scope` is 0, so the listener's memory is
+  readable too. Making the files root owned breaks the listener.
+- It can modify the runner itself (`bin/`, `externals/`, `run.sh`), which
+  runs every later job. Neither hook can undo that; restoring the tree as
+  root would fight the runner's own self-update.
+- It can leave a process outside the service's cgroup only through the
+  user manager, which the hooks and the start reset stop.
+
+The fix for both is an ephemeral runner that registers itself for exactly
+one job. `config.sh --ephemeral`, or better a just-in-time config
+(`POST /orgs/keel-linux/actions/runners/generate-jitconfig`), needs a
+credential that can register runners, every time. Options, none applied:
+
+1. A GitHub App owned by the organization with only the "Self-hosted
+   runners: read and write" organization permission, its private key on the
+   VM readable by root only, and a root service that mints an installation
+   token, asks for a JIT config and starts one runner with it as `runner`
+   from a pristine copy. A job never sees the key (another uid), and a JIT
+   config it steals is spent. The key can register and remove runners in
+   the organization and nothing else.
+2. The same with the key off the VM: a scheduled job elsewhere (the build
+   host, or a hosted workflow holding the key as a secret) generates JIT
+   configs and hands them over SSH to a root-only spool on the VM. Nothing
+   long lived on the VM, more moving parts.
+3. A fine-grained personal access token with the same permission instead of
+   an App: like option 1, but tied to a person and their account's fate.
+   Not recommended.
+
+Until one of those is in place the residual risk is wider than the fork
+guard suggests. While runner group 1 is not restricted to workflows, any
+member who can push a branch to any repository of the organization can
+point a workflow at `keel-lxc` and get a job onto this VM. Restricted or
+not, the appliance gate runs the branch's own `tests/boot-test.sh` as uid
+1001, so a branch of any appliance repository runs arbitrary code here; that
+code can read `.credentials` and `.credentials_rsaparams`, ptrace
+`Runner.Listener` (`ptrace_scope` is 0) and modify the runner, and so take
+over the registration and see every later job and its tokens. What it
+cannot do is reach root, the sites' files or the LAN.
+
+Two disruptions while this was done. A manual run of `job-reset` while the
+runner was busy stopped the container of coreruleset run 36815956699 (CI
+migration, exit 143); it was re-run and passed. When the firewall rules
+went in, the `lxcbr0` drop landed above the DNS accept for about a minute
+(04:47 to 04:48 UTC) before it was reordered. The first install of the hooks
+named them without `.sh`, which the runner refuses, so every job failed in
+"Set up runner" from 05:08 to 05:13 UTC (keel-core 36772014959 attempt 2,
+re-run green as attempt 3; common 36818461545); the runner then took two
+minutes to clear its session conflict after the restart.
+
+Rollback: `/root/keel-runner-hardening-2026-10-01/ROLLBACK.txt` on the VM,
+both rounds, in order: the hooks, the firewall (by handle, not with
+`nft -f`), then sudo and the helpers, stopping `user@1001.service` and the
+containers before `loginctl disable-linger runner`, removing
+`~runner/.cache`, and on GitHub reverting #16 and #18 and lifting the
+workflow restriction. The fork pull request policy stays.
+
 ## 7. CD: what is published where today
 
 | Artifact | Published to | Mechanism | State |
 | --- | --- | --- | --- |
 | Organization site | `https://keel-linux.github.io/` | GitHub Pages from `main` at `/` (build type legacy, `.nojekyll`, HTTPS enforced); a push to `main` is the deployment | live, `GET /repos/keel-linux/keel-linux.github.io/pages` reports `status: built`. If it is ever disabled: `POST /repos/keel-linux/keel-linux.github.io/pages` with `{"source": {"branch": "main", "path": "/"}}` |
-| Debian packages | workflow artifacts only (`build-deb.yml`, artifact `deb`, 30 days) | `dpkg-buildpackage -us -uc -b` on the LXC runner | inactive until the runner exists; nothing is signed |
+| Debian packages | workflow artifacts only (`lxc-trixie.yml`, Keel-Linux/.github#17) | built inside an unprivileged trixie container on the LXC runner | in review; nothing is signed |
 | APT repository | `https://archive.keellinux.org/` (README only) | `bin/publish` in repos/apt, target to be switched from Pages to this host | blocked on the signing key (decision 0005) |
 | Appliance layers and manifests | `https://mirror.keellinux.org/layers/` (staging, unsigned, header `X-Keel-Distribution`) | staged on the build host and published by `bin/keel-publish-mirror` (docs/releases-host.md section 6, publishing a layer) | `core`, `lamp`, `nodejs-nginx` and `nodebb` served; `nodebb` published 2026-09-26 so the appliance gate had something to boot; signed manifests blocked on the key |
 
 The APT repository, the keyring package and layer publication follow the
 decision 0005 outcome; when it lands, the publication step is added to
-`build-deb.yml` (upload of the signed `.deb` and `Release` to the chosen
+the reusable package workflow (upload of the signed `.deb` and `Release` to the chosen
 host over IPv6, `archive.keellinux.org` at `[2804:710:d0:5::13]`), not to the
 callers.
