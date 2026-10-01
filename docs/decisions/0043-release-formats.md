@@ -1,23 +1,29 @@
 # 0043: Release formats
 
 Date: 2026-10-01
-Status: **proposed**, waiting on the maintainer. Nothing here is built
-except the first fix it depends on (Keel-Linux/buildtasks#16, the machine-id
-of the ISO and the images made from it, tracker#24). Decided parts of 0005,
-0012, 0016 and 0039 are restated only where this note builds on them.
+Status: **decided by the maintainer, 2026-10-01**: Keel publishes two
+formats, the ISO and the `.tar.zst`. The decision is under "Decision";
+what was proposed and not taken is under "Resolved". Nothing here is built
+except the first fix it depends on (Keel-Linux/buildtasks#16, the
+machine-id of the ISO, tracker#24). Decided parts of 0005, 0012, 0016 and
+0039 are restated only where this note builds on them.
 
-The maintainer's requirements, 2026-10-01:
+The maintainer's requirements, 2026-10-01, before the proposal:
 
 - Keel releases are published in **every format TurnKey Linux shipped**,
   not only the Proxmox `.tar.zst`: the ISO, the VMware formats and the
   others;
-- **Docker is out.** The project ships system containers only;
+- **Docker is out** as a format of its own. The project ships system
+  containers only;
 - images are also published as **GitHub Releases** on each appliance
   repository. The first was published by hand on 2026-10-01:
   [keel-core `testing-19.0-3-step4-20260930`](https://github.com/Keel-Linux/keel-core/releases/tag/testing-19.0-3-step4-20260930),
   the `.tar.zst` and its `.sha512`, marked unsigned and not for production.
   Uploads happen from the build host or an attended step, **never from the
   CI runner**.
+
+The evidence below led the maintainer to cut the list to two files rather
+than rebuild TurnKey's whole set.
 
 ## What TurnKey ships, measured on 2026-10-01
 
@@ -81,108 +87,132 @@ the passphrase and the agent forgets it after ten minutes. `keel-release`
 does everything that needs no key first and signs last, and
 `keel-release --sign-only <date>` signs what is staged without rebuilding.
 
-## Decision proposed
+## Decision
 
-### 1. The formats
+### 1. Two formats
 
-| TurnKey format | Keel | Why |
+A release of one appliance publishes **two files**, the same root
+filesystem in two wrappers:
+
+| File | Covers | Made by |
 | --- | --- | --- |
-| Proxmox / LXC `.tar.gz` | **kept**, as today's `.tar.zst` | the primary format; Proxmox VE reads zstd templates |
-| Hybrid ISO | **kept** | bare metal, and any hypervisor that installs from an ISO (Hyper-V, XenServer, KVM) |
-| OVA | **kept** | VMware and VirtualBox import by double click; built without `ovftool` |
-| VMDK zip with `.vmx` | **kept, last** | the same disk as the OVA; for old VMware products and KVM users who want a ready disk |
-| OpenStack qcow2 | **kept as one qcow2** | KVM, libvirt, Proxmox VM and OpenStack read the same file; see "headless" below |
-| Xen `.tar.bz2` | **dropped** | Xen HVM boots the qcow2 or the ISO, and the template is already a root filesystem tarball for PV; TurnKey stopped in 15.x |
-| Docker | **dropped** | system containers only (maintainer, 2026-10-01): the template is the container format |
-| `bt-qemu-docker` | **dropped** | Docker |
-| AWS AMI (`bt-ec2`) | **not now** | not a file: needs an AWS account and a key there; the qcow2 imports into EC2 with `vmimport` if someone asks |
-| OpenStack AMI tarball, Open Telekom Cloud | **dropped** | the qcow2 covers both |
-| ARM raw image (`bt-img`, `bt-prepqemu`) | **not now** | Keel is amd64 only today |
+| `.iso`, hybrid, BIOS and UEFI | VMware, VirtualBox, Proxmox VE virtual machines, Hyper-V, KVM, bare metal: boot it and install with `tkl-installer`, or run it live | `bt-iso` on the build host |
+| `.tar.zst` | Proxmox VE containers and LXC, as today; Docker through `docker import` (section 2) | `bt-layer` and `keel assemble` on the build host, as today |
 
-So a release of one appliance is **four files**: `.tar.zst`, `.iso`,
-`.qcow2`, `.ova`, and a fifth, `-vmdk.zip`, once the other four are proven.
+Nothing else is published: no OVA, VMDK or qcow2 download, no Xen tarball,
+no Docker image format, no AMI, no ARM image. TurnKey itself stopped
+publishing the VM, OpenStack and Xen builds after 15.x (above), and every
+hypervisor among them installs from the ISO.
 
-**Headless.** TurnKey's qcow2, Xen and container builds are headless: no
-console at first boot, random passwords written to the log. Keel's qcow2 is
-**not** headless: it boots to the same first boot screens as the ISO and
-the template on Proxmox, because that is what Proxmox VE and libvirt users
-see, and the headless path of Keel is still open (inithooks#31). An
-OpenStack image with cloud metadata is a later variant, decided when
-someone needs it.
+Both formats go to **Core and Web** first, since they are what Phases 1 and
+3 deliver (tracker#46). The other appliances keep the `.tar.zst` and get
+the ISO one by one, each after its first boot was run from that ISO. A
+format is never published for an appliance whose first boot was not run in
+it.
 
-### 2. Which appliances
+### 2. Docker, from the same `.tar.zst`
 
-- **Core and Web** first, in all four formats, because they are what Phases
-  1 and 3 deliver (tracker#46) and what everything else is built on.
-- **The others** (mariadb, postgresql, redis, wordpress, lamp, and the
-  appliances 0034 brings) keep the template only, and get the other formats
-  one by one, each after its boot test passes in that format. A format is
-  never published for an appliance whose first boot was not run in it.
+`docker import` reads the template as it is:
 
-### 3. Names
+    docker import debian-13-keel-core_19.0-3_amd64.tar.zst keel/core:19.0-3
 
-TurnKey's Proxmox naming, for every format, because it is the one Keel
-already publishes and `bt-aplinfo` parses:
+zstd is read since **Docker Engine 23.0**: its release notes list "Add
+support for pulling `zstd` compressed layers"
+([moby/moby#41759](https://github.com/moby/moby/pull/41759), in
+`pkg/archive`), and `docker import` decompresses through that same
+`archive.DecompressStream` (`daemon/images/image_import.go` at `v23.0.0`;
+`pkg/archive` in 20.10.24 has no zstd). An older Engine needs
+`zstd -d` first and imports the plain `.tar`.
+
+**The appliance expects systemd as PID 1**, which Docker does not give a
+container by default. Two ways to run it:
+
+    docker run -d --name core --privileged --cgroupns=host \
+        -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+        --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
+        keel/core:19.0-3 /sbin/init
+
+or, without `--privileged`, the [Sysbox](https://github.com/nestybox/sysbox)
+runtime, which runs systemd in an ordinary container:
+
+    docker run -d --runtime=sysbox-runc --name core keel/core:19.0-3 /sbin/init
+
+Then `docker exec -it core keel-init` runs the first boot.
+
+**Said plainly: on Docker, first boot and services are not guaranteed the
+way they are on LXC.** Docker manages networking, `/etc/hosts`,
+`/etc/resolv.conf` and the hostname itself, which the first boot screens,
+`keel network` (0018) and the WireGuard overlay expect to own; nftables,
+CrowdSec's bouncer and WireGuard need capabilities and kernel modules a
+container may not have; and `--privileged` gives the container the host.
+The Docker path is documented and best effort. **Keel's own tests use
+system containers only** (LXC, as `docs/ci-cd.md` describes); nothing is
+tested on Docker, and a defect seen only there is not a release blocker.
+
+### 3. AWS and OpenStack: converted locally, later
+
+Neither file is uploaded to a cloud as it is. The `.tar.zst` is a
+container root filesystem: it has no kernel and no boot loader, and both
+clouds import virtual machine disks (AWS `ec2 import-image`: VMDK, VHD,
+OVA or raw; OpenStack Glance: qcow2, raw or ISO, among others). The ISO
+can be installed by hand into a VM there, which stays the manual
+alternative.
+
+The plan is a **local conversion in keel**: `keel assemble --format raw|qcow2`
+takes the same layers, adds a kernel, GRUB and a cloud datasource client,
+resets the machine identity (section 8), and writes a disk the user
+uploads with the cloud's own tools (`aws ec2 import-image`, `openstack image
+create`). Keel publishes no cloud image and holds no cloud account.
+
+**This is its own later phase**, validated on real AWS and OpenStack
+accounts before it is announced, and **not built now**.
+
+### 4. Names
+
+TurnKey's Proxmox naming, which Keel already publishes and `bt-aplinfo`
+parses:
 
     debian-13-keel-<app>_<ver>-<rel>_amd64.tar.zst
     debian-13-keel-<app>_<ver>-<rel>_amd64.iso
-    debian-13-keel-<app>_<ver>-<rel>_amd64.qcow2
-    debian-13-keel-<app>_<ver>-<rel>_amd64.ova
-    debian-13-keel-<app>_<ver>-<rel>_amd64-vmdk.zip
 
 `<ver>-<rel>` is the appliance version and revision from the product's
-changelog, as `release_version` reads it today (for example `19.0-3`). A
-testing build adds a `+<label>-<date>` suffix to `<rel>`, as the first
-GitHub pre-release did (`19.0-3+step4-20260930`); a stable name has none.
+changelog, as `release_version` reads it (for example `19.0-3`). A testing
+build adds `+<label>-<date>` to `<rel>`, as the first GitHub pre-release
+did (`19.0-3+step4-20260930`); a stable name has none. `bt-iso` writes
+`turnkey-<app>-<ver>-<codename>-<arch>.iso` today; the release step
+renames it.
 
-### 4. One root filesystem, many wrappers
+### 5. One root filesystem
 
-**Every format is made from the template**, the `.tar.zst` `keel assemble`
-writes, and from nothing else: unpack it, reset what must be per machine
-(section 7), and wrap it. No `apt` runs between the template and a wrapper.
+**The ISO is made from the template**, the `.tar.zst` `keel assemble`
+writes: unpack it, reset what must be per machine (section 8), and add
+fab's `cdroot` (the squashfs of the rootfs, isolinux and GRUB EFI,
+`xorriso`, `isohybrid`). No `apt` runs in between. A separate fab ISO
+build would be a second root filesystem for the same `<ver>-<rel>`, built
+at another time from other package versions; since 0016 a Keel release is
+the bytes its layers name, so one name is one set of bytes in both files.
+The kernel, `grub-pc` and `tkl-installer` come from the layers' plans and
+are in the template already.
 
-The alternative is TurnKey's: build the ISO with fab from the product and
-derive the VM images from the ISO. For Keel that would produce a second root
-filesystem for the same `<ver>-<rel>`, built at another time from other
-package versions, and the derived builds then run `apt-get upgrade` and
-patches in a chroot (`update-pkgs`, `patches/vm`), which re-runs package
-postinsts: systemd's writes a machine-id, and CrowdSec's registers the
-machine (tracker#47). Since 0016 a Keel release is the bytes its layers
-name; one name, one set of bytes, in every format.
+Until that builder exists, `bt-iso` builds the ISO from the product with
+the machine-id reset of buildtasks#16, which is proven on a real Core ISO
+(445 MB, its squashfs 388 MB, 2026-10-01). It is the fallback, not the
+release path.
 
-What a wrapper adds is only what the template does not need: the ISO's
-cdroot and boot loader (fab's `cdroot` step: the squashfs of the rootfs,
-isolinux and GRUB EFI, `xorriso`, `isohybrid`), and for the VM disk a
-partition table, a filesystem and GRUB. The kernel, `grub-pc`,
-`tkl-installer` and `open-vm-tools` come from the layers' plans, so they
-are in the template already and tested there.
+**Built on the build host, never on the runner.** The ISO needs root for
+fab's decks and mounts. The CI runner is an unprivileged LXC user without
+sudo on the public services VM (`docs/ci-cd.md` section 6) and holds
+nothing that is published. It runs the code's tests: `tests/machine-id`
+makes small ISOs from a few files.
 
-**Built on the build host, never on the runner.** Every wrapper needs root:
-loop devices, `kpartx`, mounts, `grub-install`. The CI runner is an
-unprivileged LXC user without sudo on the public services VM
-(`docs/ci-cd.md` section 6), and is not to hold anything that is
-published. What the runner does is test the code: `tests/machine-id` makes
-small ISOs from a few files, and the boot checks keep reading what the
-mirror serves. The build host also lacks tools today (measured 2026-10-01:
-`qemu-img`, `kpartx`, `zip` and `extlinux` are missing; `xorriso`,
-`mksquashfs`, `parted` and `grub-install` are there), which is part of the
-work.
+### 6. Where the files go
 
-The OVA is written without `ovftool`: an OVA is a tar of the `.ovf`
-descriptor, its `.mf` manifest and a `streamOptimized` VMDK, and
-`qemu-img convert -O vmdk -o subformat=streamOptimized` writes the disk.
-The descriptor is a template in buildtasks, tested by importing it with
-VirtualBox's `VBoxManage import` on a test machine.
-
-### 5. Where the files go
-
-The split stays the one `docs/releases-host.md` describes and TurnKey uses:
-the bytes on `mirror.keellinux.org`, what describes and signs them on
-`releases.keellinux.org`.
+The bytes on `mirror.keellinux.org`, what describes and signs them on
+`releases.keellinux.org`, as `docs/releases-host.md` and TurnKey split them:
 
 ```
 mirror.keellinux.org/images/
-  <app>/<ver>-<rel>/debian-13-keel-<app>_<ver>-<rel>_amd64.{tar.zst,iso,qcow2,ova}
+  <app>/<ver>-<rel>/debian-13-keel-<app>_<ver>-<rel>_amd64.{tar.zst,iso}
                                      immutable: written once, never replaced
   debian-13-keel-<app>_<ver>-<rel>_amd64.tar.zst
                                      the flat name the Proxmox index points
@@ -191,9 +221,8 @@ mirror.keellinux.org/images/
 releases.keellinux.org/
   pve/aplinfo.dat{,.gz,.asc}         unchanged: the Proxmox index, stable only
   meta/<date>/MANIFEST{,.asc}        unchanged: the release MANIFEST
-  <app>/<ver>-<rel>/                 one directory per appliance release, as
-                                     releases.turnkeylinux.org/turnkey-core/18.1-bookworm-amd64/
-    SHA512SUMS, SHA512SUMS.asc       every file of that release (section 6)
+  <app>/<ver>-<rel>/                 one directory per appliance release
+    SHA512SUMS, SHA512SUMS.asc       both files of that release (section 7)
     <name>.changelog                 the product changelog
     <name>.packages                  the package list the layers captured (0012)
   stable/INDEX, stable/INDEX.asc     per channel: one line per appliance,
@@ -203,152 +232,141 @@ releases.keellinux.org/
 A channel index changes only in a release, so it is signed with the
 release key in the attended step and needs no expiry: images are not an
 update path, `apt` is (0039), and 0016's expiry exists to stop a mirror
-freezing an updater. The index is what the download page reads to say
-"the current stable Core is 19.0-3", and the digest of `SHA512SUMS` in it
-ties the line to the files.
+freezing an updater. The download page reads it to say "the current stable
+Core is 19.0-3".
 
 `testing/` holds only signed builds. **An unsigned build never goes to
-either host**: the hosts serve nothing unsigned except the staging archive,
-and the header says so (`docs/releases-host.md` section 5). Unsigned test
-images go to GitHub pre-releases only (section 8).
+either host**: they serve nothing unsigned except the staging archive, and
+the header says so (`docs/releases-host.md` section 5). Unsigned test
+images go to GitHub pre-releases only (section 9).
 
-### 6. Checksums and signatures
+### 7. Checksums and signatures
 
-- `SHA512SUMS` per appliance release, in `sha512sum` format, one line per
-  file, so `sha512sum -c SHA512SUMS` works in a directory of downloads.
+- `SHA512SUMS` per appliance release, in `sha512sum` format, so
+  `sha512sum -c SHA512SUMS` works in a directory of downloads.
 - `SHA512SUMS.asc`, a detached armoured signature by the release key, made
-  in the attended step by `keel-release`'s signing phase, beside the
-  signatures it already makes. Verifiable with `gpg --verify` and with
-  `sqv`, which is what Proxmox and apt use.
-- The per-file `.sha512` and `.sha512.asc` of the template stay, because
-  the Proxmox index and existing instructions use them.
-- The release `MANIFEST` lists every file with its size and sha256, as it
-  does for the templates today, and `keel-publish-mirror` refuses any file
-  whose digest differs.
+  in the attended step by `keel-release`'s signing phase. Verifiable with
+  `gpg --verify` and with `sqv`, which Proxmox and apt use.
+- The per-file `.sha512` and `.sha512.asc` stay, because the Proxmox index
+  and existing instructions use them.
+- The release `MANIFEST` lists both files with size and digest, and
+  `keel-publish-mirror` refuses any file whose digest differs.
 
-### 7. What each format's first boot must make for itself
+### 8. What each format's first boot makes for itself
 
-Nothing that identifies a machine may be in an image, because every machine
-made from it would share it. The table says where each item is removed and
-where it is made.
+Nothing that identifies a machine may be in a published file.
 
-| Identity | Template (LXC, Proxmox) | ISO, live and installed | qcow2, OVA, VMDK |
-| --- | --- | --- | --- |
-| `/etc/machine-id` (and with it the DHCP DUID and IAID, the journal, MariaDB `server_id`) | emptied by `bt-layer` (buildtasks#15); systemd makes it at boot | emptied by `bt-iso` before fab squashes the rootfs, checked in the ISO (buildtasks#16, tracker#24; on the real Core squashfs: an empty 0444 file and the D-Bus link); `tkl-installer` copies the squashfs as it is and has no machine-id step, so the empty file is what makes each install unique | emptied when the wrapper is made, by the same `bin/reset-machine-id` |
-| SSH host keys, TLS and snakeoil pairs | none in a layer: `layer_audit_keys` refuses one (keel-core#8); `keel-host-keys.service` makes the missing ones and replaces published ones at every boot (inithooks#30), `10regen-sshkeys` and `15regen-sslcert` at first boot | the same packages and hooks; the ISO check must also run the key audit, since fab's ISO path does not call it today (follow-up) | the same, from the template |
-| CrowdSec LAPI and CAPI credentials, bouncer key | removed by keel-core's `conf.d/main`, CAPI registration suppressed in the build (tracker#47); `keel apply` registers on the first enable (keel 0.13.0) | the same: `conf.d/main` runs in the fab build of every format | the same, and no `apt` in the wrapper, so no postinst registers again |
-| WireGuard keys | the build fails if `/etc/wireguard` is not empty or a `wg-quick@` unit is enabled (keel-core#16); keel makes the pair at the first converge (keel#49) | the same | the same |
-| etcd member, Anubis key, MariaDB accounts | made by keel from the spec when enabled (keel#58, keel#62) | the same | the same |
+| Identity | `.tar.zst` (LXC, Proxmox, Docker) | ISO, live and installed |
+| --- | --- | --- |
+| `/etc/machine-id` (the DHCP DUID and IAID, the journal, MariaDB `server_id`) | emptied by `bt-layer` (buildtasks#15); systemd makes it at boot | emptied before the squashfs is made and checked in the ISO (buildtasks#16, tracker#24; on the real Core squashfs: an empty 0444 file and the D-Bus link); `tkl-installer` copies the squashfs as it is and has no machine-id step, so the empty file is what makes each install unique |
+| SSH host keys, TLS and snakeoil pairs | none in a layer: `layer_audit_keys` refuses one (keel-core#8); `keel-host-keys.service` makes the missing ones and replaces published ones at every boot (inithooks#30); `10regen-sshkeys` and `15regen-sslcert` at first boot | the same packages and hooks; the ISO check must also run the key audit, which fab's ISO path does not call today |
+| CrowdSec LAPI and CAPI credentials, bouncer key | removed by keel-core's `conf.d/main`, CAPI registration suppressed in the build (tracker#47); `keel apply` registers on the first enable (keel 0.13.0) | the same: `conf.d/main` runs in every fab build |
+| WireGuard keys | the build fails if `/etc/wireguard` is not empty or a `wg-quick@` unit is enabled (keel-core#16); keel makes the pair at the first converge (keel#49) | the same |
+| etcd member, Anubis key, MariaDB accounts | made by keel from the spec when enabled (keel#58, keel#62) | the same |
 
-The disk wrappers add one item of their own: the filesystem and LVM UUIDs
-are made when the disk is created, so they are the same on every VM made
-from one image, as with every cloud image. Nothing in Keel reads them as an
-identity; they are recorded here so that nothing starts to.
+The later cloud conversion (section 3) must apply the same resets to the
+disk it writes; its filesystem UUIDs are made per conversion, so they
+differ between users but not between VMs made from one upload.
 
-### 8. GitHub Releases
+### 9. GitHub Releases
 
 Each appliance repository (`keel-core`, `keel-web`, `keel-wordpress`, ...)
 carries its own releases.
 
 - **Tags.** `<ver>-<rel>` for a signed stable release (`19.0-3`), on the
-  commit of the product the layers were built from. `testing-<ver>-<rel>-<date>`
-  for a testing build (`testing-19.0-3-20261001`), and
-  `testing-<ver>-<rel>-<label>-<date>` for a named test image, which is
-  the shape of the first one (`testing-19.0-3-step4-20260930`). Testing
-  releases are marked pre-release.
-- **Assets.** GitHub refuses an asset of 2 GiB or more. The template is
-  386 MB (`keel-core` 19.0-3) and a Core ISO 445 MB, its squashfs 388 MB
-  (measured on the build host, 2026-10-01), so the ISO, qcow2 and OVA are
-  expected well below 1 GiB for Core and Web; every format of section 1 is attached
-  while it fits. A format that does not fit is left out of that release
-  and its body links to it on `mirror.keellinux.org`; no file is ever split.
-- **Checksums.** Today the `.sha512` of each file. Once signing exists,
-  the same `SHA512SUMS` and `SHA512SUMS.asc` as on
-  `releases.keellinux.org`, byte for byte.
+  commit of the product the layers were built from.
+  `testing-<ver>-<rel>-<date>` for a testing build
+  (`testing-19.0-3-20261001`), and `testing-<ver>-<rel>-<label>-<date>`
+  for a named test image, the shape of the first one
+  (`testing-19.0-3-step4-20260930`). Testing releases are marked
+  pre-release.
+- **Assets.** The ISO and the `.tar.zst`, each with its `.sha512`, and,
+  once signing exists, the same `SHA512SUMS` and `SHA512SUMS.asc` as on
+  `releases.keellinux.org`, byte for byte. GitHub refuses an asset of
+  2 GiB or more; the Core template is 386 MB and the Core ISO 445 MB, so
+  both fit with room. A file that ever does not fit is left out of that
+  release and its body links to the mirror; no file is split.
 - **Consistency.** `releases.keellinux.org` is the source of truth and
   GitHub a second copy. A release is uploaded to GitHub only after
-  `keel-publish-mirror` has installed it, from the same staged files, and
-  the upload checks every asset against the signed `MANIFEST` first and
-  GitHub's own asset digest (the API reports a sha256 per asset) after. The
-  release body names the `MANIFEST` URL. Stable releases are created
-  **immutable** (GitHub's immutable releases), so an asset cannot be
-  replaced later; a correction is a new `<rel>`.
+  `keel-publish-mirror` installed it, from the same staged files; the
+  upload checks every asset against the signed `MANIFEST` first and
+  GitHub's own asset digest (the API reports a sha256 per asset) after,
+  and the release body names the `MANIFEST` URL. Stable releases are
+  created **immutable** (GitHub's immutable releases), so an asset cannot
+  be replaced; a correction is a new `<rel>`.
 - **Where the upload runs.** `bin/keel-publish-github <date>` in
-  Keel-Linux/apt, beside `keel-publish-mirror`, run by the maintainer in
-  the attended release from a machine where `gh` is logged in to the
-  organization, or from the build host with a fine-grained token limited to
+  Keel-Linux/apt, beside `keel-publish-mirror`, run in the attended
+  release from a machine where `gh` is logged in to the organization, or
+  from the build host with a fine-grained token limited to
   `contents: write` on the appliance repositories, readable by root only.
-  Not a reusable workflow: a workflow runs on the runner, and the runner
-  must neither hold the files nor a token that can publish them.
-  Unsigned testing images are uploaded the same way, marked
-  "not signed, not for production" in the title and the body, as the first
-  one was.
+  **Never a workflow**: a workflow runs on the runner, which must hold
+  neither the files nor a token that can publish them. Unsigned testing
+  images are uploaded the same way, marked "not signed, not for
+  production" in the title and the body, as the first one was.
 
-### 9. Order of work
+### 10. Order of work
 
-1. **buildtasks: the machine-id of the ISO and the images made from it**
-   (tracker#24). `bin/reset-machine-id`, `bin/iso-machine-id-check`, the
-   reset in `bt-iso` and `bin/rootfs-cleanup`: buildtasks#16, which accompanies this
-   note.
-2. **tracker#23, the pin.** A pin of 1001 downgrades any package that is
-   newer in the image than in the archive. An ISO or VM user runs
-   `apt upgrade` on day one, so no new format is published before either
-   every package of an image is in the archive first, or the pin is 990.
-3. **The key audit on the ISO** (section 7): `bin/iso-machine-id-check`
-   becomes the image check and also runs `layer_audit_keys` over the
-   squashfs.
-4. **`bt-image`** in buildtasks: template in, `.iso` and `.qcow2` out, with
-   the reset and the checks, tested with fake templates like
-   `tests/layer`. The ISO first, because the qcow2 and the OVA reuse its
-   root filesystem steps.
-5. **`keel-release`**: build the wrappers after `keel assemble`, add them
-   to `MANIFEST`, write `SHA512SUMS` per appliance and sign it in the
-   existing signing phase. `--sign-only` keeps working.
+1. **buildtasks#16**: the machine-id of the ISO (tracker#24), merged after
+   review.
+2. **tracker#23, the pin.** A pin of 1001 downgrades any package newer in
+   the image than in the archive, and an ISO user runs `apt upgrade` on
+   day one. No ISO is published before every package of an image is in
+   the archive first, or the pin is 990.
+3. **The key audit on the ISO**: `bin/iso-machine-id-check` becomes the
+   image check and also runs `layer_audit_keys` over the squashfs.
+4. **The ISO from the template** in buildtasks (section 5), tested with
+   fake templates like `tests/layer`, and proven by installing a Core ISO
+   with `tkl-installer` twice on the test machines (two machine-ids, two
+   key sets).
+5. **`keel-release`**: build the ISO after `keel assemble`, add it to
+   `MANIFEST`, write `SHA512SUMS` per appliance and sign it in the existing
+   signing phase. `--sign-only` keeps working.
 6. **`keel-publish-mirror`**: the per-appliance directories, the flat hard
    links, the channel indexes; refuse what `MANIFEST` does not list.
-7. **Boot tests** for each format on the test machines: the ISO installed
-   with `tkl-installer` and booted twice (two machine-ids, two key sets),
-   the qcow2 on KVM, the OVA imported in VirtualBox.
-8. **The OVA**, then the VMDK zip.
-9. **`keel-publish-github`**, then the download page on keellinux.org.
+7. **`keel-publish-github`**, then the download page on keellinux.org,
+   with the Docker instructions of section 2.
+8. **Later, its own phase**: `keel assemble --format raw|qcow2` for AWS and
+   OpenStack (section 3), validated on real accounts.
 
-### 10. What blocks the first publication
-
-- items 1 to 7 above, for the formats other than the template;
-- the attended steps already listed in tracker#1, in particular keel-core#8
-  (every published image still carries the shared keys until the chain is
-  rebuilt and published);
-- the attended signing of the release (0005).
-
-## The attended step, as it will be
+### 11. The attended step
 
 Everything before it is built and staged by the agent on the build host
 without a key. The maintainer then:
 
-1. on the build host: `keel-release --sign-only <date>` and types the
+1. on the build host: `keel-release --sign-only <date>`, typing the
    passphrase once. It signs the template digests, the index, every
-   `SHA512SUMS`, the channel indexes and `MANIFEST`; seconds, well inside
+   `SHA512SUMS`, the channel indexes and `MANIFEST`: seconds, well inside
    the ten minutes the agent keeps the passphrase;
-2. on his workstation: `keel-publish-mirror <date>`, which opens the
-   tunnel, pulls the staged files to the public host and verifies them
-   against `MANIFEST`. Under 2 GiB per appliance in four formats, so
-   Core and Web are under 4 GiB: 10 to 20 minutes, unattended once
+2. on his workstation: `keel-publish-mirror <date>`, which pulls the staged
+   files to the public host and verifies them against `MANIFEST`. Core and
+   Web in both formats are under 2 GiB: about 10 minutes, unattended once
    started;
 3. `keel-publish-github <date>`: the same files to the two repositories'
    releases, a few minutes.
 
-About **30 minutes** in all, of which the passphrase is under one minute
-and the rest can run while he does something else.
+About **20 minutes** in all, of which the passphrase is under one minute.
 
-## Open questions for the maintainer
+## Resolved (maintainer, 2026-10-01)
 
-1. **The ISO from the template** (section 4) rather than fab's own ISO
-   build: recommended, because one release is then one set of bytes.
-2. **qcow2 with console first boot**, not headless (section 1).
-3. **Drop Xen, Docker, the AMI and the ARM images** (section 1).
-4. **The GitHub upload credential** (section 8): from his workstation in
-   the attended step (recommended), or a root-only fine-grained token on
-   the build host.
-5. **Testing images unsigned on GitHub only**, never on the project's
-   hosts (section 5).
-6. **Immutable stable releases on GitHub** (section 8).
+The proposal of the same day published the template, the ISO, a qcow2 and
+an OVA, then a VMDK zip, and dropped Xen, Docker, the AMI and the ARM
+images. The maintainer decided:
+
+- **Only the ISO and the `.tar.zst` are published.** The ISO covers
+  VMware, VirtualBox, Proxmox VMs and bare metal, so the OVA, VMDK and
+  qcow2 downloads are dropped with Xen, the Docker image formats, the AMIs
+  and ARM.
+- **Docker through `docker import` of the `.tar.zst`**, with the systemd
+  caveat of section 2; still no Docker in Keel's own tests.
+- **AWS and OpenStack by local conversion** (`keel assemble --format
+  raw|qcow2`), a later phase validated on real accounts; the ISO install
+  stays the manual alternative.
+- **GitHub Releases as proposed**: the tags, the two files with their
+  `.sha512` and the signed `SHA512SUMS`, uploaded only from the build host
+  or an attended step.
+
+The proposal's open questions are answered by this or no longer arise: the
+ISO from the template (section 5, kept), the qcow2 first boot (no qcow2),
+the dropped formats (above), the upload credential (section 9: either
+place, never the runner), unsigned testing images on GitHub only (section
+6, kept), immutable stable releases (section 9, kept).
