@@ -170,6 +170,7 @@ data:
 | `data[].backup` | yes | `dump` (the engine's own dump, taken from the hot standby when there is one, 0037), `none` (derived or rebuildable), or `files` (copied as files, for an engine with no dump) |
 | `secrets` | no | See "The appliance manifest": the same shape |
 | `hooks.first_boot` | no | See "The appliance manifest": the same shape |
+| `hooks.state` | no | `{path, timeout}`, for an overlay that is not a unit (Coraza): the executable `keel spec apply --system` runs with `enabled` or `disabled` to turn it on and off. `path` is always `/usr/lib/keel/overlays/<name>/state`; `timeout` is 1 to 600 seconds, 120 by default. Other packages may put hooks of their own in `/usr/lib/keel/overlays/<name>/state.d/`, which keel runs after it (errata below; keel's docs/apply.md, "State hooks") |
 | `screen` | no | The confconsole plugin that configures this overlay. An appliance may give the overlay the default state `ask` only when this is set |
 
 An overlay says nothing about installation modes. Whether it runs in a
@@ -635,6 +636,8 @@ name: coraza
 title: Coraza
 summary: A WAF inside Nginx with the OWASP Core Rule Set (0030)
 requires: [nginx]
+hooks:
+  state: {path: /usr/lib/keel/overlays/coraza/state}
 checks:
   - name: waf-blocks
     type: http
@@ -655,6 +658,19 @@ tenth cycle, because each probe is a log line in the WAF and in the access
 log. The loopback addresses must be in CrowdSec's whitelist, or the probe
 teaches CrowdSec to ban the machine's own loopback; that is the overlay
 package's configuration, and its gate tests it.
+
+Errata, 2026-10-01, found by step 7 of 0041 (Keel-Linux/keel#62 and
+#63): with no unit there was nothing for `apply` to start, so turning
+Coraza on in the spec wrote the `waf-blocks` check and loaded nothing.
+The overlay therefore declares `hooks.state`, the hook its package ships
+to link the module, test and reload Nginx, check the probe and roll back.
+It is a new key of version 1 rather than version 2: no manifest that
+carries it existed before, and the package declares `Depends: keel (>=
+0.15.0)`, the first keel that reads it. `validate` checks it as rule 12
+checks a first boot hook; `apply` runs it, and every executable of
+`state.d/` beside it, within its timeout, only when they are root's, not
+writable by others and inside `/usr/lib/keel/overlays`, and records the
+state with a digest of the hooks so that a hook installed later runs too.
 
 ```yaml
 # /usr/share/keel/overlays/anubis.yaml, from keel-overlay-anubis
@@ -822,7 +838,11 @@ first.
     check runs on the tree `dh_fixperms` leaves, under `fakeroot`
     (`dpkg-buildpackage` uses it by default), where the files read as
     owned by root just as they will be installed; a build without
-    fakeroot cannot pass the owner check and must not skip it.
+    fakeroot cannot pass the owner check and must not skip it. An
+    overlay's `hooks.state.path` is its own
+    `/usr/lib/keel/overlays/<name>/state` and passes the same checks;
+    `hooks.state.timeout` is a whole number of seconds from 1 to 600; an
+    appliance has no `hooks.state` (errata of the Coraza example).
 
 **Appliances**
 
