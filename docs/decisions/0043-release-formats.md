@@ -257,7 +257,7 @@ carries its own releases.
   the shape of the first one (`testing-19.0-3-step4-20260930`). Testing
   releases are marked pre-release.
 - **Assets.** GitHub refuses an asset of 2 GiB or more. The template is
-  386 MB (`keel-core` 19.0-3) and the root squashfs of a Core ISO 388 MB
+  386 MB (`keel-core` 19.0-3) and a Core ISO 445 MB, its squashfs 388 MB
   (measured on the build host, 2026-10-01), so the ISO, qcow2 and OVA are
   expected well below 1 GiB for Core and Web; every format of section 1 is attached
   while it fits. A format that does not fit is left out of that release
