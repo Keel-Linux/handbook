@@ -18,8 +18,11 @@ described state.
 - Access: `ssh -6 popsolutions@keellinux.org`, passwordless sudo, root login
   refused. No other accounts log in; `site` and `runner` are service users.
 - Firewall: nftables (`/etc/nftables.conf`), inbound policy drop, accepting
-  22, 80, 443 on both families, ICMP and ICMPv6, DHCP client replies and the
-  LXC bridge `lxcbr0` of the CI runner. Forwarding only for `lxcbr0`.
+  22, 80, 443 on both families, ICMP and ICMPv6 and DHCP client replies.
+  From `lxcbr0`, the bridge of the CI runner's containers, only DNS and DHCP
+  reach the host (sshd and nginx do not); forwarding only from `lxcbr0`, to
+  the internet, not to private ranges, ULA, link local or
+  `2804:710:d0:5::/64` (since 2026-10-01, docs/ci-cd.md section 6).
 - Time: systemd-timesyncd, synchronized. Updates: unattended-upgrades with
   `APT::Periodic::Unattended-Upgrade "1"` (daily timers active).
 - Packages added: nginx-light, dehydrated, nftables, rsync, zstd, gnupg,
@@ -401,6 +404,14 @@ tree without root, and each run uses its own container name and its own tree
 rootfs in it belongs to the subordinate ids, so it is removed through the
 same user namespace (`unprivileged-lxc cleanup`).
 
+Around every job, and as root before every start of the service, the
+runner's home, user units, containers, leftover processes, temporary files
+and work tree are reset (`keel-hardening.conf` drop-in of
+`actions-runner.service`, `job-reset.sh`, `keel-runner-start-reset`). That is
+hygiene, not a boundary: a job runs as the same uid as the runner and can
+read its registration credentials. docs/ci-cd.md section 6, "What a job can
+still do", says what that leaves and the options to close it.
+
 Container networking: the boot test joins `lxcbr0`. The dnsmasq `lxc-net`
 starts runs with `--dhcp-range=fc42:5009:ba4b:5ab0::1,ra-only`, so a container
 gets a global scope IPv6 address in that ULA prefix by SLAAC within about five
@@ -440,7 +451,7 @@ the root helper of that time; nothing else on the VM was touched.
 | `nftables.service` | firewall |
 | `dehydrated.timer` -> `dehydrated.service` | daily renewal check |
 | `keel-site-pull.timer` -> `keel-site-pull.service` | site checkout, every 15 minutes, user `site` |
-| `actions-runner.service` | GitHub Actions runner |
+| `actions-runner.service` | GitHub Actions runner; drop-in `keel-hardening.conf` (reset before every start, job hooks) |
 | `user@1001.service` | the runner's user manager, kept by linger; its delegated scopes hold the CI containers |
 | `lxc.service`, `lxc-net.service`, `lxc-monitord.service` | LXC for the runner |
 | `apt-daily.timer`, `apt-daily-upgrade.timer` | unattended-upgrades |

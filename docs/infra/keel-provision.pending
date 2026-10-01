@@ -33,13 +33,23 @@ table inet filter {
 		ct state invalid drop
 		meta l4proto ipv6-icmp accept
 		meta l4proto icmp accept
+		# The CI runner's containers (lxcbr0) get DNS and DHCP from this host
+		# and nothing else, sshd and the web sites included (docs/ci-cd.md
+		# section 6 of the keel repository).
+		iifname "lxcbr0" udp dport { 53, 67, 547 } accept comment "CI containers: DNS, DHCPv4, DHCPv6"
+		iifname "lxcbr0" tcp dport 53 accept comment "CI containers: DNS over TCP"
+		iifname "lxcbr0" drop comment "CI containers reach nothing else on this host, sshd included"
 		udp dport 546 accept comment "DHCPv6 client"
 		udp dport 68 accept comment "DHCPv4 client"
 		tcp dport { 22, 80, 443 } accept
-		iifname "lxcbr0" accept comment "LXC containers of the CI runner"
 	}
 	chain forward {
 		type filter hook forward priority filter; policy drop;
+		# The CI containers reach the internet only: no private IPv4 range
+		# (the LAN 10.88.5.0/24 included), no ULA or link local, and not
+		# the public segment this VM and the build host share.
+		iifname "lxcbr0" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } drop comment "CI containers: no private ranges, the LAN 10.88.5.0/24 included"
+		iifname "lxcbr0" ip6 daddr { fc00::/7, fe80::/10, 2804:710:d0:5::/64 } drop comment "CI containers: no ULA, link local or the public LAN segment"
 		iifname "lxcbr0" accept
 		oifname "lxcbr0" ct state established,related accept
 	}
@@ -97,6 +107,188 @@ chown runner:runner /home/runner/.config/lxc/default.conf
 loginctl enable-linger runner
 install -d -m 0755 -o runner -g runner /var/tmp/keel-ci
 rm -f /usr/local/sbin/keel-ci-boot-test /usr/local/sbin/keel-ci-cleanup
+
+# ------------------------------------------------------------- job hygiene
+# The runner is not ephemeral, so every job can leave something for the
+# next one. keel-runner-start-reset, as root before every start of the
+# service, and job-reset, as runner around every job, put uid runner back in
+# a known state (docs/ci-cd.md section 6 of the keel repository). Hygiene,
+# not a boundary: a job runs as the same uid as the runner.
+log job-hygiene
+install -d -m 0755 /usr/local/share/keel-runner /usr/local/libexec/keel-runner /etc/systemd/system/actions-runner.service.d
+install -m 0644 /home/runner/.config/lxc/default.conf /usr/local/share/keel-runner/lxc-default.conf
+printf 'LANG=C.UTF-8\n' > /usr/local/share/keel-runner/runner.env
+cat > /usr/local/libexec/keel-runner/job-reset.sh << 'HOOK'
+#!/bin/bash
+# job-reset: put the runner user back in a known state around every job of
+# keel-lxc-1 (docs/ci-cd.md section 6 of the keel repository).
+#
+# Run as runner by actions-runner.service, through
+# ACTIONS_RUNNER_HOOK_JOB_STARTED (as job-reset.sh) and
+# ACTIONS_RUNNER_HOOK_JOB_COMPLETED (as job-reset-completed.sh; the runner
+# takes only a path ending in .sh). Root owned,
+# so a job cannot rewrite it. What it removes is whatever a job could have
+# left to act on a later job: user units and timers, running containers,
+# processes that escaped the job, dotfiles, files in the temporary
+# directories and, after the job, the work tree with its cached actions.
+#
+# It is hygiene, not a boundary: a job runs as the same uid as the runner,
+# so a job that means harm can change the runner itself, which no hook
+# undoes. keel-runner-start-reset, run as root before every start of the
+# service, is the stronger reset.
+set -u
+umask 022
+cd / || exit 1
+XDG_RUNTIME_DIR=/run/user/$(id -u)
+export XDG_RUNTIME_DIR
+RUNNER_HOME=/home/runner
+TEMPLATES=/usr/local/share/keel-runner
+SCRATCH_ROOT=/var/tmp/keel-ci
+phase=started
+[ "$(basename "$0")" = job-reset-completed.sh ] && phase=completed
+
+log() { echo "keel job-reset ($phase): $*"; }
+
+sub_uid=$(awk -F: '$1 == "runner" { print $2; exit }' /etc/subuid)
+sub_gid=$(awk -F: '$1 == "runner" { print $2; exit }' /etc/subgid)
+# rm in the runner's user namespace, for files owned by its subordinate ids.
+ns_rm() {
+	lxc-usernsexec -m "u:0:$sub_uid:65536" -m "g:0:$sub_gid:65536" \
+		-m "u:65536:$(id -u):1" -m "g:65536:$(id -g):1" -- rm -rf -- "$@"
+}
+
+# 1. User units, timers and the scopes the containers run in.
+units=$(systemctl --user list-units --all --plain --no-legend \
+	--type=service,timer,path,socket,scope 2>/dev/null \
+	| awk '$1 != "init.scope" { print $1 }')
+if [ -n "$units" ]; then
+	log "stopping user units: $(echo "$units" | tr '\n' ' ')"
+	# shellcheck disable=SC2086
+	systemctl --user stop $units 2>/dev/null
+fi
+rm -rf "$RUNNER_HOME/.config/systemd" "$RUNNER_HOME/.local/share/systemd" \
+	"$RUNNER_HOME/.config/environment.d"
+systemctl --user daemon-reload 2>/dev/null
+systemctl --user reset-failed 2>/dev/null
+
+# 2. Processes of the service that are not this hook or its ancestors (the
+#    worker, the listener and run.sh): whatever a job left running.
+cgroup=$(sed -n 's/^0:://p' /proc/self/cgroup)
+keep=" "
+pid=$$
+while [ "$pid" -gt 1 ]; do
+	keep="$keep$pid "
+	pid=$(awk '/^PPid:/ { print $2 }' "/proc/$pid/status")
+done
+while read -r pid; do
+	case "$keep" in
+		*" $pid "*) ;;
+		*) [ -d "/proc/$pid" ] && log "killing leftover process $pid: $(tr '\0' ' ' < "/proc/$pid/cmdline" | cut -c1-80)" && kill -9 "$pid" 2>/dev/null ;;
+	esac
+done < "/sys/fs/cgroup$cgroup/cgroup.procs"
+
+# 3. The home directory: the skeleton dotfiles, the LXC defaults, the
+#    runner's .env, and nothing else.
+for entry in "$RUNNER_HOME"/.[!.]* "$RUNNER_HOME"/..?* "$RUNNER_HOME"/*; do
+	[ -e "$entry" ] || [ -L "$entry" ] || continue
+	case "${entry##*/}" in
+		.bashrc|.profile|.bash_logout|.config|actions-runner) ;;
+		*) log "removing $entry"; rm -rf -- "$entry" 2>/dev/null || ns_rm "$entry" ;;
+	esac
+done
+for f in .bashrc .profile .bash_logout; do
+	cmp -s "/etc/skel/$f" "$RUNNER_HOME/$f" || { log "restoring $f"; cp "/etc/skel/$f" "$RUNNER_HOME/$f"; }
+done
+for entry in "$RUNNER_HOME"/.config/* "$RUNNER_HOME"/.config/.[!.]*; do
+	[ -e "$entry" ] || [ -L "$entry" ] || continue
+	[ "$entry" = "$RUNNER_HOME/.config/lxc" ] && continue
+	log "removing $entry"; rm -rf -- "$entry"
+done
+mkdir -p "$RUNNER_HOME/.config/lxc"
+find "$RUNNER_HOME/.config/lxc" -mindepth 1 ! -name default.conf -exec rm -rf -- {} +
+cmp -s "$TEMPLATES/lxc-default.conf" "$RUNNER_HOME/.config/lxc/default.conf" ||
+	{ log "restoring .config/lxc/default.conf"; cp "$TEMPLATES/lxc-default.conf" "$RUNNER_HOME/.config/lxc/default.conf"; }
+cmp -s "$TEMPLATES/runner.env" "$RUNNER_HOME/actions-runner/.env" ||
+	{ log "restoring actions-runner/.env"; cp "$TEMPLATES/runner.env" "$RUNNER_HOME/actions-runner/.env"; }
+
+# 4. Scratch trees and temporary files of the runner and its subordinate ids.
+for entry in "$SCRATCH_ROOT"/* /tmp/* /tmp/.[!.]* /var/tmp/* /dev/shm/*; do
+	[ -e "$entry" ] || [ -L "$entry" ] || continue
+	[ "$entry" = "$SCRATCH_ROOT" ] && continue
+	# The .NET IPC files of the runner's own live processes.
+	case "${entry##*/}" in
+		clr-debug-pipe-*|dotnet-diagnostic-*)
+			pid=${entry##*/}; pid=${pid#clr-debug-pipe-}; pid=${pid#dotnet-diagnostic-}; pid=${pid%%-*}
+			[ -d "/proc/$pid" ] && continue ;;
+	esac
+	owner=$(stat -c %u "$entry")
+	if [ "$owner" = "$(id -u)" ] || { [ "$owner" -ge "$sub_uid" ] && [ "$owner" -lt $((sub_uid + 65536)) ]; }; then
+		log "removing $entry"; ns_rm "$entry"
+	fi
+done
+
+# 5. After the job, the work tree: checkouts, cached actions and tools, which
+#    the next job would otherwise run. _temp is the runner's own and it
+#    empties it at the start of every job.
+if [ "$phase" = completed ]; then
+	for entry in "$RUNNER_HOME"/actions-runner/_work/* "$RUNNER_HOME"/actions-runner/_work/.[!.]*; do
+		[ -e "$entry" ] || continue
+		[ "${entry##*/}" = _temp ] && continue
+		rm -rf -- "$entry" 2>/dev/null || ns_rm "$entry"
+	done
+	log "work tree emptied"
+fi
+log "finished"
+exit 0
+HOOK
+chmod 0755 /usr/local/libexec/keel-runner/job-reset.sh
+ln -sfn job-reset.sh /usr/local/libexec/keel-runner/job-reset-completed.sh
+rm -f /usr/local/libexec/keel-runner/job-reset /usr/local/libexec/keel-runner/job-reset-completed
+cat > /usr/local/sbin/keel-runner-start-reset << 'RESET'
+#!/bin/sh
+# keel-runner-start-reset: run as root before every start of
+# actions-runner.service (ExecStartPre=+). Whatever the last job did, the
+# runner starts from a known state: no process of uid runner, a fresh user
+# manager with no units or containers, the home directory, the LXC
+# defaults, the runner's .env, an empty work tree and an empty scratch
+# root. A job that killed the runner to dodge its hooks lands here.
+# docs/ci-cd.md section 6 of the keel repository.
+set -u
+RUNNER_HOME=/home/runner
+TEMPLATES=/usr/local/share/keel-runner
+uid=$(id -u runner)
+log() { echo "keel-runner-start-reset: $*"; }
+
+systemctl stop "user@$uid.service"
+pkill -KILL -u runner && log "killed processes left by uid runner"
+find "$RUNNER_HOME" -mindepth 1 -maxdepth 1 \
+	! -name .bashrc ! -name .profile ! -name .bash_logout ! -name .config ! -name actions-runner \
+	-exec rm -rf -- {} +
+for f in .bashrc .profile .bash_logout; do
+	install -m 0644 -o runner -g runner "/etc/skel/$f" "$RUNNER_HOME/$f"
+done
+rm -rf "$RUNNER_HOME/.config"
+install -d -m 0755 -o runner -g runner "$RUNNER_HOME/.config" "$RUNNER_HOME/.config/lxc"
+install -m 0644 -o runner -g runner "$TEMPLATES/lxc-default.conf" "$RUNNER_HOME/.config/lxc/default.conf"
+install -m 0664 -o runner -g runner "$TEMPLATES/runner.env" "$RUNNER_HOME/actions-runner/.env"
+find "$RUNNER_HOME/actions-runner/_work" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+find /var/tmp/keel-ci -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+find /tmp /var/tmp /dev/shm -xdev -mindepth 1 -maxdepth 1 -user runner ! -path /var/tmp/keel-ci -exec rm -rf -- {} +
+systemctl start "user@$uid.service"
+log "runner reset"
+RESET
+chmod 0755 /usr/local/sbin/keel-runner-start-reset
+cat > /etc/systemd/system/actions-runner.service.d/keel-hardening.conf << 'DROPIN'
+# keel-lxc-1 hardening (docs/ci-cd.md section 6 of the keel repository).
+[Service]
+# As root, before every start: a known state whatever the last job did.
+ExecStartPre=+/usr/local/sbin/keel-runner-start-reset
+# As runner, around every job: user units, containers, leftover processes,
+# dotfiles, temporary files and, after the job, the work tree.
+Environment=ACTIONS_RUNNER_HOOK_JOB_STARTED=/usr/local/libexec/keel-runner/job-reset.sh
+Environment=ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/usr/local/libexec/keel-runner/job-reset-completed.sh
+DROPIN
+systemctl daemon-reload
 
 # ---------------------------------------------------------------- trees
 log trees

@@ -362,6 +362,12 @@ Three things an unprivileged container needs here, each found by failing:
   allows exactly those. What still fails in the container is the usual set
   for an unprivileged one (`dev-mqueue`, `run-lock`, `sys-kernel-config`,
   `sys-kernel-debug` and `tmp` mounts), so it reports `degraded`.
+  AppArmor is not the boundary here, and nothing should rely on it: the job
+  writes its own LXC config and can name any profile it likes, `unconfined`
+  included. The boundary is uid 1001 and the user namespace: container root
+  is uid 165536 on the host, with no capability outside the namespace, and
+  `runner` itself has no sudo, no group and no setuid helper beyond
+  `newuidmap`, `newgidmap` and `lxc-user-nic`.
 - A cgroup it may write. The runner's jobs live in
   `system.slice/actions-runner.service`, owned by root. `lxc-start` runs in
   `systemd-run --user --scope -p Delegate=yes`, and `lxc-attach` in
@@ -401,31 +407,155 @@ Proof, in this order:
   monitors left, scratch tree gone.
 
 GitHub settings changed the same day: the fork pull request policy (section
-5). Runner group 1 already has `visibility: all`, which for an organization
-runner group means every repository of the organization and nothing else;
-the API also offers `private` (private repositories only, which would shut
-out the 40 public ones), `selected` with an explicit list of repositories,
-and `restricted_to_workflows` with a list of workflow refs. None of those was
-applied: a hand-kept list breaks the gate of every new repository.
+5), and, after the security review below, the runner group.
 
 What could not be done unprivileged: nothing the appliance gate needs.
 `build-deb.yml` still calls `sudo apt-get` for build dependencies; nothing
 calls it, and it has to move into an unprivileged container before anything
 does.
 
-Rollback, as root on the VM, if the unprivileged path has to be abandoned:
+### After the security review (2026-10-01)
 
-    D=/root/keel-runner-hardening-2026-10-01
-    install -m 0440 -o root -g root $D/etc/sudoers.d/runner /etc/sudoers.d/runner && visudo -c
-    install -m 0755 -o root -g root $D/usr/local/sbin/keel-ci-boot-test $D/usr/local/sbin/keel-ci-cleanup /usr/local/sbin/
-    install -m 0755 -o root -g root $D/usr/local/sbin/keel-provision /usr/local/sbin/keel-provision
-    rm -f /etc/lxc/lxc-usernet /home/runner/.config/lxc/default.conf
-    loginctl disable-linger runner
-    apt-get purge uidmap libsubid5
+A review after Keel-Linux/.github#16 merged found no path to root on the
+host and no reach to signing keys (there are none on this VM), and four
+things to fix.
 
-and revert the `keel-linux/.github` pull request that introduced
-`bin/unprivileged-lxc`, since the workflow before it calls the helpers
-through sudo. The fork pull request policy is independent and should stay.
+**Fork code on the VM.** A fork's pull request, once someone clicked
+"Approve and run", still ran here. Three layers now:
+
+- The workflows (Keel-Linux/.github#18). The `keel-lxc` jobs of
+  `test-appliance.yml` and `build-deb.yml` skip `pull_request_target` and
+  any `pull_request` whose head repository is not the repository itself,
+  as `lxc-trixie.yml` already did. A skipped job reports success and
+  branch protection counts a skipped required check as passed, so on a
+  fork's pull request `appliance / boot-published-layer` shows as skipped,
+  not failed. `test-appliance.yml` therefore also runs `fork-not-booted` on
+  a hosted runner in exactly that case, which fails with the reason; it
+  blocks a merge only where `appliance / fork-not-booted` is a required
+  check (harmless to require: it is skipped on every other pull request).
+- The runner group: **not yet restricted.** `restricted_to_workflows` was
+  switched on briefly (05:00 to 05:17 UTC) and lifted again at the
+  coordinator's request, because the API refuses a workflow that does not
+  exist at the ref, and the CI migration's `lxc-trixie.yml`
+  (Keel-Linux/.github#17) is not on `main` yet while its callers point at
+  `@ci/lxc-trixie`. Once #17 is merged and the callers use `@main`, the
+  list is the org's reusable workflows that target `keel-lxc`, at
+  `refs/heads/main` only (a branch is writable by any member with write
+  access). `build-deb.yml` is on it only while it exists; nothing calls it.
+  Any new reusable workflow that targets `keel-lxc` gets the runner only
+  once it is on this list. To set it, send the whole list:
+
+        gh api -X PATCH orgs/keel-linux/actions/runner-groups/1 --input - <<'JSON'
+        {"restricted_to_workflows": true, "selected_workflows": [
+          "Keel-Linux/.github/.github/workflows/test-appliance.yml@refs/heads/main",
+          "Keel-Linux/.github/.github/workflows/build-deb.yml@refs/heads/main",
+          "Keel-Linux/.github/.github/workflows/lxc-trixie.yml@refs/heads/main"]}
+        JSON
+
+- The runner is not ephemeral, see "What a job can still do" below.
+
+**The firewall.** `lxcbr0` used to be accepted wholesale. Now a container
+reaches this host only on DNS (53, UDP and TCP) and DHCP (67, 547); sshd,
+nginx and everything else on the host are dropped from `lxcbr0`, through
+the bridge address and through the public one alike. Forwarding from
+`lxcbr0` drops private IPv4 (10/8, which holds the LAN 10.88.5.0/24,
+172.16/12, 192.168/16, 169.254/16, 100.64/10), ULA, link local and
+`2804:710:d0:5::/64`, the public segment this VM shares with the build host
+and the forum appliance; everything else, the internet, is allowed.
+`/etc/nftables.conf` and `keel-provision` carry the same rules. The live
+change was made by handle, not with `nft -f /etc/nftables.conf`, whose
+`flush ruleset` would also drop the NAT tables of `lxc-net`. Checked from an
+unprivileged trixie container: `apt-get install hello` and github.com:443
+work; host :22 (bridge IPv4 and IPv6, public IPv6, LAN IPv4), host :443,
+10.88.5.1 and the build host on the public segment are all blocked. The
+sites kept answering 200 throughout.
+
+**Job hygiene.** Two layers, written by `keel-provision`:
+
+- `ACTIONS_RUNNER_HOOK_JOB_STARTED` and `_COMPLETED`, set in
+  `/etc/systemd/system/actions-runner.service.d/keel-hardening.conf`, run
+  `/usr/local/libexec/keel-runner/job-reset.sh` (root owned; the runner
+  refuses a hook path that does not end in `.sh`) as `runner` around
+  every job. It stops every user unit, timer, socket and container scope,
+  removes `~/.config/systemd` and `~/.local/share/systemd`, kills processes
+  in the service's cgroup that are not the hook's own ancestors, resets the
+  home directory to the skeleton dotfiles, the LXC defaults and the
+  runner's `.env` (from `/usr/local/share/keel-runner/`), removes the
+  runner's files in `/tmp`, `/var/tmp`, `/dev/shm` and `/var/tmp/keel-ci`,
+  and after the job empties `_work` except `_temp`, which takes the cached
+  actions and the checkouts with it.
+- `ExecStartPre=+/usr/local/sbin/keel-runner-start-reset`, as root, before
+  every start of the service: stops `user@1001.service` (every container
+  with it), kills every process of uid runner, resets the home directory,
+  `.env`, `_work`, the scratch root and the runner's temporary files, and
+  starts the user manager again. A job that kills the runner to dodge the
+  hooks lands here.
+
+Verified: keel-core run 36772014959, attempt 3, `appliance /
+boot-published-layer` green in 43 s from `test-appliance.yml@main`, with
+both hooks in the log ("stopping user units", "work tree emptied").
+
+### What a job can still do
+
+Honestly: a job on `keel-lxc-1` runs as uid 1001, the same uid as
+`Runner.Listener`. It cannot become root and cannot reach the web roots,
+the other services or the LAN, but within uid 1001:
+
+- It can read `/home/runner/actions-runner/.credentials` and
+  `.credentials_rsaparams`, the runner's registration with the
+  organization, and so impersonate `keel-lxc-1` from anywhere and receive
+  later jobs, with their tokens, until the runner is removed. There is no
+  way to keep a file from a process of the same uid that the listener must
+  read, and `kernel.yama.ptrace_scope` is 0, so the listener's memory is
+  readable too. Making the files root owned breaks the listener.
+- It can modify the runner itself (`bin/`, `externals/`, `run.sh`), which
+  runs every later job. Neither hook can undo that; restoring the tree as
+  root would fight the runner's own self-update.
+- It can leave a process outside the service's cgroup only through the
+  user manager, which the hooks and the start reset stop.
+
+The fix for both is an ephemeral runner that registers itself for exactly
+one job. `config.sh --ephemeral`, or better a just-in-time config
+(`POST /orgs/keel-linux/actions/runners/generate-jitconfig`), needs a
+credential that can register runners, every time. Options, none applied:
+
+1. A GitHub App owned by the organization with only the "Self-hosted
+   runners: read and write" organization permission, its private key on the
+   VM readable by root only, and a root service that mints an installation
+   token, asks for a JIT config and starts one runner with it as `runner`
+   from a pristine copy. A job never sees the key (another uid), and a JIT
+   config it steals is spent. The key can register and remove runners in
+   the organization and nothing else.
+2. The same with the key off the VM: a scheduled job elsewhere (the build
+   host, or a hosted workflow holding the key as a secret) generates JIT
+   configs and hands them over SSH to a root-only spool on the VM. Nothing
+   long lived on the VM, more moving parts.
+3. A fine-grained personal access token with the same permission instead of
+   an App: like option 1, but tied to a person and their account's fate.
+   Not recommended.
+
+Until one of those is in place the residual risk is: anyone who can get a
+job onto this runner, which after the changes above means a member with
+write access to `Keel-Linux/.github` or to the main branch of an appliance
+repository, can take over the runner registration and see later jobs. They
+cannot reach root, the sites' files or the LAN.
+
+Two disruptions while this was done. A manual run of `job-reset` while the
+runner was busy stopped the container of coreruleset run 36815956699 (CI
+migration, exit 143); it was re-run and passed. When the firewall rules
+went in, the `lxcbr0` drop landed above the DNS accept for about a minute
+(04:47 to 04:48 UTC) before it was reordered. The first install of the hooks
+named them without `.sh`, which the runner refuses, so every job failed in
+"Set up runner" from 05:08 to 05:13 UTC (keel-core 36772014959 attempt 2,
+re-run green as attempt 3; common 36818461545); the runner then took two
+minutes to clear its session conflict after the restart.
+
+Rollback: `/root/keel-runner-hardening-2026-10-01/ROLLBACK.txt` on the VM,
+both rounds, in order: the hooks, the firewall (by handle, not with
+`nft -f`), then sudo and the helpers, stopping `user@1001.service` and the
+containers before `loginctl disable-linger runner`, removing
+`~runner/.cache`, and on GitHub reverting #16 and #18 and lifting the
+workflow restriction. The fork pull request policy stays.
 
 ## 7. CD: what is published where today
 
