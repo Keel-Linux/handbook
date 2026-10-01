@@ -668,8 +668,9 @@ It is a new key of version 1 rather than version 2: no manifest that
 carries it existed before, and the package declares `Depends: keel (>=
 0.15.0)`, the first keel that reads it. `validate` checks it as rule 12
 checks a first boot hook; `apply` runs it, and every executable of
-`state.d/` beside it, within its timeout, only when they are root's, not
-writable by others and inside `/usr/lib/keel/overlays`, and records the
+`state.d/` beside it, within its timeout, only when they and their
+directories are root's, not writable by group or others, and inside
+`/usr/lib/keel/overlays`, and records the
 state with a digest of the hooks so that a hook installed later runs too.
 
 ```yaml
