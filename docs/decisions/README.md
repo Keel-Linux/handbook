@@ -34,6 +34,7 @@ that changes an earlier one says so under "What this amends".
 | [0041](0041-the-appliance-manifest-version-1.md) | The appliance manifest, version 1 (format: [docs/manifest-v1.md](../manifest-v1.md)) | decided 2026-09-30 |
 | [0042](0042-keel-web-sites.md) | Keel Web sites: modes, the spec, certificates through the Certificate feature, Debian's Nginx layout | decided 2026-09-30 |
 | [0043](0043-release-formats.md) | Release formats: only the ISO and the `.tar.zst` (Docker through `docker import`), AWS and OpenStack by local conversion later, names, layout, signed SHA512SUMS, GitHub Releases | decided 2026-10-01 |
+| [0047](0047-one-image-per-application.md) | One image per application: the installation mode decides what runs; WordPress on Core, Web and PHP with an embedded MariaDB; Keel Cloud in no application image | decided 2026-10-02 |
 
 ## The composition architecture (0023 to 0040)
 
