@@ -34,6 +34,8 @@ that changes an earlier one says so under "What this amends".
 | [0041](0041-the-appliance-manifest-version-1.md) | The appliance manifest, version 1 (format: [docs/manifest-v1.md](../manifest-v1.md)) | decided 2026-09-30 |
 | [0042](0042-keel-web-sites.md) | Keel Web sites: modes, the spec, certificates through the Certificate feature, Debian's Nginx layout | decided 2026-09-30 |
 | [0043](0043-release-formats.md) | Release formats: only the ISO and the `.tar.zst` (Docker through `docker import`), AWS and OpenStack by local conversion later, names, layout, signed SHA512SUMS, GitHub Releases | decided 2026-10-01 |
+| [0044](0044-keel-web-in-the-cloud.md) | Keel Web in the cloud: DNS with a health check first, edge nodes with VRRP second, a role and replicated sites for Keel Web nodes (amends 0020, 0024, 0028, 0029) | decided 2026-10-02; details open |
+| [0045](0045-keel-dns-powerdns-authoritative.md) | Keel DNS, PowerDNS authoritative: LUA records with health checks, two servers in different sites, the DNS successor of 0024 (amends 0020, 0024, 0028, 0029) | decided 2026-10-02; details open |
 
 ## The composition architecture (0023 to 0040)
 
@@ -74,4 +76,6 @@ the two open items below.
 
 Open architecture items of the same session, not yet decided: the
 successor to HubDNS for nodes behind NAT whose IPv6 prefix changes (likely
-a PowerDNS overlay fed from etcd), and Elasticsearch or OpenSearch.
+a PowerDNS overlay fed from etcd), and Elasticsearch or OpenSearch. The
+first was decided on 2026-10-02 by 0045: Keel DNS, an appliance on
+PowerDNS Authoritative.
