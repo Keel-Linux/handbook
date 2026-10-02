@@ -44,16 +44,67 @@ columns, and the operator needs the service list inside it: the site, the
 admin URL, the web shell, Webmin and SSH, each on its own line, in both
 address families. That is fifteen lines of text the operator came for.
 
-So the budget, and it is a ceiling rather than a target:
+### The art, in tiers
+
+The console art is the maintainer's own drawing, decided on 2026-09-30 "in
+layers". It replaced the first ASCII mark, which was drawn by hand from the
+picture and read as a mess on the WordPress usage screen. Five files, kept
+byte for byte as he drew them, installed by keel-core's overlay in
+`/etc/keel/`:
+
+| Tier | File | Rows | Columns | Characters |
+|------|------|------|---------|------------|
+| wide | `banner-wide.txt` | 16 | 150 | UTF-8 only: the mark, the KEEL LINUX lettering, the tagline and KEELLINUX.ORG |
+| full | `banner-utf8.txt`, `banner.txt` | 12 | 29 | UTF-8 block characters, and the same drawing in `#` |
+| small | `banner-small-utf8.txt`, `banner-small.txt` | 7 | 16 | the same, smaller |
+
+The rule, the same on both surfaces: the largest tier that fits, in the order
+wide, full, small, none. The UTF-8 files when the locale is UTF-8, the ASCII
+files otherwise, so a serial console, a recovery shell and `ssh -T` in the C
+locale still render it. There is no ASCII wide tier. No colour escapes
+anywhere. Nothing records these sizes in code: both renderers measure each
+file, so a new drawing needs no code change.
+
+- The login banner (`/etc/update-motd.d/00-keel-banner`, keel-core) measures
+  the terminal from `LINES` and `COLUMNS`, then `stty size`, then assumes 24
+  by 80, and keeps room under the mark for the title and the addresses. The
+  locale is `LC_ALL`, `LC_CTYPE`, `LANG`, then `/etc/default/locale`, because
+  pam_motd runs the drop-ins with an empty environment.
+- The confconsole usage screen (`keelbanner.py`) measures the room the dialog
+  has: the screen less the backtitle and the shadow (four rows, four
+  columns), and the usage text as dialog wraps it plus five rows of frame and
+  button. The box widens for the wide tier. The locale is the one dialog
+  inherits; Python coerces `LANG=C` to `C.UTF-8`, so only `LC_ALL=C` gets the
+  ASCII tiers there.
+
+What each surface shows, checked on a trixie container on 2026-10-01 with a
+dual stack WordPress service list:
+
+| Terminal | Login banner | Usage screen |
+|----------|--------------|--------------|
+| 80 by 24 | full | none: eleven rows of addresses leave no room |
+| 100 by 30 | full | small |
+| 160 by 45 | wide (UTF-8), full (ASCII) | wide (UTF-8), full (ASCII) |
+| 200 by 50 | wide (UTF-8), full (ASCII) | wide (UTF-8), full (ASCII) |
+
+On 80 by 24 the usage screen has a 20 row box, so the small mark fits only
+above a usage text of seven rows or fewer, such as an IPv6 only appliance.
+The login banner fits its own block, but the rest of the message of the day
+(sysinfo, the confconsole line, uname) follows it and scrolls the top of the
+mark off a 24 row screen.
+
+### The budget of the first mark
+
+What follows is the reasoning behind the first, hand-drawn mark, kept for its
+measurements. The first mark had this ceiling:
 
 | Mark | Rows | Columns |
 |------|------|---------|
 | full | 12 | 38 |
 | small | 7 | 24 |
 
-Plain ASCII only. No box drawing characters and no colour escapes, so a serial
-console, a recovery shell and `ssh -T` all render it. What that leaves on a 24
-by 80 screen, with the full mark and a real service list:
+It was plain ASCII only. What that leaves on a 24 by 80 screen, with the full
+mark and a real service list:
 
 ```
 +------------------------------------------------------------------------+
@@ -90,14 +141,13 @@ comfortably inside it. And the longest service line, the admin URL, already
 wraps at that width, which is a defect of the service list rather than of the
 mark, recorded so that whoever shortens it does not blame the drawing.
 
-At 80 by 24 today, with the current oversized art, the mark is dropped
-entirely and the list still scrolls at 95 percent. That is the rule working
-and the art not fitting: the operator sees no mark at the size that matters
-most.
+At 80 by 24, with that oversized first art, the mark was dropped entirely and
+the list still scrolled at 95 percent.
 
 The rule the code keeps, and its tests hold: the addresses never scroll away.
-As the screen shrinks the full mark gives way to the small one, and the small
-one gives way to nothing, before a single line of text is lost. The code reads
+As the screen shrinks the wide mark gives way to the full one, the full to
+the small one, and the small one to nothing, before a single line of text is
+lost. The code reads
 the mark from its file and measures it, so a new drawing needs no code change,
 and no size is assumed anywhere.
 
@@ -131,8 +181,9 @@ brand's navy, is the version to draw when one is needed for print.
 
 - Do not recolour the mark, and do not add a second blue.
 - Do not stretch it: the wings and the blade are one proportion.
-- Do not redraw the ASCII by hand from the picture. Export it, check it at 24
-  by 80 and at 24 by 60, and commit the file.
+- Do not edit the console art. The five banner files are the maintainer's
+  drawing, installed byte for byte; a change is a new drawing from him, and
+  only trailing spaces may be trimmed.
 - Do not use the lockup where the symbol is meant, or the symbol where the
   product is being named for the first time.
 - Do not put the mark in the footer of a page the operator publishes. The
@@ -152,7 +203,7 @@ brand's navy, is the version to draw when one is needed for print.
 | `keel-lockup-light.png`, `keel-lockup-dark.png`, `keel-lockup*.svg` | symbol with the wordmark, stacked |
 | `site/keel-lockup-horizontal-light.png`, `site/keel-lockup-horizontal-dark.png` | symbol and "Keel Linux" side by side, the site header's lockup, 2367 by 640, transparent; renders of the site, not exports (see "The horizontal lockup" above) |
 | `keel-social-1200x630.png` | link preview card |
-| `banner.txt`, `banner-small.txt` | the console marks, in keel-core's overlay |
+| `banner-wide.txt`, `banner-utf8.txt`, `banner.txt`, `banner-small-utf8.txt`, `banner-small.txt` | the maintainer's console art, in keel-core's overlay (`overlay/etc/keel/`), see "The console mark" |
 | `trace.py` | traces the vectors off the master |
 | `export.py` | re-exports the rasters off the vectors |
 
