@@ -36,6 +36,7 @@ that changes an earlier one says so under "What this amends".
 | [0043](0043-release-formats.md) | Release formats: only the ISO and the `.tar.zst` (Docker through `docker import`), AWS and OpenStack by local conversion later, names, layout, signed SHA512SUMS, GitHub Releases | decided 2026-10-01 |
 | [0044](0044-keel-web-in-the-cloud.md) | Keel Web in the cloud: DNS with a health check first, edge nodes with VRRP second, a role and replicated sites for Keel Web nodes (amends 0020, 0024, 0028, 0029) | decided 2026-10-02; details open |
 | [0045](0045-keel-dns-powerdns-authoritative.md) | Keel DNS, PowerDNS authoritative: LUA records with health checks, two servers in different sites, the DNS successor of 0024 (amends 0020, 0024, 0028, 0029) | decided 2026-10-02; details open |
+| [0046](0046-keel-cloud-version-1-scope.md) | Keel Cloud, version 1 scope: membership and key exchange, DNS with a health check through Keel DNS, a registry view; the API key, the trust model, the self-hosted path | proposed |
 
 ## The composition architecture (0023 to 0040)
 
