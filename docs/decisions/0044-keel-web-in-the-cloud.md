@@ -6,7 +6,9 @@ Status: **decided by the maintainer on 2026-10-02** for the points under
 what balances load in front of applications and in front of Keel Web
 itself, and that Keel Web gets a role and replicated configuration. The
 details he did not decide are under "Open questions", each with a
-recommendation. Nothing here is implemented.
+recommendation. Nothing here is implemented. The addendum at the end, "The
+IPv4 front door", records an idea of the maintainer's of the same day and
+is **proposed**, not decided.
 
 ## What was asked
 
@@ -202,3 +204,112 @@ Checked with `apt-cache policy` on trixie, 2026-10-02.
 - **0029**: the WireGuard VIP is restated as mesh internal and never
   public; it stays for database appliances only (0041), and public clients
   reach Keel Web through DNS and the edge, not through the VIP.
+
+## Addendum (proposed, 2026-10-02): the IPv4 front door
+
+Status: **proposed**. Recorded from the maintainer's idea of 2026-10-02;
+not decided, and nothing here is implemented.
+
+### The idea
+
+A set of Keel Web nodes usually has more IPv6 addresses than IPv4 ones:
+every node has a routable IPv6 address (brief section 4, principle 5), and
+often only one node, or one line of the provider, has a public IPv4
+address. The maintainer's shape for that case:
+
+- **One Keel Web node holds the only public IPv4 address**, the IPv4 front
+  door. It receives every IPv4 connection and reverse proxies it **over
+  native IPv6** to all the Keel Web nodes of the set, itself included,
+  **falling back to the mesh** (0024) for a node it cannot reach over
+  native IPv6. It balances load across them and drops a node that fails
+  its health check.
+- **AAAA records list every live node**, through Keel DNS's health checked
+  LUA records (0045), so IPv6 clients go direct to a node and never pass
+  through the front door.
+- **The A record is the front door's address**, and only that.
+
+### How it fits what is decided
+
+It is the edge node of decision 1.2 above, collapsed onto a Keel Web node
+and limited to IPv4, for the case where there is one IPv4 address and no
+second machine to share it with by VRRP. Nothing new is needed in Nginx:
+
+- **The front door's IPv4 listener is a `tls-passthrough` front** (0042,
+  decision 3): port 443 on `0.0.0.0` is read for its SNI name and passed
+  intact, with the PROXY protocol, to an upstream group of the nodes'
+  public IPv6 addresses. Each node's mesh address is in the same group as
+  a `backup` server (0042, decision 6), which is the fallback to the mesh.
+  TLS ends on the node that serves the request, so the front door holds no
+  certificate or private key of any other node, and Coraza, Anubis and
+  CrowdSec on that node see the client's IPv4 address through PROXY.
+  Port 80 forwards the ACME challenge path and redirects the rest, as for
+  any passthrough site.
+- **Its IPv6 listener is an ordinary Keel Web listener**: an IPv6 client
+  that reaches the front door through the AAAA list is served there,
+  directly, like on any other node.
+- **The other nodes accept PROXY on a listener of its own.** Nginx refuses
+  a connection without a PROXY header on a listener that expects one, so a
+  node cannot take direct IPv6 clients and proxied IPv4 clients on the
+  same socket. Each node keeps `[::]:443` for direct clients and opens a
+  second listener with `proxy_protocol`, whose exposure class admits only
+  the front door's addresses (its public IPv6 address and its mesh
+  address), and `web.real_ip` trusts PROXY only from those addresses.
+- **Health is passive and active, as in 0042**: `max_fails` and
+  `fail_timeout` take a failing node out of the IPv4 rotation, and Monit's
+  derived checks alert. Keel DNS does the same for IPv6 clients, from
+  where each DNS server is.
+
+```yaml
+# on the front door, which also serves its sites itself
+web:
+  upstreams:
+    - name: web-nodes-v6
+      servers:
+        - {address: "2001:db8:10::11", port: 8443}
+        - {address: "2001:db8:20::12", port: 8443}
+        - {address: "fd4b:7c1e:30a2::12", port: 8443, backup: true}  # mesh fallback
+      max_fails: 2
+      fail_timeout: 10s
+      check: {type: tcp}
+  sites:
+    - name: shop-v4
+      mode: tls-passthrough
+      names: [shop.example.org]
+      ipv6: false               # IPv4 listener only; IPv6 clients are served locally
+      to: {upstream: web-nodes-v6}
+      proxy_protocol: true
+```
+
+The `ipv6: false` on a site and the `port` on an upstream server are the
+shape this needs, not fields 0042 already defines; they are named here so
+that the implementation decides them in the spec, not in a template.
+
+### Its limit, stated
+
+**The front door is a single point of failure for IPv4-only clients.**
+While it is down, IPv6 clients still reach every live node through the
+AAAA list, and IPv4-only clients reach nothing. That stays true until one
+of two things exists:
+
+- **a second IPv4 address** on another node, so that Keel DNS answers the
+  A record with an `ifportup` list of both, as it does for AAAA; or
+- **a redundant edge**: two edge nodes sharing one IPv4 address by VRRP in
+  one datacenter (decision 1.2), which replaces the single front door.
+
+The console's status panel (0020) and the IPv4 site's screen say so in one
+line while the set has one IPv4 holder.
+
+### Open questions on the addendum (for the maintainer)
+
+- [ ] **Native IPv6 first, or the mesh first.** Recommendation: native
+  IPv6 first, as the maintainer described, with the mesh as `backup`. TLS
+  is already end to end because the front door passes it through, so the
+  mesh adds no confidentiality, only WireGuard's cost; it is kept for the
+  node whose public IPv6 address is unreachable from the front door.
+- [ ] **Balancing method.** Recommendation: Nginx stream's default round
+  robin, with `hash $remote_addr consistent` as the operator's choice for
+  an application that keeps sessions on one node (Anubis's shared key of
+  0041 already makes the challenge survive a change of node).
+- [ ] **The PROXY listener's port.** Recommendation: 8443, `public` class
+  in the manifest but opened by the firewall only to the front door's
+  addresses, and rendered only on a set that has a front door.
