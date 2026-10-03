@@ -5,7 +5,9 @@ Status: **decided by the maintainer, 2026-10-03**, in two rounds the same
 day: the goal, the commands, the token's contents and four questions
 first, then the five points this note left open, each approved as
 recommended. Both are under "Decision". The sections after it carry the
-decision out. Nothing here is implemented.
+decision out. Nothing here is implemented. An amendment, admission
+evidence for what members learn of each other, is **proposed, for the
+maintainer's approval** at the end of this note.
 
 ## What was asked
 
@@ -452,3 +454,77 @@ anyone, which is what being a member means.
 - **0024 and 0025**: unchanged and applied; inside to outside, the
   rendezvous point for what cannot reach, and etcd as the registry from
   the third node.
+
+## Amendment proposed (2026-10-03): admission evidence
+
+**Status: proposed, for the maintainer to approve or refuse.** It comes
+from the security review of keel#76, which builds "Until etcd exists".
+
+**What was found.** "The overlay authenticates the announcement: it
+comes from a peer's address, which only that peer's key can use." That
+is true of who speaks, and says nothing of what it vouches for. A member
+that pushes a roster can make every other member add any peer it names,
+with no join behind it; the rogue key's own handshake then confirms
+each member's window (0018), since it is a handshake from the peer the
+change added. One compromised member could so add nodes mesh-wide under
+nobody's name, and bring back a node another member removed.
+
+**What is proposed.** Only an admitted join adds a peer, and each added
+peer carries the evidence of its admission:
+
+1. **A signing key per node.** Each node has a long-term Ed25519 key
+   pair, made on the machine (as keel-core#8 has the WireGuard key made),
+   kept as state under /var/lib/keel/mesh, never in an image, a spec or
+   a backup set. Its public half goes in the join request and the
+   fallback's `keel1a:` line, and the inviter's in the join's and the
+   confirmation's answers, which the invite's HMAC authenticates.
+2. **Evidence.** The inviter signs, with its key, the mesh identity, the
+   invite id, the new node's WireGuard and signing keys, its overlay
+   address and endpoint, and the time; it keeps that evidence, sends it
+   in the answer, and joins it to the node's entry in the join's
+   answers, the announcement and every roster.
+3. **Trust.** A member takes an entry only when the evidence names the
+   entry's key and address, is for its mesh, and is signed by a key it
+   already trusts: its own, the inviter it joined through, a member
+   admitted the same way (evidence chains), or a trust root. An entry
+   without valid evidence is ignored, whoever sends it.
+4. **Trust roots, for a mesh built by hand.** Such a mesh has no
+   evidence. `keel mesh create --adopt` on one node and `keel mesh sync
+   --adopt <its address>` on each other one, explicit acts of the
+   operator, make the peers each node's spec lists its trust roots; a
+   root's signing key is learned from the root itself over the overlay,
+   and the node then signs evidence for it (no invite id), which
+   carries it to the members that trust this node. The same two acts
+   are the only way, besides a join, to set a node's mesh identity: no
+   roster or announcement sets it.
+5. **Tombstones.** `keel mesh remove` records the removal, signed with
+   the remover's key; rosters carry tombstones, and no member takes a
+   key with a tombstone signed by a key it trusts.
+6. **The members' channel** is split as an invite's listener is: a root
+   helper that holds the spec, the trust store and the signing key, and
+   an unprivileged, sandboxed listener that faces the overlay, with the
+   same limits (deadline, slots, per source, sizes, refusals), the
+   announcements queued per sender, bounded, and applied in one 0018
+   window.
+
+**What it changes in the threat model** ("Threat model", whose last
+sentence stands). A compromised member can still admit anyone and sign
+for it: that is what being a member means. It can no longer add a node
+to the others without evidence that names it and the invite, add one to
+a member that does not trust it, or bring back a key whose removal a
+trusted member signed; every peer added can be traced to the member
+that signed its admission. 0049's move of the VIP over "the overlay
+announcement of 0048" is a different message, which this does not
+cover; it needs the same rule before it is built: signed by a member's
+key, verified by the receiver.
+
+**What it amends in this note.** "The third node and after", second
+paragraph: "The overlay authenticates the announcement" becomes "The
+overlay authenticates who sends the announcement; each peer it names is
+taken only with admission evidence signed by a key the receiver
+trusts". "Revocation and removing a node": the removal leaves a signed
+tombstone. "Consequences": keel also gains `keel mesh sync`, a signing
+key and a trust store per node, and the `keel-mesh-members` service and
+its listener. Once etcd exists (0025), the registry's records carry the
+same evidence, and members verify it before configuring themselves.
+
