@@ -483,23 +483,36 @@ peer carries the evidence of its admission:
    address and endpoint, and the time; it keeps that evidence, sends it
    in the answer, and joins it to the node's entry in the join's
    answers, the announcement and every roster.
-3. **Trust.** A member takes an entry only when the evidence names the
-   entry's key and address, is for its mesh, and is signed by a key it
-   already trusts: its own, the inviter it joined through, a member
-   admitted the same way (evidence chains), or a trust root. An entry
-   without valid evidence is ignored, whoever sends it.
+3. **Trust.** A member takes an entry only when the evidence names an
+   invite, the entry's key and address, is for its mesh, and is signed
+   by a key it already trusts: its own, the inviter it joined through, a
+   member admitted the same way (evidence chains), or a trust root. An
+   entry without valid evidence is ignored, whoever sends it. Evidence
+   always names an invite: no member vouches for a node it did not
+   admit.
 4. **Trust roots, for a mesh built by hand.** Such a mesh has no
    evidence. `keel mesh create --adopt` on one node and `keel mesh sync
    --adopt <its address>` on each other one, explicit acts of the
-   operator, make the peers each node's spec lists its trust roots; a
-   root's signing key is learned from the root itself over the overlay,
-   and the node then signs evidence for it (no invite id), which
-   carries it to the members that trust this node. The same two acts
-   are the only way, besides a join, to set a node's mesh identity: no
-   roster or announcement sets it.
-5. **Tombstones.** `keel mesh remove` records the removal, signed with
-   the remover's key; rosters carry tombstones, and no member takes a
-   key with a tombstone signed by a key it trusts.
+   operator, make the peers each node's spec lists its trust roots. A
+   root's signing key is bound only from a roster the node fetched
+   itself from the root's own overlay address, never from an
+   announcement, whose source only the unprivileged listener reports.
+   A root vouches for nobody: a peer that a hand-built node's spec lacks
+   is written into that spec by its operator, as the mesh was built.
+   The same two acts are the only way, besides a join, to set a node's
+   mesh identity: no roster or announcement sets it.
+5. **Tombstones, and removing a node before etcd.** `keel mesh remove`
+   records the removal, signed with the remover's key, removes the peer
+   from its own spec under 0018's window, and sends its roster, the
+   tombstone in it, to the others, as this note's "Revocation and
+   removing a node" asks ("so the others drop it too"). A member takes a
+   tombstone only from a key that may remove that node: **the member
+   that admitted it**, **a trust root**, or **the node itself**; it then
+   drops the peer through one window, and never takes the key again.
+   Any other member removes a node from its own spec only. Tombstones
+   are kept for good (one that expired could let a stale roster bring
+   the key back to a member that was offline), at most 1024 per node
+   and 64 per signer, and every roster carries them all.
 6. **The members' channel** is split as an invite's listener is: a root
    helper that holds the spec, the trust store and the signing key, and
    an unprivileged, sandboxed listener that faces the overlay, with the
@@ -508,12 +521,20 @@ peer carries the evidence of its admission:
    window.
 
 **What it changes in the threat model** ("Threat model", whose last
-sentence stands). A compromised member can still admit anyone and sign
-for it: that is what being a member means. It can no longer add a node
-to the others without evidence that names it and the invite, add one to
-a member that does not trust it, or bring back a key whose removal a
-trusted member signed; every peer added can be traced to the member
-that signed its admission. 0049's move of the VIP over "the overlay
+sentence stands). **Any trusted member can vouch for a new node**, as
+this note says any member can invite: the evidence it signs is enough
+for every member that trusts it, directly or through the chain. So a
+compromised member (its root, or its signing key) can admit any node
+into the whole mesh, signed in its own name, and every member adds it;
+it can remove the nodes it admitted, and any node if it is a trust
+root. It can no longer add a node without evidence that names it and
+the invite, add one under another member's name or to a member that
+does not trust it, remove a node it did not admit (unless it is a
+root), or bring back a key whose removal was taken. Every peer added
+can be traced to the member that signed its admission. The way out of
+a compromised member is to remove it, by its admitter or a root: its
+tombstone makes it trusted no more; the nodes it admitted before stay,
+and each is removed the same way. 0049's move of the VIP over "the overlay
 announcement of 0048" is a different message, which this does not
 cover; it needs the same rule before it is built: signed by a member's
 key, verified by the receiver.
@@ -527,4 +548,11 @@ tombstone. "Consequences": keel also gains `keel mesh sync`, a signing
 key and a trust store per node, and the `keel-mesh-members` service and
 its listener. Once etcd exists (0025), the registry's records carry the
 same evidence, and members verify it before configuring themselves.
+
+**Left as follow-up, for the maintainer.** A node's signing key is not
+rotated: it keeps the key it made. Rotation would be a new key signed by
+the old one, which every member that trusts the old key then trusts in
+its place, and a tombstone for the old key once the new one has spread.
+Until then, a node whose key may be compromised is removed and joins
+again with a new invite, which gives it a new key pair.
 
