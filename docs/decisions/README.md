@@ -35,6 +35,7 @@ that changes an earlier one says so under "What this amends".
 | [0042](0042-keel-web-sites.md) | Keel Web sites: modes, the spec, certificates through the Certificate feature, Debian's Nginx layout | decided 2026-09-30 |
 | [0043](0043-release-formats.md) | Release formats: only the ISO and the `.tar.zst` (Docker through `docker import`), AWS and OpenStack by local conversion later, names, layout, signed SHA512SUMS, GitHub Releases | decided 2026-10-01 |
 | [0047](0047-one-image-per-application.md) | One image per application: the installation mode decides what runs; WordPress on Core, Web and PHP with an embedded MariaDB; Keel Cloud in no application image | decided 2026-10-02 |
+| [0048](0048-joining-the-mesh-with-one-command.md) | Joining the mesh with one command: `keel mesh invite` prints `keel mesh join keel1:<token>`, valid one hour and once; an HMAC authenticated HTTPS port with a pinned certificate, a fallback command; both sides under 0018's window; etcd forms at the third node, with its own TLS | decided 2026-10-03 |
 
 ## The composition architecture (0023 to 0040)
 
