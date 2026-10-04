@@ -4,7 +4,10 @@ Date: 2026-10-03
 Status: **decided by the maintainer, 2026-10-03**, in two rounds the same
 day: Webmin's access per mode and role first (Keel-Linux/tracker#57), then
 the six points the first draft of this note left open, under "Decided,
-second round". The text below already reflects both. The maintainer asked
+second round". The text below already reflects both. A third round, on
+2026-10-04, settled five questions keel's VIP implementation found; it is
+under "Decided, third round" and overrides the text above where they
+differ. The maintainer asked
 that the VIP be settled before the database work, as structural. Nothing
 here is implemented.
 
@@ -411,6 +414,55 @@ carried into the decision above:
    files. Only a node that replicates nothing gets none.
 6. **Yes**: operators reach Webmin from outside the mesh only through an
    SSH tunnel, for now.
+
+## Decided, third round (2026-10-04)
+
+Five questions the design of keel's VIP raised, where this note met 0020,
+0025 and 0048, each approved by the maintainer as recommended:
+
+1. **The code lives in keel.** The VIP state, the move, promote and the
+   etcd lease controller are keel's, as `keel mesh` and etcd are. A
+   `keel-overlay-vip` package in Keel-Linux/common ships only the unit
+   files, as the etcd overlay does. There is no separate keel-quorum
+   repository: the election of 0020 for a replicated pair is the VIP's
+   etcd lease.
+2. **No new role field.** The primary is the VIP's holder: the node of the
+   pair that holds the highest epoch it knows for `appliance.vip`; the
+   other node of the pair is the replica. 0020's one role stands, and is
+   observed, not declared. The command is **`keel vip promote`**, with
+   `--old-primary-gone`; it works with or without a database, and `keel
+   database promote` calls it.
+3. **Only the nodes of the pair may claim the VIP**: the nodes whose spec
+   declares the same `appliance.vip`, as their roster on the members'
+   channel says, and that the receiver trusts by 0048's amendment. A
+   claim is signed with the claimant's signing key and sent from its own
+   overlay address; any other trusted member's claim is refused.
+4. **Nodes that are not cloud advanced learn of moves through the signed
+   announcement** on the members' channel, with etcd as without it; a
+   cloud advanced node watches etcd as well.
+5. **`--old-primary-gone` with etcd waits for the old primary's lease to
+   expire**, up to its TTL, and never revokes another node's lease.
+
+**The lease.** Its TTL is 20 seconds, and the holder drops the address
+after 10 seconds without a renewal, counted from the send of the last
+renewal etcd answered. Against etcd's 5 second election timeout (keel's
+docs/mesh.md, "Timeouts"): a re-election in the majority takes 5 to 10
+seconds, during which renewals fail but etcd extends every lease on a
+leader change, so 10 seconds rides out one re-election without a move;
+and etcd cannot expire the lease before 20 seconds after that send, so a
+holder cut off from the majority has dropped the address 10 seconds
+before any other node can win it. The epoch with etcd is the revision of
+the pair's key, which a claimant writes only by a compare-and-swap on
+the revision it saw.
+
+**What this amends.** 0020, "Where each piece lives" and "Names and
+home": the election row is keel's VIP lease, not keel-quorum, and the
+watchdog of hard part 1 is not built in this version. 0025, "What this
+amends", the brief's section 2: the VIP controller acts on the registry
+from keel, as the etcd member keel runs does; it configures only the
+machine it runs on. "Who moves it" and "How it is carried out" above
+read `keel vip promote` where they say `keel database promote` for the
+VIP.
 
 ## Reconciled with 0029, 0041 and keel
 
