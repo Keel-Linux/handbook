@@ -4,10 +4,12 @@ Date: 2026-10-03
 Status: **decided by the maintainer, 2026-10-03**, in two rounds the same
 day: the goal, the commands, the token's contents and four questions
 first, then the five points this note left open, each approved as
-recommended. Both are under "Decision". The sections after it carry the
-decision out. Nothing here is implemented. An amendment, admission
-evidence for what members learn of each other, is **proposed, for the
-maintainer's approval** at the end of this note.
+recommended. A third round, on 2026-10-04, settled four questions the
+etcd implementation found (keel's etcd PR). All three are under
+"Decision". The sections after it carry the decision out. An amendment,
+admission evidence for what members learn of each other, was
+**approved by the maintainer on 2026-10-04**; it is at the end of this
+note.
 
 ## What was asked
 
@@ -119,6 +121,44 @@ The five points the first draft left open, approved as recommended:
    the WireGuard mesh grows, with peers learned through the inviter, and
    the screen says that etcd and automatic failover need cloud advanced.
    The mesh never changes the installation mode by itself.
+
+### Decided, third round (2026-10-04)
+
+Four questions the design of the etcd half raised, where the rounds above
+disagreed with each other or with keel 0.18, each approved by the
+maintainer as recommended:
+
+1. **Each member issues with its own intermediate CA.** Second round,
+   point 3, has the first node make the CA and the inviter issue the new
+   member's certificate, while any member may invite ("The third node and
+   after") and the answer carries only the CA's certificate, so a member
+   other than the first could not issue. The answer: the root CA key
+   stays on the first node; every etcd member receives, in its join
+   answer, its own intermediate CA, signed by its inviter, and issues the
+   certificates of the nodes it invites with it. Any member can then
+   issue, and every certificate can be traced to the member whose
+   intermediate signed it.
+2. **The spec holds only `overlays.etcd: enabled`.** "etcd at the third
+   node" writes the three member initial cluster "into its spec", which
+   contradicts "The spec does not change" (Consequences) and keel's
+   docs/mesh.md. The answer: the member list, the certificates and the
+   cluster's state are state under `/var/lib/keel/etcd`, rendered into
+   `/etc/default/etcd`; the spec says only that the overlay is enabled.
+3. **Only cloud advanced members count, and an existing mesh forms by
+   command.** A mesh that already has three or more nodes (built with
+   keel 0.18, or by hand and adopted) never sees a third join, and a
+   mesh may mix modes. The answer: only members whose
+   `installation.mode` is `cloud_advanced` count towards the three; the
+   join request says whether the joining node can run etcd; and `keel
+   mesh etcd form` forms the cluster on an existing mesh, making the CA
+   first when the mesh has none.
+4. **`keel mesh remove` removes the etcd member under the amendment's
+   rule.** etcd accepts `member remove` from any holder of a client
+   certificate, while the amendment below lets only the member that
+   admitted a node, a trust root, or the node itself remove it mesh-wide.
+   The answer: `keel mesh remove` runs `etcdctl member remove` only under
+   that rule; otherwise the removal is local only, as the amendment says
+   of the peer.
 
 ## The token
 
@@ -455,9 +495,9 @@ anyone, which is what being a member means.
   rendezvous point for what cannot reach, and etcd as the registry from
   the third node.
 
-## Amendment proposed (2026-10-03): admission evidence
+## Amendment (proposed 2026-10-03, approved 2026-10-04): admission evidence
 
-**Status: proposed, for the maintainer to approve or refuse.** It comes
+**Status: approved by the maintainer, 2026-10-04.** It comes
 from the security review of keel#76, which builds "Until etcd exists".
 
 **What was found.** "The overlay authenticates the announcement: it
