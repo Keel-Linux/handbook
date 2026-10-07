@@ -1,14 +1,15 @@
 #!/bin/sh
-# keel-lxc-2-provision: the second self-hosted runner of the Keel-Linux
-# organization, keel-lxc-2, on a VM that runs the runner only (handbook
-# docs/infra/keel-lxc-2.md). Runs as root on a fresh Debian 13. Idempotent.
+# keel-lxc-2-provision: the second self-hosted runner host of the
+# Keel-Linux organization, on a VM that runs runners only (handbook
+# docs/infra/keel-lxc-2.md): KEEL_RUNNERS instances (8 by default),
+# keel-lxc-2-1 to keel-lxc-2-8, each as its own user runner1 to runner8 in
+# its own limited slice. Runs as root on a fresh Debian 13. Idempotent.
 #
-# The firewall is keel-provision's minus HTTP and HTTPS. The users,
-# appliance gate and job hygiene sections are copied verbatim from
-# docs/infra/keel-provision.pending (its lines 66 to 336, without the site
-# user), so keel-lxc-1 and keel-lxc-2 run the same profile, hooks and
-# resets; change them there first and copy them here. Registering the
-# runner needs a token from the maintainer: docs/infra/keel-lxc-2.md.
+# The firewall is keel-provision's minus HTTP and HTTPS. The appliance gate
+# and job hygiene sections derive from docs/infra/keel-provision.pending
+# (keel-lxc-1): the same profile, hooks and resets, made per user so that
+# several instances share the host. Registering the instances needs a
+# token from the maintainer: docs/infra/keel-lxc-2.md.
 set -eu
 log() { printf '== %s\n' "$*"; }
 
@@ -26,7 +27,10 @@ grep -q 'Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades && log "una
 # The bridge of the CI containers, as on keel-lxc-1 (docs/releases-host.md
 # section 7): IPv4 NAT on 10.0.3.0/24 and the ULA prefix
 # fc42:5009:ba4b:5ab0::/64 advertised ra-only and masqueraded, so a
-# container has a global scope IPv6 address the host can reach.
+# container has a global scope IPv6 address the host can reach. Leases of
+# 10 minutes instead of dnsmasq's hour: every CI container is new, with a
+# new MAC, and eight instances creating containers at once would otherwise
+# hold the 253 addresses of the /24 with leases of containers long gone.
 log lxc-net
 cat > /etc/default/lxc-net << 'EOF'
 # Written by keel-lxc-2-provision (handbook docs/infra/keel-lxc-2.md).
@@ -35,6 +39,7 @@ LXC_IPV6_ADDR="fc42:5009:ba4b:5ab0::1"
 LXC_IPV6_MASK="64"
 LXC_IPV6_NETWORK="fc42:5009:ba4b:5ab0::/64"
 LXC_IPV6_NAT="true"
+LXC_DHCP_RANGE="10.0.3.2,10.0.3.254,10m"
 EOF
 
 # ---------------------------------------------------------------- modules
@@ -98,34 +103,115 @@ systemctl restart nftables
 systemctl restart lxc-net
 nft list ruleset | grep -q 'tcp dport 22 accept' && log "firewall active"
 
+# ---------------------------------------------------------------- lxcfs
+# lxcfs gives each container a /proc/meminfo, cpuinfo and uptime of its own
+# cgroup, so a container under its instance's 2.5 GB sees 2.5 GB. It is a
+# host service: it runs in system.slice, outside the runners' limits.
+log lxcfs
+systemctl enable --now lxcfs >/dev/null 2>&1
+systemctl is-active --quiet lxcfs && log "lxcfs active in $(systemctl show -p ControlGroup --value lxcfs)"
+
+# ---------------------------------------------------------------- instances
+# KEEL_RUNNERS instances, keel-lxc-2-1 to keel-lxc-2-N, one user each:
+# runnerI, uid RUNNER_UID_BASE+I, and subordinate ids at
+# SUB_BASE+(I-1)*65536, 65536 of them, which overlap neither each other nor
+# the 100000-165535 Debian gives the first user of the VM. Each instance
+# has its own user because the job hooks wipe the runner user's home,
+# containers, user units and work tree between jobs: two instances under one
+# uid would wipe each other's job.
+KEEL_RUNNERS=${KEEL_RUNNERS:-8}
+RUNNER_UID_BASE=1100
+SUB_BASE=165536
+SUB_COUNT=65536
+# Per instance, the systemd slice of its user (user-UID.slice) holds both
+# the runner service and the user manager whose delegated scopes the
+# containers run in, so these limits cover the job and its containers.
+# 8 x 2.5 GB leaves the host about 3 GB of the 23.
+RUNNER_MEMORY_MAX=2560M
+RUNNER_TASKS_MAX=8192
+RUNNER_CPU_WEIGHT=100
+runner_user() { echo "runner$1"; }
+runner_uid() { echo $((RUNNER_UID_BASE + $1)); }
+runner_sub() { echo $((SUB_BASE + ($1 - 1) * SUB_COUNT)); }
+
 # ---------------------------------------------------------------- users
 log users
-id runner >/dev/null 2>&1 || useradd -m -s /bin/bash runner
-# The runner has no sudo since 2026-10-01 (docs/ci-cd.md section 6 of the
-# keel repository): apt-get and the lxc-* commands it was allowed were each
-# root-equivalent, on the host that serves every public name.
-rm -f /etc/sudoers.d/runner
+# The single instance of the first provisioning (user runner, uid 1001,
+# actions-runner.service) is gone: it is deregistered on GitHub first
+# (docs/infra/keel-lxc-2.md, "From one instance to eight"), then removed
+# here, its subordinate ids with it.
+if [ -e /etc/systemd/system/actions-runner.service ]; then
+	# KillMode=process: a plain stop leaves the listener running, and it
+	# takes the next job. Every process of the unit goes, then the unit.
+	systemctl kill -s KILL actions-runner >/dev/null 2>&1 || true
+	systemctl disable --now actions-runner >/dev/null 2>&1 || true
+	rm -rf /etc/systemd/system/actions-runner.service /etc/systemd/system/actions-runner.service.d
+	systemctl daemon-reload
+	log "single instance actions-runner.service removed"
+fi
+if id runner >/dev/null 2>&1; then
+	loginctl disable-linger runner || true
+	systemctl stop "user@$(id -u runner).service" || true
+	pkill -KILL -u runner || true
+	userdel -r runner 2>/dev/null || userdel runner
+	sed -i '/^runner:/d' /etc/subuid /etc/subgid
+	rm -rf /home/runner
+	log "user runner removed"
+fi
+rm -f /etc/sudoers.d/runner /usr/local/share/keel-runner/lxc-default.conf
+i=1
+while [ "$i" -le "$KEEL_RUNNERS" ]; do
+	u=$(runner_user "$i") uid=$(runner_uid "$i") sub=$(runner_sub "$i")
+	if ! id "$u" >/dev/null 2>&1; then
+		# No automatic subordinate range: the fixed one is set below.
+		useradd -m -s /bin/bash -u "$uid" -U \
+			-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 "$u"
+	fi
+	[ "$(id -u "$u")" = "$uid" ] || { echo "keel-lxc-2-provision: $u is not uid $uid" >&2; exit 1; }
+	for f in /etc/subuid /etc/subgid; do
+		grep -qx "$u:$sub:$SUB_COUNT" "$f" || { sed -i "/^$u:/d" "$f"; echo "$u:$sub:$SUB_COUNT" >> "$f"; }
+	done
+	# The runners have no sudo since 2026-10-01 (docs/ci-cd.md section 6 of
+	# the keel repository): apt-get and the lxc-* commands it was allowed
+	# were each root-equivalent.
+	rm -f "/etc/sudoers.d/$u"
+	i=$((i + 1))
+done
+# No two ranges of /etc/subuid may overlap, whoever they belong to.
+for f in /etc/subuid /etc/subgid; do
+	sort -t: -k2,2n "$f" | awk -F: -v f="$f" '
+		NR > 1 && $2 < end { printf "keel-lxc-2-provision: %s: %s overlaps %s\n", f, $1, prev > "/dev/stderr"; bad = 1 }
+		{ end = $2 + $3; prev = $1 }
+		END { exit bad }'
+done
+log "users runner1 to runner$KEEL_RUNNERS, subordinate ids $SUB_BASE to $((SUB_BASE + KEEL_RUNNERS * SUB_COUNT - 1))"
 
 # ---------------------------------------------------------- appliance gate
 # test-appliance.yml (keel-linux/.github) boots the published layer in an
 # unprivileged container started by the runner itself, through
-# bin/unprivileged-lxc of that repository. What the runner needs for that:
-# subordinate ids (given by useradd), newuidmap (package uidmap), a quota
-# of veths on lxcbr0, LXC defaults of an unprivileged user, and a systemd
-# user manager that outlives logins, for the delegated cgroup scopes. No
-# root entry points: the two that existed until 2026-10-01 are removed.
+# bin/unprivileged-lxc of that repository. What a runner user needs for
+# that: subordinate ids, newuidmap (package uidmap), a quota of veths on
+# lxcbr0, LXC defaults of an unprivileged user, and a systemd user manager
+# that outlives logins, for the delegated cgroup scopes. No root entry
+# points: the two that existed until 2026-10-01 are removed.
 log appliance-gate
-command -v newuidmap >/dev/null || { echo "keel-provision: install uidmap first" >&2; exit 1; }
-SUB_UID=$(awk -F: '$1 == "runner" && $3 >= 65536 { print $2; exit }' /etc/subuid)
-SUB_GID=$(awk -F: '$1 == "runner" && $3 >= 65536 { print $2; exit }' /etc/subgid)
-if [ -z "$SUB_UID" ] || [ -z "$SUB_GID" ]; then
-	echo "keel-provision: runner has no range of 65536 ids in /etc/subuid and /etc/subgid" >&2
-	exit 1
-fi
-echo 'runner veth lxcbr0 10' > /etc/lxc/lxc-usernet
+command -v newuidmap >/dev/null || { echo "keel-lxc-2-provision: install uidmap first" >&2; exit 1; }
+install -d -m 0755 /usr/local/share/keel-runner
+{
+	echo '# Written by keel-lxc-2-provision (handbook docs/infra/keel-lxc-2.md).'
+	i=1
+	while [ "$i" -le "$KEEL_RUNNERS" ]; do
+		echo "$(runner_user "$i") veth lxcbr0 10"
+		i=$((i + 1))
+	done
+} > /etc/lxc/lxc-usernet
 chmod 0644 /etc/lxc/lxc-usernet
-install -d -m 0755 -o runner -g runner /home/runner/.config /home/runner/.config/lxc
-cat > /home/runner/.config/lxc/default.conf << LXCDEF
+i=1
+while [ "$i" -le "$KEEL_RUNNERS" ]; do
+	u=$(runner_user "$i") sub=$(runner_sub "$i")
+	# The template the job hooks restore ~/.config/lxc/default.conf from,
+	# one per user because the idmap differs.
+	cat > "/usr/local/share/keel-runner/lxc-default.$u.conf" << LXCDEF
 # Unprivileged containers of the CI runner (docs/ci-cd.md section 6).
 # The generated AppArmor profile of /etc/lxc/default.conf needs mac_admin,
 # which an unprivileged user does not have. The preloaded nesting profile
@@ -134,10 +220,15 @@ lxc.net.0.type = veth
 lxc.net.0.link = lxcbr0
 lxc.net.0.flags = up
 lxc.apparmor.profile = lxc-container-default-with-nesting
-lxc.idmap = u 0 $SUB_UID 65536
-lxc.idmap = g 0 $SUB_GID 65536
+lxc.idmap = u 0 $sub $SUB_COUNT
+lxc.idmap = g 0 $sub $SUB_COUNT
 LXCDEF
-chown runner:runner /home/runner/.config/lxc/default.conf
+	chmod 0644 "/usr/local/share/keel-runner/lxc-default.$u.conf"
+	install -d -m 0755 -o "$u" -g "$u" "/home/$u/.config" "/home/$u/.config/lxc"
+	install -m 0644 -o "$u" -g "$u" "/usr/local/share/keel-runner/lxc-default.$u.conf" "/home/$u/.config/lxc/default.conf"
+	loginctl enable-linger "$u"
+	i=$((i + 1))
+done
 # The nesting profile the containers run under, as the lxc package ships it
 # (1:6.0.4-4+deb13u4) plus two mount rules systemd 257 needs: at boot,
 # systemd-journald (and every unit with credentials) runs sd-mkdcreds,
@@ -183,26 +274,44 @@ PROFILE
 chmod 0644 /etc/apparmor.d/lxc/lxc-default-with-nesting
 apparmor_parser -r /etc/apparmor.d/lxc-containers
 aa-status 2>/dev/null | grep -q 'lxc-container-default-with-nesting' && log "nesting profile loaded with the credentials mounts"
-loginctl enable-linger runner
-install -d -m 0755 -o runner -g runner /var/tmp/keel-ci
+# The scratch root the workflows hard code (SCRATCH=/var/tmp/keel-ci/...,
+# one tree per run, attempt and call). Shared by the instances, mode 1777
+# as /tmp: the sticky bit keeps each user's trees its own. Not a group
+# directory: bin/unprivileged-lxc removes a job's tree from inside the
+# job's user namespace, where only the user's own uid and gid are mapped,
+# so a group write bit does not apply there and the removal is refused
+# (every job failed its cleanup that way on 2026-10-07). The write bit for
+# others is what applies; a container's root needs the search bit anyway.
+install -d -m 1777 -o root -g root /var/tmp/keel-ci
+chown root:root /var/tmp/keel-ci
+chmod 1777 /var/tmp/keel-ci
 rm -f /usr/local/sbin/keel-ci-boot-test /usr/local/sbin/keel-ci-cleanup
 
 # ------------------------------------------------------------- job hygiene
-# The runner is not ephemeral, so every job can leave something for the
-# next one. keel-runner-start-reset, as root before every start of the
-# service, and job-reset, as runner around every job, put uid runner back in
-# a known state (docs/ci-cd.md section 6 of the keel repository). Hygiene,
-# not a boundary: a job runs as the same uid as the runner.
+# The runners are not ephemeral, so every job can leave something for the
+# next one. keel-runner-start-reset, as root before every start of an
+# instance, and job-reset, as the instance's user around every job, put that
+# user back in a known state (docs/ci-cd.md section 6 of the keel
+# repository). Hygiene, not a boundary: a job runs as the same uid as its
+# runner.
+#
+# Derived from the same section of docs/infra/keel-provision.pending
+# (keel-lxc-1), with one change: the user is not the fixed name runner but
+# whoever runs the hook (job-reset) or the instance named on the command
+# line (keel-runner-start-reset), and everything they remove is that user's
+# own: its home, its user manager and the scopes its containers run in, its
+# service's cgroup, and the files it or its subordinate ids own in the
+# shared scratch and temporary directories. With one instance named runner
+# they do what keel-lxc-1's do.
 log job-hygiene
-install -d -m 0755 /usr/local/share/keel-runner /usr/local/libexec/keel-runner /etc/systemd/system/actions-runner.service.d
-install -m 0644 /home/runner/.config/lxc/default.conf /usr/local/share/keel-runner/lxc-default.conf
+install -d -m 0755 /usr/local/share/keel-runner /usr/local/libexec/keel-runner
 printf 'LANG=C.UTF-8\n' > /usr/local/share/keel-runner/runner.env
 cat > /usr/local/libexec/keel-runner/job-reset.sh << 'HOOK'
 #!/bin/bash
 # job-reset: put the runner user back in a known state around every job of
-# keel-lxc-1 (docs/ci-cd.md section 6 of the keel repository).
+# its instance (docs/ci-cd.md section 6 of the keel repository).
 #
-# Run as runner by actions-runner.service, through
+# Run as the instance's user by actions-runner@I.service, through
 # ACTIONS_RUNNER_HOOK_JOB_STARTED (as job-reset.sh) and
 # ACTIONS_RUNNER_HOOK_JOB_COMPLETED (as job-reset-completed.sh; the runner
 # takes only a path ending in .sh). Root owned,
@@ -210,6 +319,8 @@ cat > /usr/local/libexec/keel-runner/job-reset.sh << 'HOOK'
 # left to act on a later job: user units and timers, running containers,
 # processes that escaped the job, dotfiles, files in the temporary
 # directories and, after the job, the work tree with its cached actions.
+# Only the files, units, processes and containers of the user running it:
+# several instances share the host, each under its own user.
 #
 # It is hygiene, not a boundary: a job runs as the same uid as the runner,
 # so a job that means harm can change the runner itself, which no hook
@@ -220,23 +331,30 @@ umask 022
 cd / || exit 1
 XDG_RUNTIME_DIR=/run/user/$(id -u)
 export XDG_RUNTIME_DIR
-RUNNER_HOME=/home/runner
+RUNNER_USER=$(id -un)
+RUNNER_HOME=$(getent passwd "$RUNNER_USER" | cut -d: -f6)
 TEMPLATES=/usr/local/share/keel-runner
 SCRATCH_ROOT=/var/tmp/keel-ci
 phase=started
 [ "$(basename "$0")" = job-reset-completed.sh ] && phase=completed
 
-log() { echo "keel job-reset ($phase): $*"; }
+log() { echo "keel job-reset ($phase, $RUNNER_USER): $*"; }
 
-sub_uid=$(awk -F: '$1 == "runner" { print $2; exit }' /etc/subuid)
-sub_gid=$(awk -F: '$1 == "runner" { print $2; exit }' /etc/subgid)
+case "$RUNNER_HOME" in
+	/home/runner*) ;;
+	*) log "refusing to run for home '$RUNNER_HOME'"; exit 0 ;;
+esac
+
+sub_uid=$(awk -F: -v u="$RUNNER_USER" '$1 == u { print $2; exit }' /etc/subuid)
+sub_gid=$(awk -F: -v u="$RUNNER_USER" '$1 == u { print $2; exit }' /etc/subgid)
 # rm in the runner's user namespace, for files owned by its subordinate ids.
 ns_rm() {
 	lxc-usernsexec -m "u:0:$sub_uid:65536" -m "g:0:$sub_gid:65536" \
 		-m "u:65536:$(id -u):1" -m "g:65536:$(id -g):1" -- rm -rf -- "$@"
 }
 
-# 1. User units, timers and the scopes the containers run in.
+# 1. User units, timers and the scopes the containers run in, of this
+#    user's own manager.
 units=$(systemctl --user list-units --all --plain --no-legend \
 	--type=service,timer,path,socket,scope 2>/dev/null \
 	| awk '$1 != "init.scope" { print $1 }')
@@ -250,8 +368,9 @@ rm -rf "$RUNNER_HOME/.config/systemd" "$RUNNER_HOME/.local/share/systemd" \
 systemctl --user daemon-reload 2>/dev/null
 systemctl --user reset-failed 2>/dev/null
 
-# 2. Processes of the service that are not this hook or its ancestors (the
-#    worker, the listener and run.sh): whatever a job left running.
+# 2. Processes of this instance's service that are not this hook or its
+#    ancestors (the worker, the listener and run.sh): whatever a job left
+#    running.
 cgroup=$(sed -n 's/^0:://p' /proc/self/cgroup)
 keep=" "
 pid=$$
@@ -285,12 +404,13 @@ for entry in "$RUNNER_HOME"/.config/* "$RUNNER_HOME"/.config/.[!.]*; do
 done
 mkdir -p "$RUNNER_HOME/.config/lxc"
 find "$RUNNER_HOME/.config/lxc" -mindepth 1 ! -name default.conf -exec rm -rf -- {} +
-cmp -s "$TEMPLATES/lxc-default.conf" "$RUNNER_HOME/.config/lxc/default.conf" ||
-	{ log "restoring .config/lxc/default.conf"; cp "$TEMPLATES/lxc-default.conf" "$RUNNER_HOME/.config/lxc/default.conf"; }
+cmp -s "$TEMPLATES/lxc-default.$RUNNER_USER.conf" "$RUNNER_HOME/.config/lxc/default.conf" ||
+	{ log "restoring .config/lxc/default.conf"; cp "$TEMPLATES/lxc-default.$RUNNER_USER.conf" "$RUNNER_HOME/.config/lxc/default.conf"; }
 cmp -s "$TEMPLATES/runner.env" "$RUNNER_HOME/actions-runner/.env" ||
 	{ log "restoring actions-runner/.env"; cp "$TEMPLATES/runner.env" "$RUNNER_HOME/actions-runner/.env"; }
 
-# 4. Scratch trees and temporary files of the runner and its subordinate ids.
+# 4. Scratch trees and temporary files of this user and its subordinate
+#    ids; those of the other instances are left alone.
 for entry in "$SCRATCH_ROOT"/* /tmp/* /tmp/.[!.]* /var/tmp/* /dev/shm/*; do
 	[ -e "$entry" ] || [ -L "$entry" ] || continue
 	[ "$entry" = "$SCRATCH_ROOT" ] && continue
@@ -325,78 +445,127 @@ ln -sfn job-reset.sh /usr/local/libexec/keel-runner/job-reset-completed.sh
 rm -f /usr/local/libexec/keel-runner/job-reset /usr/local/libexec/keel-runner/job-reset-completed
 cat > /usr/local/sbin/keel-runner-start-reset << 'RESET'
 #!/bin/sh
-# keel-runner-start-reset: run as root before every start of
-# actions-runner.service (ExecStartPre=+). Whatever the last job did, the
-# runner starts from a known state: no process of uid runner, a fresh user
-# manager with no units or containers, the home directory, the LXC
-# defaults, the runner's .env, an empty work tree and an empty scratch
-# root. A job that killed the runner to dodge its hooks lands here.
-# docs/ci-cd.md section 6 of the keel repository.
+# keel-runner-start-reset USER: run as root before every start of an
+# instance, actions-runner@I.service (ExecStartPre=+, USER is runnerI).
+# Whatever the last job did, the instance starts from a known state: no
+# process of USER, a fresh user manager with no units or containers, the
+# home directory, the LXC defaults, the runner's .env, an empty work tree
+# and none of USER's trees in the scratch root. A job that killed the
+# runner to dodge its hooks lands here. Only USER's own: the other
+# instances keep running. docs/ci-cd.md section 6 of the keel repository.
 set -u
-RUNNER_HOME=/home/runner
+user=${1-}
+case "$user" in
+	runner|runner[1-9]|runner[1-9][0-9]) ;;
+	*) echo "keel-runner-start-reset: not a runner user: '$user'" >&2; exit 2 ;;
+esac
+RUNNER_HOME=/home/$user
 TEMPLATES=/usr/local/share/keel-runner
-uid=$(id -u runner)
-log() { echo "keel-runner-start-reset: $*"; }
+uid=$(id -u "$user") || exit 2
+log() { echo "keel-runner-start-reset ($user): $*"; }
 
 systemctl stop "user@$uid.service"
-pkill -KILL -u runner && log "killed processes left by uid runner"
+pkill -KILL -u "$user" && log "killed processes left by uid $user"
 find "$RUNNER_HOME" -mindepth 1 -maxdepth 1 \
 	! -name .bashrc ! -name .profile ! -name .bash_logout ! -name .config ! -name actions-runner \
 	-exec rm -rf -- {} +
 for f in .bashrc .profile .bash_logout; do
-	install -m 0644 -o runner -g runner "/etc/skel/$f" "$RUNNER_HOME/$f"
+	install -m 0644 -o "$user" -g "$user" "/etc/skel/$f" "$RUNNER_HOME/$f"
 done
 rm -rf "$RUNNER_HOME/.config"
-install -d -m 0755 -o runner -g runner "$RUNNER_HOME/.config" "$RUNNER_HOME/.config/lxc"
-install -m 0644 -o runner -g runner "$TEMPLATES/lxc-default.conf" "$RUNNER_HOME/.config/lxc/default.conf"
-install -m 0664 -o runner -g runner "$TEMPLATES/runner.env" "$RUNNER_HOME/actions-runner/.env"
+install -d -m 0755 -o "$user" -g "$user" "$RUNNER_HOME/.config" "$RUNNER_HOME/.config/lxc"
+install -m 0644 -o "$user" -g "$user" "$TEMPLATES/lxc-default.$user.conf" "$RUNNER_HOME/.config/lxc/default.conf"
+install -m 0664 -o "$user" -g "$user" "$TEMPLATES/runner.env" "$RUNNER_HOME/actions-runner/.env"
 find "$RUNNER_HOME/actions-runner/_work" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-find /var/tmp/keel-ci -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-find /tmp /var/tmp /dev/shm -xdev -mindepth 1 -maxdepth 1 -user runner ! -path /var/tmp/keel-ci -exec rm -rf -- {} +
+# The trees USER made in the scratch root; what they hold belongs to its
+# subordinate ids, which root removes as well.
+find /var/tmp/keel-ci -mindepth 1 -maxdepth 1 -user "$user" -exec rm -rf -- {} +
+find /tmp /var/tmp /dev/shm -xdev -mindepth 1 -maxdepth 1 -user "$user" ! -path /var/tmp/keel-ci -exec rm -rf -- {} +
 systemctl start "user@$uid.service"
 log "runner reset"
 RESET
 chmod 0755 /usr/local/sbin/keel-runner-start-reset
-cat > /etc/systemd/system/actions-runner.service.d/keel-hardening.conf << 'DROPIN'
-# keel-lxc-1 hardening (docs/ci-cd.md section 6 of the keel repository).
-[Service]
-# As root, before every start: a known state whatever the last job did.
-ExecStartPre=+/usr/local/sbin/keel-runner-start-reset
-# As runner, around every job: user units, containers, leftover processes,
-# dotfiles, temporary files and, after the job, the work tree.
-Environment=ACTIONS_RUNNER_HOOK_JOB_STARTED=/usr/local/libexec/keel-runner/job-reset.sh
-Environment=ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/usr/local/libexec/keel-runner/job-reset-completed.sh
-DROPIN
-systemctl daemon-reload
 
 # ---------------------------------------------------------------- service
 # The tarball ships no svc.sh: the unit is written here, as on keel-lxc-1
-# (docs/ci-cd.md section 6, step 4). keel-hardening.conf above adds the
-# start reset and the job hooks. Enabled only once config.sh has run.
+# (docs/ci-cd.md section 6, step 4), as a template: actions-runner@I runs
+# instance keel-lxc-2-I as runnerI from /home/runnerI/actions-runner.
+# keel-hardening.conf adds the start reset and the job hooks; a drop-in per
+# instance puts it in its user's slice, and that slice carries the limits.
 log service
-cat > /etc/systemd/system/actions-runner.service << 'UNIT'
+cat > /etc/systemd/system/actions-runner@.service << 'UNIT'
 [Unit]
-Description=GitHub Actions runner keel-lxc-2 (Keel-Linux organization)
+Description=GitHub Actions runner keel-lxc-2-%i (Keel-Linux organization)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=runner
-Group=runner
-WorkingDirectory=/home/runner/actions-runner
-ExecStart=/home/runner/actions-runner/run.sh
+User=runner%i
+Group=runner%i
+WorkingDirectory=/home/runner%i/actions-runner
+ExecStart=/home/runner%i/actions-runner/run.sh
 Restart=always
 KillMode=process
 KillSignal=SIGTERM
 TimeoutStopSec=5min
+# A job that runs its slice out of memory loses the process the kernel
+# picks; the instance keeps running and the job fails, instead of systemd
+# stopping the whole service.
+OOMPolicy=continue
 
 [Install]
 WantedBy=multi-user.target
 UNIT
+install -d -m 0755 /etc/systemd/system/actions-runner@.service.d
+cat > /etc/systemd/system/actions-runner@.service.d/keel-hardening.conf << 'DROPIN'
+# keel-lxc-2 hardening (docs/ci-cd.md section 6 of the keel repository).
+[Service]
+# As root, before every start: a known state whatever the last job did.
+ExecStartPre=+/usr/local/sbin/keel-runner-start-reset runner%i
+# As the instance's user, around every job: user units, containers,
+# leftover processes, dotfiles, temporary files and, after the job, the
+# work tree.
+Environment=ACTIONS_RUNNER_HOOK_JOB_STARTED=/usr/local/libexec/keel-runner/job-reset.sh
+Environment=ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/usr/local/libexec/keel-runner/job-reset-completed.sh
+DROPIN
+i=1
+while [ "$i" -le "$KEEL_RUNNERS" ]; do
+	uid=$(runner_uid "$i")
+	# The service joins user-UID.slice, the slice of its user's manager,
+	# where bin/unprivileged-lxc starts the containers (systemd-run --user
+	# --scope -p Delegate=yes). The job's own processes (keel assemble in
+	# the user namespace, tar, the checkout) and its containers are then
+	# under one limit. lxcfs and the host's services stay in system.slice.
+	install -d -m 0755 "/etc/systemd/system/actions-runner@$i.service.d" "/etc/systemd/system/user-$uid.slice.d"
+	cat > "/etc/systemd/system/actions-runner@$i.service.d/keel-slice.conf" << DROPIN
+# Written by keel-lxc-2-provision: instance $i in the slice of runner$i.
+[Unit]
+After=user-runtime-dir@$uid.service
+
+[Service]
+Slice=user-$uid.slice
+DROPIN
+	# 90- sorts after systemd's own user-.slice.d/10-defaults.conf.
+	cat > "/etc/systemd/system/user-$uid.slice.d/90-keel-limits.conf" << DROPIN
+# Written by keel-lxc-2-provision: the limits of instance keel-lxc-2-$i,
+# its runner, its job and its containers.
+[Slice]
+MemoryAccounting=yes
+MemoryMax=$RUNNER_MEMORY_MAX
+MemorySwapMax=0
+CPUWeight=$RUNNER_CPU_WEIGHT
+TasksMax=$RUNNER_TASKS_MAX
+DROPIN
+	i=$((i + 1))
+done
 systemctl daemon-reload
-if [ -f /home/runner/actions-runner/.runner ]; then
-	systemctl enable actions-runner >/dev/null 2>&1
-	log "actions-runner: $(systemctl is-active actions-runner)"
-else
-	log "runner not registered yet: see docs/infra/keel-lxc-2.md"
-fi
+i=1
+while [ "$i" -le "$KEEL_RUNNERS" ]; do
+	if [ -f "/home/runner$i/actions-runner/.runner" ]; then
+		systemctl enable "actions-runner@$i" >/dev/null 2>&1
+		log "actions-runner@$i: $(systemctl is-active "actions-runner@$i")"
+	else
+		log "actions-runner@$i not registered yet: see docs/infra/keel-lxc-2.md"
+	fi
+	i=$((i + 1))
+done
