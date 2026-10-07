@@ -433,10 +433,19 @@ Five questions the design of keel's VIP raised, where this note met 0020,
    `--old-primary-gone`; it works with or without a database, and `keel
    database promote` calls it.
 3. **Only the nodes of the pair may claim the VIP**: the nodes whose spec
-   declares the same `appliance.vip`, as their roster on the members'
-   channel says, and that the receiver trusts by 0048's amendment. A
-   claim is signed with the claimant's signing key and sent from its own
-   overlay address; any other trusted member's claim is refused.
+   declares the same `appliance.vip`, and that the receiver trusts by
+   0048's amendment. The pair is bound by a **pair record**: the mesh,
+   the VIP and the two members' WireGuard keys, signed by both members
+   (`keel vip pair`, run once the operator declared `appliance.vip` on
+   both, each signing only for the VIP its own spec declares) or by a
+   trust root in place of a member. Every claim and every release is
+   checked against it: a claim carries the record and is taken only
+   from one of its two members, for its VIP; a release only from the
+   other member. A node keeps the first record it takes for a VIP and
+   refuses one naming other members. The VIP is refused when it is a
+   member's own address or outside its region's /112 (0051), and an
+   epoch more than 64 above the one a node knows is refused, so no
+   claim can freeze the VIP.
 4. **Nodes that are not cloud advanced learn of moves through the signed
    announcement** on the members' channel, with etcd as without it; a
    cloud advanced node watches etcd as well.
@@ -445,15 +454,30 @@ Five questions the design of keel's VIP raised, where this note met 0020,
 
 **The lease.** Its TTL is 20 seconds, and the holder drops the address
 after 10 seconds without a renewal, counted from the send of the last
-renewal etcd answered. Against etcd's 5 second election timeout (keel's
+renewal the majority confirmed (etcd's leader renews leases by itself,
+so a renewal counts once a linearizable read confirms it), on the boot
+clock and in memory: a holder that restarts or reboots carries nothing
+until it renewed its lease again. Against etcd's 5 second election timeout (keel's
 docs/mesh.md, "Timeouts"): a re-election in the majority takes 5 to 10
 seconds, during which renewals fail but etcd extends every lease on a
 leader change, so 10 seconds rides out one re-election without a move;
 and etcd cannot expire the lease before 20 seconds after that send, so a
 holder cut off from the majority has dropped the address 10 seconds
-before any other node can win it. The epoch with etcd is the revision of
-the pair's key, which a claimant writes only by a compare-and-swap on
-the revision it saw.
+before any other node can win it. With etcd the epoch is a counter
+kept in its own key, beside the holder's key attached to the lease; a
+claimant writes both only by one transaction, the counter's key still
+at the revision it read and no holder's key, so a stale claim is never
+written. This replaces "the epoch is the etcd revision of the holder's
+key" above: the holder's key goes with its lease, and the counter must
+outlive it.
+
+**Left open, for the maintainer: etcd's access control.** etcd takes a
+client certificate's CN as its user, and every member issues its own
+client certificates with its own intermediate CA (0048, third round,
+point 1), so any member could name itself any user and etcd's RBAC
+would stop none. Until who issues client certificates changes, the VIP's
+keys are guarded by the signed claims and the pair record every node
+checks, not by etcd.
 
 **What this amends.** 0020, "Where each piece lives" and "Names and
 home": the election row is keel's VIP lease, not keel-quorum, and the
