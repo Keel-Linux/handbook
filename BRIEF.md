@@ -154,6 +154,7 @@ Ordering rationale: the spec first because it is the least invasive change and u
 - Process over result: if the process fails, fix the process. Never bypass it.
 - Licensing: forked code stays GPL. Licensing of new components is a maintainer decision.
 - Documentation typography: no em dashes; use commas, colons, parentheses or semicolons; plain hyphen in numeric ranges.
+- **Language standard: ASD-STE100** (Simplified Technical English) for every project text: documentation, decision notes, commits, PR and issue text, console and log messages, reports. The rules are in `docs/writing.md`; the agent summary is in `AGENTS.md`.
 
 ## 11. Decisions reserved for the maintainer
 
