@@ -737,7 +737,7 @@ and `keel diff` show the same.
 
 **Status: decided by the maintainer, 2026-10-07** (Keel-Linux/keel#83,
 recorded in 0048's amendment of the same date). Implemented for the
-single region case in keel 0.21.0; forward-compatible with the rest of
+single region case in keel 0.22.0; forward-compatible with the rest of
 this note, which keel#79 still tracks.
 
 - **Issuance.** "an intermediate per member, signed by a root ...;
