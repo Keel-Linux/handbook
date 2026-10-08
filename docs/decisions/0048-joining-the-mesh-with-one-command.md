@@ -596,3 +596,52 @@ its place, and a tombstone for the old key once the new one has spread.
 Until then, a node whose key may be compromised is removed and joins
 again with a new invite, which gives it a new key pair.
 
+## Amendment (decided 2026-10-07): the root issues every certificate
+
+**Status: decided by the maintainer, 2026-10-07** (Keel-Linux/keel#83,
+after finding 4 of the keel#81 review). Implemented in keel 0.21.0.
+
+**What was found.** Each etcd member held an intermediate CA (signed by
+the root, name-constrained to its /128) and issued its own certificates.
+etcd takes a client certificate's CN as its user, so any member could
+mint a certificate with any CN, root's included, and per-user access
+control in etcd was meaningless.
+
+**What changes.**
+
+- The root CA (the region root, 0051) issues every etcd client and peer
+  certificate itself; the request is relayed by the inviter, as it was
+  for intermediates, or sent by the member at a renewal. **Members hold
+  no intermediate CA.**
+- The certificate's CN is the member's mesh identity (`keel-` and its
+  overlay address), fixed by the root; its SANs stay the member's /128
+  and ::1. The root's holder alone also holds an admin certificate,
+  CN `root`, etcd's root user.
+- etcd's auth is enabled; users are the CNs. Every member reads the
+  mesh's keys and writes its own (`/keel/<mesh>/etcd/`); a pair's VIP
+  key prefixes are read-write for that pair's two members alone, read
+  for the rest. The root's holder manages users and roles.
+- A renewal (every 30 days) and a new membership wait while the root's
+  holder cannot be reached; with several regions (0051) another root
+  issues, as 0051's point 2 already says.
+- keel asks etcd over gRPC with `etcdctl`, since etcd's JSON gateway
+  calls etcd with the member's own certificate and refuses a client
+  certificate with a CN once auth is on; the gateway is turned off, and
+  keel-overlay-etcd depends on etcd-client.
+- A running cluster of the old layout moves with `keel mesh etcd
+  reissue` on the root's holder: one member at a time, every voter
+  healthy before the next and nothing restarted, the intermediates then
+  revoked by the root's CRL, then auth enabled; `--rollback` turns auth
+  off again.
+
+The VIP keeps its signed-claim checks as defence in depth (0049).
+
+**What it amends.** "Decided, third round", point 1: "every etcd member
+receives, in its join answer, its own intermediate CA ... and issues the
+certificates of the nodes it invites with it" becomes "every etcd member
+receives, in its join answer, its certificate, signed by the root, the
+request relayed by its inviter"; the root CA key still stays on the
+first node. Second round, point 3 is unchanged ("The inviter issues the
+new member's certificate" was already the root's, relayed). 0051 is
+amended with it (its "Issuance").
+
