@@ -221,3 +221,46 @@ fallback of 0030 unless a new decision chooses it.
   attachments in a data service.
 - **One source package per overlay**, each released on its own with its
   own changelog and version, at the cost of a CI and a changelog each.
+
+## Amendment (proposed 2026-10-08): an overlay an upgrade adds to the chain
+
+**Status: proposed, for the maintainer's approval.** Implemented in
+keel 0.20.1 (Keel-Linux/keel, branch `fix/overlay-new-in-chain`).
+
+**What was found.** keel-core 0.1.3 added `vip` to Core's overlays.
+After `apt full-upgrade`, every keel command on two Keel Web nodes refused
+`/etc/keel/instance.yaml`: `overlays.vip: not declared`. Rule 25 of the
+format ("`overlays` names exactly the overlays of the resolved chain")
+holds a spec against the chain as it is now, so any overlay added to a
+chain makes every spec written before it invalid, and an upgrade breaks a
+working machine. 0039 makes `apt upgrade` the only update path, so this
+is the normal case, not an accident.
+
+**What changes.** An overlay of the chain that the spec does not declare,
+and did not declare when it was last applied, takes the state its
+manifest gives for `installation.mode`. It is a warning, not an error:
+every command that reads the spec says `overlays.vip: not declared
+(default: disabled)`, `apply --system` converges the default, and `diff`
+lists it as not declared with its default. The spec on disk is not
+rewritten, by keel or by a package's maintainer script.
+
+What the spec declared is recorded by `apply --system` after a run that
+did not fail, in `/var/lib/keel/spec/overlays.yaml`, from the spec alone
+and never from the defaults it filled in. An overlay in that record that
+the spec leaves out stays an error, so the intent of 0027 holds for what
+the operator wrote: a declared overlay cannot silently fall back to a
+default. No default is taken without `installation.mode`, which picks the
+column, or when the default is `ask`, which only the installer asks.
+
+**Why not have the package add it to the spec.** A maintainer script
+editing the operator's spec is invasive: the spec is the operator's
+document (0027), it is replayed on other machines, and an edit by `dpkg`
+would land in a file under configuration management without anyone
+choosing it. The emitted spec still becomes complete: `keel inspect`
+writes the new overlay out from systemd, which is 0039's re-emission
+after an upgrade.
+
+**What this amends.** Rule 25 of docs/manifest-v1.md and the
+`overlays.<name>` row of its "The instance spec side", each with a note
+pointing here. 0027 is unchanged: what an installation and `inspect` emit
+is still complete, defaults written out.
