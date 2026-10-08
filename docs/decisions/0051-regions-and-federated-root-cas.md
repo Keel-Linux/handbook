@@ -732,3 +732,44 @@ and `keel diff` show the same.
 - **keel docs/spec.md and docs/mesh.md**: `installation.region`, and the
   bundle, the merged CRL, the region commands and the roots' status,
   when they are built (keel#79).
+
+## Amendment (decided 2026-10-07): a region root issues every certificate
+
+**Status: decided by the maintainer, 2026-10-07** (Keel-Linux/keel#83,
+recorded in 0048's amendment of the same date). Implemented for the
+single region case in keel 0.22.0; forward-compatible with the rest of
+this note, which keel#79 still tracks.
+
+- **Issuance.** "an intermediate per member, signed by a root ...;
+  leaves issued by the member" becomes "every member's certificate,
+  signed by a root, 30 days". A region root signs its region's members'
+  certificates, relayed by the inviter; when it does not answer another
+  active root signs, as point 2 says, and that certificate's 30 days are
+  already the foreign root's limit, so re-anchoring is the next renewal
+  at the home root. Name constraints no longer apply: the root sets the
+  CN (the member's mesh identity) and the SANs (its /128 and ::1)
+  itself, whatever the request asks.
+- **etcd's users.** The CN is etcd's user, and auth is on; each region
+  root's holder holds an admin certificate (CN `root`) and manages users
+  and roles, the same for every root. "etcd's roles ... are not part of
+  this note and would need their own" (Threat model) is what keel#83
+  decided.
+- **The merged CRL (forward-compatible note).** Members sign nothing:
+  no member holds a CA key, so "signed with its own intermediate's key"
+  in "What etcd does with a CRL" no longer applies. Each root still
+  signs its own CRL on its holder, distributed as today. Since etcd
+  reads one CRL file and does not check its signer, the merged CRL is
+  signed by a root's holder, with that root's key: it carries the union
+  of every root's CRL it verified, under "What the merge keeps"; a
+  member takes it only when its entries are exactly the union it
+  computes itself from each root's own CRL, which it verifies as
+  before, and writes it for etcd. A member that cannot reach a holder
+  keeps the last merged CRL it took, as "a revocation is never undone
+  by silence" says.
+- **Threat model.** A compromised region root can still issue
+  certificates for any address (unchanged), and now for any member's
+  name, so act as any member in etcd; it can no longer be any member's
+  intermediate, of which there are none. A compromised member can no
+  longer certify itself or anyone else into etcd, nor name itself
+  another user.
+
