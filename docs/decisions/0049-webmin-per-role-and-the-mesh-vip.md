@@ -488,6 +488,30 @@ machine it runs on. "Who moves it" and "How it is carried out" above
 read `keel vip promote` where they say `keel database promote` for the
 VIP.
 
+## Precision, 2026-10-11: the rejoin leaves the spec alone
+
+Approved by the maintainer on 2026-10-11, with the design of the MariaDB
+pair in keel (Keel-Linux/keel#93). "The old primary coming back",
+MariaDB, step 3, says the node "writes `role: replica` and the new
+primary's address into its own spec". That is read as the **emitted**
+spec, what `keel inspect` writes out: the rejoin does not rewrite
+`/etc/keel/instance.yaml`. The role in the spec is the one chosen at
+installation, and from the first claim of the VIP on it is runtime
+state, the VIP's (0020, "One role"): `inspect` reports the role the VIP
+gives the node, `diff` reports the difference from the declared role as
+information and never as drift to repair, and `apply` never converges
+it. Who writes the operator's file is Keel-Linux/keel#69's question.
+
+Three more points approved the same day for the same design, each as
+recommended: the mesh root CA is made by `keel mesh create` in every
+cloud mode, and the root issues a `database` leaf per node (a CN that is
+no etcd user, its SANs the node's /128 and the pair's VIP, `REQUIRE X509`
+on the replication account), so there is no database CA per pair; both
+nodes of a pair bind the VIP through `net.ipv6.ip_nonlocal_bind`, so no
+promotion or demotion restarts MariaDB; and the dumps on the standby
+(the maintainer's interim backup of 2026-10-03) are the pull request
+after the replication one.
+
 ## Reconciled with 0029, 0041 and keel
 
 - **0029, "Resolved"**: "node-to-node and management traffic use real
