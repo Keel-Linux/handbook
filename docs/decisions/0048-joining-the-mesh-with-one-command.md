@@ -599,7 +599,7 @@ again with a new invite, which gives it a new key pair.
 ## Amendment (decided 2026-10-07): the root issues every certificate
 
 **Status: decided by the maintainer, 2026-10-07** (Keel-Linux/keel#83,
-after finding 4 of the keel#81 review). Implemented in keel 0.21.0.
+after finding 4 of the keel#81 review). Implemented in keel 0.22.0.
 
 **What was found.** Each etcd member held an intermediate CA (signed by
 the root, name-constrained to its /128) and issued its own certificates.
