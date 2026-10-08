@@ -401,7 +401,7 @@ secrets:
 | --- | --- |
 | `appliance.name` | The appliance manifest this machine runs. Must be installed. `inspect` writes it from the one installed appliance manifest that no other one has as its `base` |
 | `installation.mode` | Chosen once, at installation. It selects which column of the manifest gives the defaults the installer starts from. Changing it later is not a field edit: moving a machine between modes is out of scope (see below). `inspect` reads it from the spec the installer emitted and reports it as not inferred otherwise, since a machine's units do not say which mode chose them |
-| `overlays.<name>` | `enabled` or `disabled`, for every overlay of the resolved chain. `apply --system` converges the units; `diff` compares them with systemd; `inspect` reads them from systemd. A name the resolved chain does not carry is an error. Turning on an overlay whose `requires` are `disabled` is an error |
+| `overlays.<name>` | `enabled` or `disabled`, for every overlay of the resolved chain (one the chain gained after the spec was last applied takes its default: 0041, amendment of 2026-10-08). `apply --system` converges the units; `diff` compares them with systemd; `inspect` reads them from systemd. A name the resolved chain does not carry is an error. Turning on an overlay whose `requires` are `disabled` is an error |
 | `secrets.<name>` | The names the three existing fields have, plus every name a resolved manifest declares. The backends are the existing ones (`file`, `generate`), and `generate` is refused where the manifest says `never`. A secret a manifest marks `generate: required` and the spec leaves out is generated at installation and written out as a file reference by the emitter |
 
 The application sections add `services`, `workers` and the checked
@@ -883,7 +883,9 @@ first.
 
 25. `appliance.name` is installed; `overlays` names exactly the overlays of
     the resolved chain, each `enabled` or `disabled`; the `requires` of every `enabled`
-    overlay are `enabled`.
+    overlay are `enabled`. (Amended, see 0041's amendment of 2026-10-08:
+    an overlay the chain gained after the spec was last applied takes its
+    default for the mode, with a warning, instead of being an error.)
 26. `secrets.<name>` is one of the three existing names or a name a
     resolved manifest declares; `generate: true` is refused where the
     manifest says `never`.
