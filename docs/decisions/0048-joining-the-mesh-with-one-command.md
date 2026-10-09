@@ -645,3 +645,40 @@ first node. Second round, point 3 is unchanged ("The inviter issues the
 new member's certificate" was already the root's, relayed). 0051 is
 amended with it (its "Issuance").
 
+
+## Amendment (decided 2026-10-09): named roots, one hop
+
+**Status: decided 2026-10-09 by the coordinator under the maintainer's
+delegation** (Keel-Linux/keel#99, finding B4 of handbook PR #60).
+Implemented in keel 0.23.7.
+
+**What was found.** A node that joins a mesh built by hand takes only
+the inviter as a peer. The other members are trust roots of the
+inviter and have no evidence, so the joiner does not take them. They
+take the joiner from the announcement and wait for a handshake that
+does not come. The same occurs for a node that a member other than the
+first node invites.
+
+**What changes.**
+
+- **Operator roots** come from `--adopt`, or are the inviter of the
+  node's own invite. They keep every power of a trust root.
+- An operator root names its own operator roots: in the join's answer,
+  or in a roster that the node fetched from that root over the
+  overlay. The node takes them as **named roots**.
+- A named root signs admission evidence, as any member. It names
+  nobody: root status never goes beyond one hop. It has no root-only
+  power: it removes no other node, here or mesh-wide, has no
+  certificate revoked at the root CA's holder, signs no VIP pair
+  record, and is no source of the root CA's anchor.
+- When its namer has a tombstone, a named root is a plain member.
+- A root is not always a root both ways: the inviter is a root of the
+  node it admits, not the other way. A node removes one of its roots
+  mesh-wide only when each other member that holds that root as a root
+  holds this node as one too; else it refuses and changes nothing.
+
+**What it amends.** Amendment "admission evidence", point 4: "A root
+vouches for nobody" becomes "An operator root vouches for nobody; it
+names its operator roots, as named roots, one hop". Point 5: "a trust
+root" becomes "an operator root". keel's assumption that two roots
+always hold each other as roots is corrected.
