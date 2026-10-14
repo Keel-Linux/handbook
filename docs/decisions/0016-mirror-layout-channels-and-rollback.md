@@ -3,7 +3,8 @@
 Date: 2026-09-28
 Status: **accepted**, decided by the maintainer 2026-09-28. Implemented in
 Keel-Linux/keel (client) and Keel-Linux/apt (publisher); the client landed
-first on purpose, see "Order of work" below.
+first on purpose, see "Order of work" below. The words "Not the release
+key" in "Which key signs a channel" are superseded by 0055 (2026-10-14).
 
 What the maintainer decided is the layout and the expiry rule
 (Keel-Linux/apt#13). "Which key signs a channel", and with it an
