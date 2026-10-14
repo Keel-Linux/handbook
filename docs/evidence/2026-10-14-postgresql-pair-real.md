@@ -38,11 +38,11 @@ are on NTP (offset under 1 ms). No secret is in this file.
 | (b) replica cut off | PASS | commit waited 76.4 s, no fallback; alert 58.4 s after the cut; ack 2.1 s after the heal | alert 13.5 to 20.5 s; ack 20.9 to 22.2 s |
 | (c) unplanned failover, 4 ms | PASS | first write 0.83 s after the VIP on B (bound 5 s); 0 of 37 acknowledged ids lost | 1.1 to 1.9 s; none of 15 lost |
 | (e) old primary back | FAIL (fence not automatic), PASS after `keel vip check` | keel#154: A did not learn the newer claim; fenced, dumped, recorded, alerted 9.25 s after `keel vip check`; 0 writes acknowledged | 8 s and 10 s from the VIP helper start |
-| (d) confirmed reseed | FAIL, then PASS with a workaround | keel#153: the copy broke 2 times in 2 tries; with the workaround 15.0 s, streams 0.29 s later, `FIRST 1 (keel)` back | 98 to 129 s; 0.2 to 0.8 s |
+| (d) confirmed reseed | FAIL, then PASS with a workaround | keel#153: 3 tries on 9062 (the copy broke, the apply refused, the copy broke); with the workaround 15.0 s, streams 0.29 s later, `FIRST 1 (keel)` back | 98 to 129 s; 0.2 to 0.8 s |
 | (c) under netem, 250 ms | PASS | overlay 230 to 277 ms, 1.75 % loss; write 0.39 s mean; first write 1.47 s after the VIP on A; 0 of 37 acknowledged ids lost | 227 to 229 ms minimum, 3.25 to 5 % loss; 0.47 to 0.74 s; 1.1 to 1.9 s |
-| (e) and (d) under netem | (e) as above; (d) FAIL, then PASS | keel#154 again, and 61 writes acknowledged with `synchronous_commit = local`; keel#153 again; reseed 83.9 s with the workaround and the watch paused | 98 to 129 s |
+| (e) and (d) under netem | (e) as above; (d) FAIL, then PASS | keel#154 again, and 61 writes acknowledged with `synchronous_commit = local` (keel#156); keel#153 again; reseed 83.9 s with the workaround and the watch paused | 98 to 129 s |
 
-Issues opened: Keel-Linux/keel#152, #153, #154, #155.
+Issues opened: Keel-Linux/keel#152, #153, #154, #155, #156.
 
 ## 1. Release of keel 0.23.18
 
@@ -354,7 +354,7 @@ ack 2000002 ...
 | --- | --- | --- |
 | The last ack on A | id 1036 at 1792010583.22 | - |
 | `keel database promote --old-primary-gone` on B | 33.0 s | 35.0 to 43.8 s |
-| The VIP on B, from the promote start | 31.0 s | - |
+| The VIP on B, from the promote start | 30.8 s | - |
 | B out of recovery, from the VIP on B | 0.69 s | 0.3 to 1.4 s |
 | The first write on B, from the VIP on B | 0.83 s (bound 5 s) | 1.1 to 1.9 s |
 | The write downtime, from the last ack on A | 48.0 s; 31.6 s from the promote start | 24.6 to 40.7 s |
@@ -539,10 +539,10 @@ with `sslmode=verify-full` on the slot `keel`.
 
 | What | Real | CI |
 | --- | --- | --- |
-| The confirmed reseed of the diverged node | FAIL, 2 tries (keel#153) | 98 to 129 s |
+| The confirmed reseed of the diverged node | FAIL, 3 tries (keel#153) | 98 to 129 s |
 | The reseed with `KEEL_POSTGRES_SERVICE=postgresql@17-main` | 15.0 s | - |
 | A streams after the apply | 0.29 s | 0.2 to 0.8 s |
-| `FIRST 1 (keel)` back on B, the end alert | 12.2 s after A streams (next watch run) | at once |
+| `FIRST 1 (keel)` back on B, the end alert | 11.9 s after A streams (next watch run) | at once |
 | The rows of A and B | equal | equal |
 
 Result: FAIL for the product path (keel#153). PASS with the workaround.
@@ -583,7 +583,7 @@ ack 6000001 1792012158.74 1792012159.26
 | --- | --- | --- | --- |
 | A write on the primary: connect and the synchronous commit | 0.39 s mean (0.32 to 0.71 s) | 0.19 s mean (0.07 to 0.36 s) | 0.47 to 0.74 s |
 | `keel database promote --old-primary-gone` | 33.6 s | 33.0 s | 35.0 to 43.8 s |
-| The VIP on the new primary, from the promote start | 31.1 s | 31.0 s | - |
+| The VIP on the new primary, from the promote start | 31.1 s | 30.8 s | - |
 | The first write, from the VIP on the new primary | 1.47 s (bound 5 s) | 0.83 s | 1.1 to 1.9 s |
 | The write downtime, from the last ack on the old primary | 37.2 s; 32.6 s from the promote start | 48.0 s; 31.6 s | 24.6 to 40.7 s |
 | Acknowledged ids on the old primary; missing on the new primary | 37; 0 | 37; 0 | 15; none |
@@ -632,8 +632,14 @@ $ zstdcat rejoin-20261014T211119Z.sql.zst | grep -cP '^70000[0-9]{2}\t'
 A client that sets `synchronous_commit = local` gets acknowledged
 writes on a returned old primary until the fence. The fence put all 61
 rows in the dump, and the new primary does not have them. With the
-default client settings, 0 writes were acknowledged (section 7). This
-result is on keel#154.
+default client settings, 0 writes were acknowledged (section 7).
+
+The 61 writes came in 2 kinds of window:
+
+- 29 in the boot window (from the boot to 1792012218.25, when the boot
+  follow stopped the server). This window is in the design of case (e),
+  with etcd and in CI too: keel#156.
+- 32 after the watch started the server again (1792012226): keel#154.
 
 Fenced, dumped, recorded and alerted 11.65 s after `keel vip check`.
 
@@ -733,11 +739,12 @@ synchronous standby:
 | `keel diff` | no drift | no drift |
 | netem | removed | removed |
 | Hostname | `postgresql-br2` (from its spec) | `postgres` (from the inithooks run at boot; the spec says `postgresql`) |
+| `passwd -S root` after the inithooks run | L (locked) | P |
 
 The hosts: `sch_netem` unloaded on both. No nft table and no qdisc
 remain. No other CT or VM was changed.
 
-Left on the CTs for the investigation of keel#152 to #155:
+Left on the CTs for the investigation of keel#152 to #156:
 
 - `/var/lib/postgresql/17/main.broken-20261014` and
   `main.broken2-20261014` on both CTs (15 MB each on A, 54 MB each on
