@@ -108,3 +108,28 @@ rewind), the design says no instead of guessing.
 - **Several replicas.** `FIRST 1 (keel)` names one standby. A larger
   set changes `synchronous_standby_names`, the slot story and the
   0031 commit contract.
+
+## Amendment 2026-10-14: the new primary commits alone after `--old-primary-gone`
+
+Decided by the coordinator under the maintainer's delegation. It follows
+the maintainer's ceiling of 2026-10-14: after the VIP lands, writes must
+resume within 5 s (Keel-Linux/keel#148).
+
+Case (c) of the end to end test (Keel-Linux/keel#149) showed what the
+no-timeout rule does after an unplanned failover. The new primary keeps
+`FIRST 1 (keel)`. The old primary is gone, so every commit waits until the
+operator confirms the reseed of the old primary. The first write came 202
+to 216 s after the VIP landed.
+
+The rule now has one exception. `keel database promote --old-primary-gone`
+makes the new primary commit alone: it clears `synchronous_standby_names`
+and reloads the server. The operator's flag is the human statement that
+the old primary is gone, and this statement is what allows the change.
+While the primary commits alone, the database watch alerts on each run.
+When a standby streams again after the confirmed reseed, the converge
+writes `FIRST 1 (keel)` back.
+
+The cost, accepted: until the reseed, each commit is on one node only. A
+loss of the new primary in that time loses those commits. A planned
+promote and a replica cut (case (b)) do not change: commits still wait
+for the standby, with no timeout.
