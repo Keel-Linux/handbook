@@ -55,16 +55,24 @@ It has Forgejo Actions and runners that the project can operate itself.
    not run Keel jobs.
 
 5. **What changes in the workflows.** Forgejo reads `.forgejo/workflows`
-   when it is there, and `.github/workflows` when it is not. Thus the
-   port adds `.forgejo/workflows` and does not change the GitHub files
-   until the cutover of `keel` and `handbook` is complete. The Forgejo
-   workflows:
-   - use labels that only the Keel runners have, in place of
-     `ubuntu-latest`;
-   - do not upload SARIF to GitHub code scanning (CodeQL and
-     `github/codeql-action` are GitHub only); the security scan keeps its
-     reports as artifacts and fails on a finding, as before;
-   - call the reusable workflows of `Keel-Linux/.github` on git.pop.coop.
+   when it is there, and ignores `.github/workflows` then. Thus the port
+   adds `.forgejo/workflows` and does not change the GitHub files. The
+   changes:
+   - Forgejo runs a called workflow inline, on the runner of the calling
+     job. Thus each call of a reusable workflow in `.forgejo/workflows`
+     has a `runs-on` line (`keel-lxc` for `lxc-trixie.yml` and
+     `test-appliance.yml`, `keel-host` for the others). A call without
+     `runs-on` waits and never starts.
+   - The reusable workflows of `Keel-Linux/.github` on git.pop.coop use
+     the label `keel-host` in place of `ubuntu-latest`. No job has sudo:
+     the runner host has the packages, and `keel-need-packages` fails a
+     job when one is missing.
+   - The artifact actions are `forgejo/upload-artifact@v4` and
+     `forgejo/download-artifact@v4` of code.forgejo.org. Forgejo does not
+     support `actions/upload-artifact@v4` and later.
+   - The security scan does not upload SARIF to GitHub code scanning
+     (`github/codeql-action` is GitHub only). It keeps its reports as
+     artifacts and fails on a finding, as before.
 
    The names of the required checks on git.pop.coop come from the commit
    statuses of the first green run on Forgejo, not from the GitHub names.
@@ -88,11 +96,12 @@ It has Forgejo Actions and runners that the project can operate itself.
 
 ## Known gaps
 
-- The GitHub runners have job hooks that reset the user, its containers
-  and its files around every job (docs/infra/keel-lxc-2.md). Forgejo
-  runner has no job hook. Until it has an equal, each job of the
-  `keel-lxc` runner cleans its own work.
 - GitHub limited the self-hosted runner group to two workflows at
-  `refs/heads/main`. Forgejo has no such limit. A pull request from a fork
-  on git.pop.coop needs the approval of a maintainer before its workflows
-  run.
+  `refs/heads/main`. Forgejo has no such limit: a workflow of any
+  repository of the organization can use the Keel runners. A pull request
+  from a fork on git.pop.coop needs the approval of a maintainer before
+  its workflows run.
+- The Forgejo runners run one job for each start (`forgejo-runner
+  one-job`), so the resets of the GitHub job hooks run before and after
+  every job (docs/infra/keel-lxc-2.md). The GitHub instances and the
+  Forgejo instances share the VM until the cutover is complete.
