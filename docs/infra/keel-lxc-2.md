@@ -205,6 +205,39 @@ and the listener left behind takes the next job (it did on 2026-10-07):
     systemctl kill -s KILL actions-runner@I; systemctl disable --now actions-runner@I
     gh api -X DELETE orgs/Keel-Linux/actions/runners/ID
 
+## Forgejo runner instances (decision 0056)
+
+Since 2026-10-14 the VM also runs Forgejo runners for the organization
+`Keel-Linux` on git.pop.coop, beside the GitHub instances. They are
+written by `docs/infra/keel-fj-provision.pending`, run as root,
+idempotent. Do not run it while a job runs: its `systemctl daemon-reload`
+stopped two jobs on 2026-10-14.
+
+| Part | What |
+| --- | --- |
+| Instances | `FJ_RUNNERS` (4 by default) users `runner9` to `runner12`, uid 1109 to 1112, the same subordinate range scheme (`runner9` 689824-755359 ...), LXC defaults, `lxc-usernet` quota and slice limits as `runner1` to `runner8` |
+| Runner | `forgejo-runner` 13.2.0 in `/usr/local/bin`, checked against its SHA256; state and `config.yml` in `/home/runnerI/actions-runner`, work trees in its `_work` |
+| Service | `forgejo-runner@I`: `forgejo-runner one-job --wait`, one job for each start, `Restart=always`. Before each job, `keel-runner-start-reset` (as root) and `job-reset.sh`; after it, `job-reset-completed.sh`: the same resets as the GitHub job hooks |
+| Labels | `keel-host`, `keel-lxc`, `self-hosted`, all of the host executor, registered with the registration token of the organization (not of the server), so jobs of other organizations do not come here |
+| Node | `/opt/keel-node24`, the node 24 of the GitHub runner, first in `PATH`, for the JavaScript actions |
+| Packages | what the GitHub jobs installed on ubuntu-latest with sudo (jq, python3-venv, cmake and the kcov build libraries, reprepro, debhelper, devscripts, lintian, redis-server masked, ...); the Debian kcov is 43, the pinned version |
+| `keel-need-packages` | `/usr/local/bin/keel-need-packages PKG...`: the Forgejo jobs run it in place of `sudo apt-get install`; it fails and names the packages the host does not have |
+
+Registration, with a token of
+`GET /api/v1/orgs/Keel-Linux/actions/runners/registration-token` (a site
+or organization administrator), for instance I:
+
+    cd /home/runnerI/actions-runner
+    runuser -u runnerI -- forgejo-runner register --no-interactive \
+      --instance https://git.pop.coop --token TOKEN --name keel-fj-I \
+      --labels keel-lxc:host,self-hosted:host,keel-host:host -c config.yml
+    systemctl enable --now forgejo-runner@I
+
+Memory: the 8 GitHub instances and 4 Forgejo instances have limits of
+30 GB on a 23 GB VM. The GitHub instances are retired after the cutover
+of `keel` and `handbook`, and then the Forgejo instances can grow to 8.
+Instances 13 and 14 are registered and stopped until then.
+
 ## What a job can still do
 
 The same as on keel-lxc-1 (docs/ci-cd.md section 6, "What a job can still

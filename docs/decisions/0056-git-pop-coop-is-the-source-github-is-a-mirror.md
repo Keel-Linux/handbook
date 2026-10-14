@@ -78,9 +78,14 @@ It has Forgejo Actions and runners that the project can operate itself.
    statuses of the first green run on Forgejo, not from the GitHub names.
 
 6. **The order of the cutover.** First the repositories that no other
-   work changes. `keel`, `handbook` and `.github` are last, with a new
-   import at that time, because a push mirror replaces all of the GitHub
-   content and would remove work that is not yet on git.pop.coop.
+   work changes. `keel`, `handbook`, `.github` and `apt` are last, because
+   a push mirror replaces all of the GitHub content and would remove work
+   that is not yet on git.pop.coop. `keel` and `handbook` get a new import
+   at that time. `.github` and `apt` are already on git.pop.coop without a
+   push mirror: their GitHub `main` is merged into the git.pop.coop `main`
+   first, and the push mirror starts after the GitHub CI of `keel` and
+   `handbook` is off (the Forgejo `.github` uses the label `keel-host`,
+   which GitHub does not have).
 
 7. **Archived repositories stay archived.** GitHub refuses a push to an
    archived repository. The archived repositories are imported and
