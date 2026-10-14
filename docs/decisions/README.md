@@ -12,7 +12,7 @@ that changes an earlier one says so under "What this amends".
 | 0002 | tklbam is the last component to be ported | decided |
 | 0003 | Test coverage standard | decided |
 | 0004 | How shell code is tested and measured | decided |
-| 0005 | Signing key custody and repository hosting | key generated and rotated; hosting names decided |
+| 0005 | Signing key custody and repository hosting | key generated and rotated; hosting names decided; unattended signing superseded by 0055 |
 | 0006 | Organization guidelines | decided; tracker reversal 2026-09-27 |
 | 0007 | License of new code, and review policy | decided |
 | 0008 | What kind of fork Keel is | proposed |
@@ -23,7 +23,7 @@ that changes an earlier one says so under "What this amends".
 | 0013 | Database topologies configurable from the console | scope decided |
 | 0014 | Appliance identity, and what it says about backup | open PR, handbook#6 |
 | 0015 | Operator facing commands carry the Keel name | decided |
-| 0016 | Mirror layout, channels and rollback | accepted |
+| 0016 | Mirror layout, channels and rollback | accepted; "not the release key" superseded by 0055 |
 | 0017 | Owning fab | open PR, handbook#18 |
 | 0018 | The network on a running machine | decided |
 | 0019 | Webmin does not change the network | accepted |
@@ -42,6 +42,7 @@ that changes an earlier one says so under "What this amends".
 | [0052](0052-every-release-ships-both-formats.md) | Every release ships both formats: each appliance release stages the `.tar.zst` and the ISO from one build and is published only when both pass; the container drops the boot set (kernel, initrd, firmware, GRUB, installer, about 192 MB of Core's 903.6 MB unpacked), which moves to a per appliance boot layer only the ISO uses; both scanned, signed and listed, the Proxmox index the `.tar.zst` only; the ISO boot tested under BIOS and UEFI in QEMU on the build host as a gate; amends 0043 | decided 2026-10-10, with the five points of the proposal approved as recommended: the boot layer, UEFI as a gate, the install to disk once automated, `.tar.zst` only testing pre-releases until the ISO builder exists, the 990 pin first |
 | [0053](0053-no-merge-on-a-red-check-and-evidence-for-every-real-test.md) | No merge on a red check, and evidence for every test on the real platform: a failing check, required or not, is a bug fixed before the merge, never known noise, and the fix to a wrong check is the first PR (the case: keel-mariadb's `appliance / boot-published-layer`, red since 2026-09-30, fixed by reordering `tests/lib/boot-test-lib.sh`); every run on real nodes leaves `evidence/<date>-<topic>.md` with commands, trimmed output, dpkg versions, hashes and timings, and a report without it is not a result (the case: 0.22.0 from dpkg against 0.19.0 from `keel --version`, keel#98); the undecided items under "What comes next" | decided 2026-10-08 |
 | [0054](0054-the-postgresql-database-pair.md) | The PostgreSQL database pair: twin of the MariaDB converge, basebackup seeding, timeline divergence probe, confirmed-reseed failback, no-timeout synchronous commit | decided 2026-10-13 |
+| [0055](0055-one-key-per-purpose-signed-on-the-build-host.md) | One key per purpose, signed on the build host: main, security, testing and images, each its own certificate and keyring file; subkeys without passphrase on the build host only, 3 year expiry with an alert; supersedes part of 0005 and 0016 | decided |
 
 ## The composition architecture (0023 to 0040)
 
