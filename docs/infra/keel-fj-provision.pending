@@ -156,4 +156,4 @@ OOMPolicy=continue
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-log done
+log finished
