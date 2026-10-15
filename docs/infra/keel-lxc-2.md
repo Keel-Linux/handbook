@@ -1,5 +1,12 @@
 # keel-lxc-2, the second CI runner host
 
+**Status 2026-10-15:** the GitHub runner instances `keel-lxc-2-1` to
+`keel-lxc-2-8` (`actions-runner@1` to `@8`) are stopped, disabled and
+removed from the GitHub organization, and their credentials are deleted
+(decision 0056). The CI of Keel-Linux runs on the Forgejo instances, see
+"Forgejo runner instances" below. The users `runner1` to `runner8` and
+their trees stay; the text about the GitHub instances is a record.
+
 Provisioned on 2026-10-07. The second runner host of the Keel-Linux
 organization, equivalent to keel-lxc-1 (docs/ci-cd.md section 6,
 docs/releases-host.md section 7), so a `keel-lxc` job runs on either.
@@ -215,7 +222,7 @@ stopped two jobs on 2026-10-14.
 
 | Part | What |
 | --- | --- |
-| Instances | `FJ_RUNNERS` (4 by default) users `runner9` to `runner12`, uid 1109 to 1112, the same subordinate range scheme (`runner9` 689824-755359 ...), LXC defaults, `lxc-usernet` quota and slice limits as `runner1` to `runner8` |
+| Instances | `FJ_RUNNERS` (6 by default) users `runner9` to `runner14`, uid 1109 to 1114, the same subordinate range scheme (`runner9` 689824-755359 ...), LXC defaults, `lxc-usernet` quota and slice limits as `runner1` to `runner8` |
 | Runner | `forgejo-runner` 13.2.0 in `/usr/local/bin`, checked against its SHA256; state and `config.yml` in `/home/runnerI/actions-runner`, work trees in its `_work` |
 | Service | `forgejo-runner@I`: `forgejo-runner one-job --wait`, one job for each start, `Restart=always`. Before each job, `keel-runner-start-reset` (as root) and `job-reset.sh`; after it, `job-reset-completed.sh`: the same resets as the GitHub job hooks |
 | Labels | `keel-host`, `keel-lxc`, `self-hosted`, all of the host executor, registered with the registration token of the organization (not of the server), so jobs of other organizations do not come here |
@@ -233,10 +240,9 @@ or organization administrator), for instance I:
       --labels keel-lxc:host,self-hosted:host,keel-host:host -c config.yml
     systemctl enable --now forgejo-runner@I
 
-Memory: the 8 GitHub instances and 4 Forgejo instances have limits of
-30 GB on a 23 GB VM. The GitHub instances are retired after the cutover
-of `keel` and `handbook`, and then the Forgejo instances can grow to 8.
-Instances 13 and 14 are registered and stopped until then.
+Instances: `runner9` to `runner14` (6 instances, `FJ_RUNNERS=6`) run
+since 2026-10-15, after the GitHub instances were retired. Their limits
+are 15 GB of the 23 GB VM.
 
 ## What a job can still do
 

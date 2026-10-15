@@ -6,7 +6,7 @@
 # instances (docs/infra/keel-lxc-2.md). Run as root. Idempotent.
 set -eu
 FJ_FIRST=9
-FJ_RUNNERS=${FJ_RUNNERS:-4}
+FJ_RUNNERS=${FJ_RUNNERS:-6}
 FJ_VERSION=13.2.0
 FJ_SHA256=fadaec897f5e6641c363f87ecaf75f866f99c81b7097ec6b433e4c48123fcad1
 RUNNER_UID_BASE=1100 SUB_BASE=165536 SUB_COUNT=65536

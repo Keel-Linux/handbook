@@ -103,10 +103,20 @@ It has Forgejo Actions and runners that the project can operate itself.
 
 - GitHub limited the self-hosted runner group to two workflows at
   `refs/heads/main`. Forgejo has no such limit: a workflow of any
-  repository of the organization can use the Keel runners. A pull request
-  from a fork on git.pop.coop needs the approval of a maintainer before
-  its workflows run.
+  repository of the organization can use the Keel runners.
+- A pull request from a fork is held until a maintainer approves it.
+  Tested on 2026-10-15 with a user that is not a member of `Keel-Linux`:
+  a fork pull request to `keel-keys` that changed `.forgejo/workflows`
+  made 4 runs, each `need_approval`, and no job started. Forgejo 14
+  (`services/actions/trust.go`) trusts only users with write access to
+  the repository. Every other poster needs an approval for each run,
+  unless a maintainer selects "always trust" for that user. Thus approve
+  once, after reading the workflow change, and do not select "always
+  trust". This is the default of Forgejo 14; no setting was changed.
+  Registration on git.pop.coop is closed, so only existing accounts can
+  open such a pull request.
 - The Forgejo runners run one job for each start (`forgejo-runner
   one-job`), so the resets of the GitHub job hooks run before and after
-  every job (docs/infra/keel-lxc-2.md). The GitHub instances and the
-  Forgejo instances share the VM until the cutover is complete.
+  every job (docs/infra/keel-lxc-2.md). The GitHub runners
+  `keel-lxc-2-1` to `keel-lxc-2-8` were stopped, disabled and removed
+  from the GitHub organization on 2026-10-15.
