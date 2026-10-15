@@ -44,6 +44,7 @@ that changes an earlier one says so under "What this amends".
 | [0054](0054-the-postgresql-database-pair.md) | The PostgreSQL database pair: twin of the MariaDB converge, basebackup seeding, timeline divergence probe, confirmed-reseed failback, no-timeout synchronous commit | decided 2026-10-13 |
 | [0055](0055-one-key-per-purpose-signed-on-the-build-host.md) | One key per purpose, signed on the build host: main, security, testing and images, each its own certificate and keyring file; subkeys without passphrase on the build host only, 3 year expiry with an alert; supersedes part of 0005 and 0016 | decided |
 | [0056](0056-git-pop-coop-is-the-source-github-is-a-mirror.md) | git.pop.coop is the source, GitHub is a mirror: the organization `Keel-Linux` on git.pop.coop holds the repositories, issues, pull requests and CI (Forgejo Actions on the Keel runners); each GitHub copy is a push mirror with one deploy key, no branch protection and no new issues; `keel`, `handbook` and `.github` cut over last | decided 2026-10-14 |
+| [0057](0057-an-etcd-witness-and-a-pair-that-moves-to-cloud-advanced.md) | An etcd witness, and a pair that moves to cloud advanced: a witness is a Keel Core node in `cloud_advanced` with etcd and no role (0020's data-less voter, 0028's external arbiter); an existing `cloud_simple` pair moves to `cloud_advanced` by its spec, then `keel mesh etcd form` on the root's holder; only that direction; proved by the BR3-THIN evidence before keel's docs change | decided 2026-10-15 |
 
 ## The composition architecture (0023 to 0040)
 
