@@ -43,3 +43,108 @@ is not used (keel#163).
 The VIP drop of keel#167 on a cut of the leader's site fails the witness
 and standby items. A cut of the standby where writes wait is 0054's
 design, not a failure. If any item fails, keel stays in trixie-testing.
+
+## 1. Release and upgrade: keel 0.23.27
+
+```
+# build host, 18:03 UTC, /srv/keel-apt/apt after git pull --ff-only (03c30c6)
+$ bin/build-package --native keel main </dev/null
+build-package: done: keel_0.23.27_amd64.changes in /srv/keel-apt/incoming
+$ dpkg-deb -f keel_0.23.27_all.deb Version
+0.23.27
+sha256 5bb2363b2b729d417cd2b5cfb4f0830e414280cea78b6f5220b9bbfe1aac11ff
+./usr/lib/systemd/system/postgresql@.service.d/keel-guard.conf
+$ bin/publish </dev/null
+publish: signing trixie-testing with subkey 03041024F4B2C0C2F42DDDEA04906EAB77513310 of AD0964BE3F09DED469A3B6B2148E951314703180
+publish: committed in /srv/keel-apt/apt: publish trixie-testing: keel 0.23.27
+# workstation
+$ keel-publish-mirror --archive-only
+keel-publish-mirror: https://archive.keellinux.org trixie-testing verifies
+EXIT=0
+```
+
+The signature ran over ssh with standard input from `/dev/null` and
+nobody at a keyboard (decision 0055).
+
+```
+$ apt-get update; apt-get install -y keel        # 9062, 9054, 9071, 18:04 UTC
+  Installed: 0.23.21
+  Candidate: 0.23.27
+keel	0.23.27
+$ systemctl is-active keel-database-follow.path keel-vip   # 9062 and 9054
+active active
+$ systemctl show postgresql@17-main -p ExecStartPre | grep -o 'keel database guard'
+keel database guard
+```
+
+On 9062 the watch cleared the VIP fence of the run of 2026-10-15
+(keel#166), with no operator step:
+
+```
+7465.84 9062 keel: database.server.role: the VIP fence is cleared: this standby is the holder's copy and received everything the holder flushed, so it may take the VIP again when the lease of the holder expires (keel#166)
+```
+
+After the upgrade, `keel-database-follow.service` ran 2 times on 9054
+and 1 time on 9062 in 4 min (keel#164: before, every 1 to 2 s).
+
+## 2. Run 1 on 0.23.27, base network: FAIL
+
+The method is the one of `docs/evidence/2026-10-15-br3-thin-etcd-witness.md`,
+section 4: `/root/writer.sh` on both pair nodes writes only while the
+node carries the VIP, `/root/vipwatch.sh` samples the VIP every 0.1 s,
+and a cut is an nft table that drops UDP port 51820 in the cut CT.
+
+| Cut | etcd leader | Result | Numbers |
+| --- | --- | --- | --- |
+| BR3, witness, 60 s | 9054 (holder) | PASS | VIP kept on 9054; 197 writes acknowledged, 0 killed |
+| BR2, standby, 60 s | 9054 (holder) | PASS, by design | VIP kept; 2 writes waited and were killed after 30 s (0054); the next write acknowledged 0.32 s after the heal |
+| BR1, primary, 90 s | 9054 (cut) | FAIL (keel#178) | 9062 claimed epoch 14 in etcd, but no node carried the VIP |
+
+Neither cut of run 1 removed the etcd leader from a site that did not
+hold the VIP. So run 1 did not test keel#167.
+
+### The failure (keel#178)
+
+The cut of 9054 began at 7979.98. 9062's controller claimed epoch 14
+when the lease of epoch 13 expired. Its root half then wrote the
+statement of keel#165, and the sandbox of keel-vip.service refused the
+write:
+
+```
+8013.44 9062 python3[370035]: vip: [Errno 30] Read-only file system: '/var/lib/keel/database/old-primary-gone.new'
+```
+
+keel-vip.service has `ProtectSystem=strict` and
+`ReadWritePaths=/var/lib/keel/vip /etc/wireguard`. The write failed
+before the claim was recorded with its lease. The next turn took the
+claim from the counter with no lease, and the controller carries only a
+claim with a lease. 9062 stayed in recovery. CI did not see it, because
+the netns harness gave the helper write access to the whole root of
+the node.
+
+What worked in the same run, on 9054 after the heal at 8071.71
+(keel#156, keel#164):
+
+```
+8074.86 9054 keel: vip ...: epoch 14, held by EJIMTp... at fd1a:bb4c:b407::fc0a; this node no longer holds it
+8075.59 9054 systemd: Starting postgresql@17-main.service
+8076.22 9054 postgresql@17-main: keel database guard: starts as a standby that follows nobody: the newest claim of fd1a:bb4c:b407::ffff:1 is the other member's, so this server takes no write (standby.signal written, the follow drop-in removed; keel#156)
+8078.59 9054 systemd: Started postgresql@17-main.service
+8080.22 9054 keel: database.server.role: a dump of what this node holds is kept at /var/backups/keel/postgresql/rejoin-20261015T181439Z.sql.zst
+8080.22 9054 keel: database.server.role: refused: diverged: ... (timeline 7 against the holder's 7)
+```
+
+The old primary never started as a primary after the heal. Before the
+fix the server was writable 2.9 to 3.8 s at this point.
+
+**Restore 1, an operator step:** `keel database promote
+--old-primary-gone` on 9054, 8256.99 to 8262.30 (5.3 s). 9054 holds
+epoch 15 with an etcd lease, 9062 streams as its synchronous standby,
+and the watch cleared the VIP fence of 9062 again. Both nodes were on
+timeline 7, so no reseed was necessary.
+
+Acknowledged ids of run 1: 360. All 360 are in `t1` on 9054 and on 9062.
+
+**Decision:** 0.23.27 stays in trixie-testing and does not go to
+trixie. The fix is Keel-Linux/keel#179 (keel#178), released as 0.23.28.
+The whole matrix runs again on 0.23.28.
