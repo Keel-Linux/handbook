@@ -28,7 +28,7 @@ Output is trimmed. No secret is in this file.
 
 | Item | Result | Numbers |
 | --- | --- | --- |
-| 1. Signers changed, 1 PR for each repository | DONE | apt#30 and buildtasks#24 merged. keel#176 open, see section 1 |
+| 1. Signers changed, 1 PR for each repository | DONE | apt#30, buildtasks#24 and keel#176 merged, see section 1 |
 | 2. How Proxmox verifies `aplinfo.dat.asc` | MEASURED | `pveam` has 2 fixed sources and the pve-manager keyring. An admin adds no key file. Keel uses `keel-pve` and `/usr/share/keyrings/keel-images-keyring.gpg` |
 | 3. Re-sign of the current artifacts | PASS | release 2026-10-11: `.sha512.asc`, `aplinfo.dat.asc`, `MANIFEST.asc` each have 2 signatures. `aplinfo.dat` did not change |
 | 4. Publication | PASS | `keel-publish-mirror --no-channels 2026-10-11`: exit 0. The APT archive did not change |
@@ -58,15 +58,16 @@ The pull requests:
   then images. `release_sign` writes 1 `.asc` with both. A main-only
   signature is not current when both must sign, so `--sign-only` adds the
   images signature. The expiry alert checks both subkeys. CI green.
-- **keel#176**, open. `signature.verify_by_any` reads the gpgv status
-  lines one signature at a time. gpgv exits 2 when one of 2 signatures has
-  no key, so the exit code is not read. The keyrings are
+- **keel#176**, merged (1093a01) after keel#175 (0.23.27) of the other
+  agent. `signature.verify_by_any` reads the gpgv status lines one
+  signature at a time. gpgv exits 2 when one of 2 signatures has no key,
+  so the exit code is not read. The keyrings are
   `/usr/share/keyrings/keel-archive-keyring.gpg` and
   `keel-images-keyring.gpg`. A missing file is skipped. Version 0.23.28.
-  It merges after keel#175 (0.23.27) of the other agent. The first CI run
-  had 1 red job, `tests / vip`: etcd timeouts under netem, in code that
-  this PR does not change. It is run again before the merge. keel#151 is
-  replaced by keel#176.
+  2 earlier CI runs each had 1 red job (`tests / vip`, then
+  `tests / vip-upgrade`), in VIP code that this PR does not change. The
+  run after the rebase onto keel#175 was green on all 11 checks. keel#151
+  is replaced by keel#176.
 - **buildtasks#24**, merged (a43e6a3). The first CI run failed the
   coverage gate (98.99 percent of 99 in `generate-signature`). The fix
   made the line that kcov did not count into 2 lines, and the second run
