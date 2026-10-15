@@ -133,3 +133,49 @@ The cost, accepted: until the reseed, each commit is on one node only. A
 loss of the new primary in that time loses those commits. A planned
 promote and a replica cut (case (b)) do not change: commits still wait
 for the standby, with no timeout.
+
+## Amendment 2026-10-15: an expired lease counts as `--old-primary-gone`
+
+Decided by the maintainer on 2026-10-15, in answer to the question of
+Keel-Linux/keel#165. The maintainer's answer was: "sim".
+
+With etcd, the other node of the pair claims the VIP only after the
+lease of the old primary's claim expired (keel `docs/vip.md`). Case (c)
+on real nodes showed that the VIP moved by itself, but the new primary
+took no write until the operator ran `keel database promote
+--old-primary-gone` (`docs/evidence/2026-10-15-br3-thin-etcd-witness.md`,
+section 5).
+
+The rule of the amendment of 2026-10-14 now has a second statement that
+allows the exception:
+
+- **The scope.** etcd is formed, and the VIP controller of the new
+  primary claims because the lease of the newest claim expired. The
+  controller saw that lease alive before, and the lease ended at its
+  due time, not before it.
+- **What keel does.** The controller records the statement before it
+  records the claim. keel database follow then promotes the standby and
+  empties `synchronous_standby_names`, the same as after `keel database
+  promote --old-primary-gone`. The new primary commits alone.
+- **What does not count.** A lease that ended before its due time was
+  revoked, not expired. A lease that the controller never saw alive,
+  for example after a restart of the controller, can be either. In
+  these cases the new primary does not commit alone. Its commits wait
+  for a standby or for the operator, as before.
+- **The alert.** While the primary commits alone, the database watch
+  alerts at each run. When a standby streams again after the confirmed
+  reseed, keel writes `FIRST 1 (keel)` back.
+
+The safety argument: a holder drops the VIP 10 s after its last renewal
+that the majority confirmed, and etcd cannot expire the lease before
+20 s after that renewal. Thus the old primary was cut off from the
+majority, and it dropped the VIP before the new claim. Under
+synchronous replication it cannot acknowledge a write without its
+standby, and the standby is the new primary. The exception is a client
+that sets `synchronous_commit` to `local` or `off` for its session
+(Keel-Linux/keel#156): the old primary can acknowledge such a write in
+the window before keel stops it.
+
+The cost, accepted: until the reseed of the old primary, each commit is
+on one node only. A loss of the new primary in that time loses those
+commits.
