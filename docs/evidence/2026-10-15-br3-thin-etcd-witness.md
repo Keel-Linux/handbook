@@ -1,6 +1,6 @@
 # Evidence: an etcd witness on BR3-THIN for the PostgreSQL pair
 
-Date: 2026-10-15, 10:40 to 11:43 UTC.
+Date: 2026-10-15, 10:40 to 11:55 UTC.
 Decision: 0057 (handbook#77), 0054, 0049, 0025.
 Approval: the maintainer approved this test and the use of BR3-THIN.
 Issues opened: Keel-Linux/keel#161 to #169. A comment on keel#156.
@@ -33,10 +33,20 @@ Machines:
 | (c) operator promote, base | PASS, bound FAIL | 0 of 30 acknowledged ids lost; first write 11.9 s after the VIP (bound 5 s, keel#169) |
 | (c) operator promote, netem 250 ms | PASS, bound FAIL | 0 of 20 lost; VIP on B 36.7 s after the cut; first write 12.9 s after the VIP (keel#169) |
 | Automatic failover a 2nd time | FAIL | the rejoined node stays VIP-fenced (keel#166) |
-| (e) old primary returns, base and netem | PASS | fenced, dumped and recorded after the heal; writable 3.8 s and 2.9 s before the fence (keel#156 comment) |
-| Cut of BR3 (witness) | PASS, with a blip | writes go on; VIP off 2.3 s when the witness is the etcd leader (keel#167) |
-| Cut of BR2 (standby) | PASS at base; 1 of 2 FAIL under netem | base: VIP kept, writes wait (0054); netem run 1: no etcd leader for 111 s, pair down 180 s (keel#167, #168) |
-| End state | PASS | pair works, netem removed |
+| (c) by `pct stop`, base | PASS, bound FAIL | VIP on B 34.1 s after the stop; first write 12.1 s after the VIP (keel#169) |
+| (e) old primary returns after a heal, base and netem | PASS | fenced, dumped and recorded 10.7 to 26.0 s after the heal; server writable 2.9 to 3.8 s before the fence (keel#156 comment) |
+| (e) old primary boots, base | PASS | newer claim learned 1.7 s after the server started; writable 3.9 s; fenced 21.1 s after `pct start` returned; 1 write tried, 0 acknowledged |
+| Cut of BR3 (witness) | PASS, with a blip | the pair keeps working; VIP off 2.3 s when the witness is the etcd leader (keel#167) |
+| Cut of BR2 (standby) | by design at base; FAIL in 1 of 2 runs under netem | base: VIP kept, reads work, writes wait until the heal (0054); netem run 1: no etcd leader for 111 s, pair down 180 s (keel#167, #168) |
+| Cut of BR1 (primary) | needs the operator | automatic VIP move once, then never (keel#165, #166); writes back 12 to 13 s after the VIP (keel#169) |
+| End state | PASS | the pair works, netem removed |
+
+**Answer to "the pair keeps working while 2 of 3 sites are up": not
+yet.** It holds for a cut of the witness. A cut of the standby keeps
+the VIP and the reads, and the writes wait until the heal, by the
+design of 0054. A cut of the primary needs the operator, and the
+writes come back 12 to 13 s after the VIP moves. Under netem, 1 of 2
+cuts of the standby left 2 of 3 voters with no leader for 111 s.
 
 ## 1. BR3-THIN: network and CT
 
@@ -275,7 +285,7 @@ Acknowledged ids on A: 30. All 30 are on B.
 | The first write, from the VIP on B | 11.9 s | 12.9 s | 0.83 s, 1.47 s | 1.1 to 1.9 s |
 | Acknowledged ids lost | 0 of 37, 0 of 30 | 0 of 20 | 0 of 37 | none of 15 |
 
-## 6. Case (e), the old primary returns after the heal
+## 6. Case (e), the old primary returns
 
 | | Run 1, base (A = 9054) | Run 2, base (A = 9062) | netem (A = 9054) |
 | --- | --- | --- | --- |
@@ -285,12 +295,62 @@ Acknowledged ids on A: 30. All 30 are on B.
 | Stopped by the fence restart | 2547.97 | 3010.02 | 4319.09 |
 | Fenced, dumped, recorded | 2551.56 (26.0 s) | 3014.54 (10.7 s) | 4325.85 (25.3 s) |
 | Divergence record | timeline 3 against 4 | 4 against 5 | 5 against 6 |
-| Acknowledged writes in the window | 0 | 0 | 0 |
+| Writes in the window | not tried: the writer writes only while the node carries the VIP | not tried | not tried |
 
 In all runs A recorded the newer claim before its server started as a
-primary. The server was writable for 2.9 to 3.8 s while the other node
-held the VIP. The writer did not write, because A did not carry the
-VIP. This is the window of keel#156, after a heal (comment on #156).
+primary. The server was writable for 2.9 to 3.8 s (from the unit start
+to the stop) while the other node held the VIP. No write was tried in
+the window. This is the window of keel#156, after a heal (comment on
+#156).
+
+### (e) with a boot, the method of 2026-10-14 and 2026-10-15
+
+A = 9062 (primary, epoch 12), B = 9054. The test stopped A, promoted B,
+and started A again. A writer on A sent an INSERT every 0.5 s from the
+boot, whatever the VIP, with the default `synchronous_commit`
+(`/root/bootwriter.sh`).
+
+```
+$ pct stop 9062                                  # issued 4952.98, returned 4956.81
+$ keel database promote --old-primary-gone       # on 9054, 4958.54 to 4999.21
+this node holds fd1a:bb4c:b407::ffff:1 at epoch 13, by etcd's lease 15095466573830527
+$ pct start 9062                                 # issued 5009.48, returned 5014.20
+```
+
+On B: the VIP at 4987.04 (34.1 s after the stop was issued, 28.5 s
+after the promote started), out of recovery at 4999.06, and the first
+write acknowledged at 4999.16: 12.1 s after the VIP (keel#169).
+
+A's journal and writer:
+
+```
+5025.07 systemd: Starting postgresql@17-main.service
+5027.60 writer: server answers
+5027.61 writer: id 960013 sent; it waits for the standby
+5029.25 systemd: Started postgresql@17-main.service                  # as a primary
+5030.93 keel: vip ...: epoch 13, held by e59FVo... at fd1a:bb4c:b407::1; this node no longer holds it
+5031.51 systemd: Stopping postgresql@17-main.service                 # the fence restart
+5031.61 writer: noack 960013 [WARNING: canceling the wait for synchronous replication ...]
+5035.32 keel: database.server.role: fenced ... a dump ... rejoin-20261015T115034Z.sql.zst
+5035.32 keel: database.server.role: refused: diverged ... (timeline 6 against the holder's 7)
+```
+
+| What | etcd, 2026-10-15 | No etcd, 0.23.21 (00:10 UTC) | No etcd, 0.23.18 | CI |
+| --- | --- | --- | --- | --- |
+| The newer claim learned, from the server start | 1.7 s (the VIP helper) | 2.5 s (the boot follow) | only after `keel vip check` | - |
+| The server writable at boot | 3.9 s (5027.60 to 5031.51) | 3.4 s | 17.4 s, then 6 more windows | - |
+| Fenced, dumped, recorded, from `pct start` | 25.8 s (21.1 s from its return) | 18.8 s (13.9 s) | 9.25 s after `keel vip check` | 8 s and 10 s |
+| Writes from the boot to the fence | 1 tried, 0 acknowledged; it is in the dump only | 2 tried, 0 acknowledged | 47 tried, 0 acknowledged | 7 and 8 tried, 0 |
+| Server starts after the fence | 0 | 0 | 6 | - |
+
+The rows on B: 654 acknowledged on B during this run, 654 present.
+The boot ran the first-boot inithooks again: the hostname was
+`keel-postgres-br2` during the boot and `postgresql-br2` after it
+(keel#155, item 6). After the fence, the follow service failed with
+exit 16 at each trigger (keel#164).
+
+Then (d) on A: 13.1 s, streaming 0.17 s later, `FIRST 1 (keel)` on B
+22.6 s later.
 
 ### (d), the confirmed reseed of the old primary
 
@@ -316,10 +376,11 @@ The primary was 9054 (BR1). Each cut lasted 60 to 72 s.
 | BR2, standby, run 2 | netem | 9062 | off 3.9 s, 7.0 s after the cut | - (no writer) |
 | BR1, primary | base and netem | - | sections 5 and 6 | sections 5 and 6 |
 
-With 2 of 3 sites up, the pair keeps working in these cases: a cut of
-the witness, and a cut of the standby at base. A cut of the standby
-stops the writes until the heal, by the design of 0054 (synchronous
-commit with no timeout). This is not a loss of quorum.
+With 2 of 3 sites up, the pair keeps working only for a cut of the
+witness. A cut of the standby at base keeps the VIP and the reads, but
+the writes wait until the heal, by the design of 0054 (synchronous
+commit with no timeout). This is not a loss of quorum. A cut of the
+primary needs the operator (sections 5 and 6).
 
 The cut site held the etcd leader in 5 cuts. In 3 of them the VIP
 holder lost the VIP for 2.3 to 3.9 s, and in 1 of them for the whole
@@ -353,17 +414,21 @@ again at 4039.00.
 | 3 | start the server on 9054 | `keel database follow` | the server stayed stopped (keel#168) |
 | - | reseeds after each (e) | `keel spec apply --system-only --destroy-local-database` | case (d), the product path |
 
-No keel file, unit file or configuration was edited by hand on a node.
+Outside the keel CLI, the test changed only these: the 3 specs, by a
+script, with a backup of each (section 2 and section 1); the 2 files
+on the BR3-THIN host (section 1); the units of restore 2; the test
+tools under `/root`; and `tc` and `nft` in the CTs during the test.
+No keel file, unit file or other configuration was edited.
 
 ## 9. State at the end
 
 | | 9062 (BR2) | 9054 (BR1) | 9071 (BR3) |
 | --- | --- | --- | --- |
 | keel | 0.23.21 | 0.23.21 | 0.23.21 |
-| etcd | voter, healthy, leader | voter, healthy | voter, healthy |
-| VIP | primary, epoch 12, etcd lease | replica, `fenced` (keel#166) | not in the pair |
-| Server | primary, `FIRST 1 (keel)`, standby `keel` sync | standby, streams over TLS, refuses writes | - |
-| A write | `INSERT 0 1` in 0.23 s, seen on 9054 | `cannot execute INSERT in a read-only transaction` | - |
+| etcd | voter, healthy | voter, healthy | voter, healthy |
+| VIP | replica, `fenced` (keel#166) | primary, epoch 13, etcd lease | not in the pair |
+| Server | standby, streams over TLS, refuses writes | primary, `FIRST 1 (keel)`, standby `keel` sync | - |
+| A write | `cannot execute INSERT in a read-only transaction` | `INSERT 0 1` in 0.09 s | - |
 | `keel diff` | exit 0 | exit 0 | exit 0 |
 | `keel-database-follow.path` | failed (keel#164) | failed (keel#164) | - |
 | netem | removed | removed | removed |
@@ -376,7 +441,7 @@ Left on the nodes:
 - On BR3-THIN: CT 9071, `vmbr1`, the 2 files of section 1.
 - On 9054 and 9062: `/root/instance.yaml.pre-advanced-20261015`,
   `/root/vipwatch.sh`, the database `pairtest`, and the dumps under
-  `/var/backups/keel/postgresql/`.
+  `/var/backups/keel/postgresql/`. On 9062: `/root/bootwriter.sh`.
 - On 9071: `/root/instance.yaml.orig-20261015`.
 
 Next: with this state, a failover needs the operator
