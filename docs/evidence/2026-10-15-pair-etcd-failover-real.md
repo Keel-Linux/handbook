@@ -148,3 +148,41 @@ Acknowledged ids of run 1: 360. All 360 are in `t1` on 9054 and on 9062.
 **Decision:** 0.23.27 stays in trixie-testing and does not go to
 trixie. The fix is Keel-Linux/keel#179 (keel#178), released as 0.23.28.
 The whole matrix runs again on 0.23.28.
+
+## 3. Release and upgrade: keel 0.23.29
+
+keel 0.23.28 is Keel-Linux/keel#176 (keel verify and the images key,
+decision 0055), merged on main by other work on the same day. keel
+0.23.29 adds the fix of keel#178 (Keel-Linux/keel#179). CI was green
+on #179, with the netns helper now in the write paths of
+keel-vip.service.
+
+```
+# build host, 20:02 UTC, /srv/keel-apt/apt
+$ bin/build-package --native keel main </dev/null
+build-package: done: keel_0.23.29_amd64.changes in /srv/keel-apt/incoming
+sha256 7329e3d0592f4ee6ac838c3c2b99942e72b21dae929e56aae6e87d7aa28e4622  keel_0.23.29_all.deb
+$ bin/publish </dev/null
+publish: committed in /srv/keel-apt/apt: publish trixie-testing: keel 0.23.29
+# workstation
+$ keel-publish-mirror --archive-only
+keel-publish-mirror: https://archive.keellinux.org trixie-testing verifies
+EXIT=0
+$ apt-get install -y keel                         # 9062 20:02:42, 9054 20:03:03
+keel	0.23.29
+```
+
+9071 was not upgraded: BR3-THIN did not answer (section 4).
+
+## 4. BR3-THIN offline
+
+The last WireGuard handshake of 9054 with the witness was at 1792091681
+(19:14:41 UTC). From 20:03 UTC the host BR3-THIN did not answer ssh or
+ping. A traceroute stops after `2804:710:d0:c::ffff`, the far end of
+the WireGuard link `pop`. etcd had 2 of 3 voters, 9054 and 9062, and the
+pair worked: 9054 primary at epoch 15, 9062 streams as its synchronous
+standby.
+
+With 2 voters, a cut of either pair node leaves no quorum. So the
+matrix cannot run on 0.23.29 until the witness is back. The test did
+not change BR3-THIN.
