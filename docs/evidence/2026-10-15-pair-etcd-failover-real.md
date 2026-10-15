@@ -186,3 +186,56 @@ standby.
 With 2 voters, a cut of either pair node leaves no quorum. So the
 matrix cannot run on 0.23.29 until the witness is back. The test did
 not change BR3-THIN.
+
+## 5. Result against the criteria
+
+| Item | 0.23.27 (run 1) | 0.23.29 |
+| --- | --- | --- |
+| Upgrade | PASS: follow path active on both; fence of 9062 cleared by the watch | 9054 and 9062 upgraded; 9071 not reached |
+| Cut of BR3 (witness) | PASS at base, leader on the holder | not run, BR3-THIN offline |
+| Cut of the standby site | PASS at base, by design, leader on the holder | not run, BR3-THIN offline |
+| (c) cut of the primary site | FAIL (keel#178) | not run, BR3-THIN offline |
+| (e) heal of the old primary | PASS for keel#156: started as a standby, fenced, dumped, recorded | not run, BR3-THIN offline |
+| (d) reseed | not reached | not run, BR3-THIN offline |
+| 2 failovers in a row | not reached | not run, BR3-THIN offline |
+| (e) boot | not reached | not run, BR3-THIN offline |
+| keel#167, a cut of the leader's site that does not hold the VIP | not tested | not run, BR3-THIN offline |
+| netem profile | not run | not run, BR3-THIN offline |
+| Follow path | PASS: active on both, 1 to 2 runs in 4 min | active on both |
+
+**Decision:** keel stays in trixie-testing. Nothing goes to trixie:
+
+```
+$ curl -s https://archive.keellinux.org/dists/trixie/main/binary-amd64/Packages | grep -A1 '^Package: keel$'
+Version: 0.23.21
+$ curl -s https://archive.keellinux.org/dists/trixie-testing/main/binary-amd64/Packages | grep -A1 '^Package: keel$'
+Version: 0.23.29
+```
+
+0.23.27 must never go to trixie (keel#178). 0.23.29 goes to trixie
+only after the whole matrix passes on it, with BR3-THIN back.
+
+## 6. State at the end
+
+| | 9054 (BR1) | 9062 (BR2) | 9071 (BR3) |
+| --- | --- | --- | --- |
+| keel | 0.23.29 | 0.23.29 | 0.23.27, not reached since 19:14 UTC |
+| VIP | primary, epoch 15, etcd lease | replica, not fenced | not in the pair |
+| Server | primary, `keel\|streaming\|sync` | standby, streams over TLS | - |
+| A write | `INSERT 0 1` | - | - |
+| `keel-database-follow.path` | active | active | - |
+| `keel diff` | exit 14: only the handshake of the witness (4707 s old) | exit 14: the same | - |
+| nft table `inet keeltest` | none | none | none at the last heal (7754.07) |
+| netem | none | none | never applied in this session |
+
+The pair works with 2 of 3 etcd voters. While BR3-THIN is offline, the
+loss of 9054 or 9062 stops the writes, and no failover is possible.
+
+Outside the keel CLI, the test changed only these: the nft table of a
+cut in the cut CT, the test tools under `/root/logs`, and the leader
+helpers that only read etcd. Restore 1 (section 2) is the one operator
+step.
+
+Left on the nodes: the dumps under `/var/backups/keel/postgresql/` on
+9054, the rows of the tests in `pairtest.t1`, and `/root/logs` on 9054
+and 9062.
