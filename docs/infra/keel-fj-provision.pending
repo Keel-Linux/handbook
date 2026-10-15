@@ -20,7 +20,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
 	libcurl4-openssl-dev libelf-dev libdw-dev libiberty-dev zlib1g-dev \
 	squashfs-tools xorriso attr reprepro gpgv sqv apt-utils dialog \
 	python3-dialog cpp dpkg-dev debhelper redis-server devscripts lintian \
-	equivs build-essential >/dev/null
+	equivs build-essential wireguard-tools >/dev/null
 # redis-server is here for its binary only (unit-redis tests start their own).
 systemctl disable --now redis-server >/dev/null 2>&1 || true
 systemctl mask redis-server >/dev/null 2>&1 || true
