@@ -24,6 +24,7 @@ Output is trimmed.
 | 2. Reproduction | PASS | After 300 s, `RUN_FIRSTBOOT=true`. A reboot ran the first boot again. The ED25519 host key changed. |
 | 3. The fix on the CT | PASS | With the hook of common#55, the first boot ended in 20 s. `RUN_FIRSTBOOT=false`. |
 | 4. Reboot after the fix | PASS | No first boot run. The host key and the root password state stayed the same. |
+| 4a. Locked root, "Permission denied" lines | Not reproduced | Root of 9081 stayed `P`. Open. |
 | 5. The hostname | Not inithooks | Proxmox writes `/etc/hostname` from the CT configuration at each start. |
 
 ## 1. The first boot of a new CT
@@ -88,8 +89,10 @@ INFO: [35pgsqlpass] running
 
 The host key changed, and the first boot stopped at `35pgsqlpass` again.
 This is the behavior of CTs 9062 and 9054 on 2026-10-14. On each run,
-`29sudoadmin` writes the root password state again, which explains the
-locked root on 9062.
+`29sudoadmin` sets the root password state again. This test did not
+reproduce the locked root of 9062: root of 9081 stayed `P` through the 3
+runs. The "inithooks.conf: Permission denied" lines of the issue did not
+come back either. Both stay open.
 
 The hostname came back to `ihtest`, the name in the CT configuration.
 Proxmox writes `/etc/hostname` at each start. The `postgres` name of CT
