@@ -28,7 +28,7 @@ Output is trimmed. No secret is in this file.
 
 | Item | Result | Numbers |
 | --- | --- | --- |
-| 1. Signers changed, 1 PR for each repository | DONE | apt#30 merged. keel#176 and buildtasks#24 open, see section 1 |
+| 1. Signers changed, 1 PR for each repository | DONE | apt#30 and buildtasks#24 merged. keel#176 open, see section 1 |
 | 2. How Proxmox verifies `aplinfo.dat.asc` | MEASURED | `pveam` has 2 fixed sources and the pve-manager keyring. An admin adds no key file. Keel uses `keel-pve` and `/usr/share/keyrings/keel-images-keyring.gpg` |
 | 3. Re-sign of the current artifacts | PASS | release 2026-10-11: `.sha512.asc`, `aplinfo.dat.asc`, `MANIFEST.asc` each have 2 signatures. `aplinfo.dat` did not change |
 | 4. Publication | PASS | `keel-publish-mirror --no-channels 2026-10-11`: exit 0. The APT archive did not change |
@@ -67,9 +67,10 @@ The pull requests:
   had 1 red job, `tests / vip`: etcd timeouts under netem, in code that
   this PR does not change. It is run again before the merge. keel#151 is
   replaced by keel#176.
-- **buildtasks#24**, open. The first CI run failed the coverage gate
-  (98.99 percent of 99 in `generate-signature`). The fix is pushed, and
-  kcov gives 100 percent locally.
+- **buildtasks#24**, merged (a43e6a3). The first CI run failed the
+  coverage gate (98.99 percent of 99 in `generate-signature`). The fix
+  made the line that kcov did not count into 2 lines, and the second run
+  was green.
 
 This task publishes no keel release. keel#176 goes out in the next keel
 release of the other agent, or in a later one.
@@ -264,7 +265,7 @@ keel-pve 0.1.0 (3 min 25 s, `downloaded and verified`).
 
 CT 9081 on BR3-THIN, from `debian-13-keel-core_19.0-9`. It has keel
 0.20.0 and keel-archive-keyring 0.2.0. keel of keel#176 (0.23.28, commit
-1850960) runs from a copy of the source with `PYTHONPATH`. The CT has no
+1850960, the same tree as 48212cb) runs from a copy of the source with `PYTHONPATH`. The CT has no
 network. The files of section 5 are copied in with `pct push`.
 
 ```
