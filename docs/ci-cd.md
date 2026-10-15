@@ -1,5 +1,11 @@
 # CI and CD
 
+**Status 2026-10-15:** the CI runs on Forgejo Actions on git.pop.coop
+(decision 0056). The GitHub self-hosted runners are not in use:
+`keel-lxc-1` left the pool on 2026-10-08, and `keel-lxc-2-1` to
+`keel-lxc-2-8` were removed on 2026-10-15. The runner text below is a
+record of the GitHub setup.
+
 Date: 2026-09-26. Implements decision 0006 item 4 and org-plan.md sections 2
 and 3. Coverage standard: decisions 0003 and 0004.
 
