@@ -31,6 +31,7 @@ and `(testing subkey)`.
 | 5. Publish | PASS | `keel-publish-mirror --archive-only`: exit 0. The built-in verify passed for trixie, trixie-testing and trixie-security. |
 | 6. Verify from outside | PASS | verify-repo: testing keyring exit 0, main keyring exit 0, security keyring exit 4. |
 | 7. apt-get update, CT 9081 | PASS | Signed-By testing: exit 0. Signed-By main: exit 0. Signed-By security: exit 100, as it must. |
+| 7a. Layer builds, `keel-pool-apt update` | PASS | trixie-testing with the testing keyring: exit 0. |
 | 8. Packages | PASS | trixie-testing has keel 0.23.29. trixie has keel 0.23.21. Nothing was promoted. |
 
 ## 1. Why 2 signatures
@@ -242,6 +243,24 @@ update-exit=0
 ```
 
 0 `W:` and 0 `E:` lines.
+
+## 7a. The layer builds read trixie-testing with the testing keyring
+
+`bin/keel-pool-apt update` on the build host, with a scratch
+`KEEL_POOL_ROOT` so that the real capture state did not change:
+
+```
+$ KEEL_POOL_ROOT=$(mktemp -d) bin/keel-pool-apt update
+Get:4 https://archive.keellinux.org trixie-testing InRelease [2127 B]
+Get:7 https://archive.keellinux.org trixie-testing/main amd64 Packages [15.6 kB]
+keel-pool-apt: lists under <scratch>/apt/lists refreshed from /srv/keel-apt/apt/conf/pool.list
+exit=0
+$ grep keellinux <scratch>/apt/sources.list
+deb [signed-by=<scratch>/apt/keyrings/keel-testing-keyring.gpg] https://archive.keellinux.org trixie-testing main
+```
+
+The 1 `W:` line of the run is about the sandbox of `_apt` in the scratch
+directory (mode 0700), not about a signature.
 
 ## 8. What did not change
 
