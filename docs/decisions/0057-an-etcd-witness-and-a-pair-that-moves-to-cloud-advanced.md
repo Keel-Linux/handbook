@@ -54,8 +54,8 @@ Two questions follow:
    does not need the resources of a data node.
 2. **0020 names `keel-quorum`, which does not exist.** keel's VIP
    controller (`keel vip control`, `docs/vip.md`) is the election on
-   etcd. The witness runs etcd only. It runs no VIP controller, because
-   it is not in a pair.
+   etcd. The witness runs etcd and the overlays of Core (CrowdSec
+   too). It runs no VIP controller, because it is not in a pair.
 3. **An existing pair can move from `cloud_simple` to
    `cloud_advanced`, by the spec.** The operator does these steps:
    1. On each node of the pair, set `installation.mode:
@@ -79,7 +79,8 @@ quorum. With 2 data nodes in 2 sites and the witness in a third site,
 each single site cut leaves 2 of 3 voters. If the site of the standby
 is cut, the primary keeps the VIP, but writes wait for the standby
 (0054: synchronous commit with no timeout). That is 0054's design, not a
-loss of quorum.
+loss of quorum. The test found that this rule is not enough when the
+cut site holds the etcd leader (keel#167): see "Result".
 
 ## What this amends
 
@@ -88,4 +89,22 @@ loss of quorum.
   `cloud_advanced` by the steps above. The keel text changes after the
   evidence.
 - **0020, "Decided, second round"**: the data-less voter runs etcd
-  only. `keel-quorum` is keel's VIP controller.
+  and no role. `keel-quorum` is keel's VIP controller.
+
+## Result, 2026-10-15
+
+The test of point 5 ran on BR1, BR2 and BR3-THIN
+(`docs/evidence/2026-10-15-br3-thin-etcd-witness.md`). It proves the
+procedure in part:
+
+- The witness, the mode move and `keel mesh etcd form` work. etcd has
+  3 voters in 3 sites. The form reports a member that took the cluster
+  as "not reached" (keel#162).
+- The procedure is not complete. After the form, the claim that the
+  pair made before etcd has no lease (keel#161). Today only a planned
+  `keel database promote` gives it one, and that leaves the old
+  primary diverged, so a reseed follows (keel#163).
+- A cut of 1 site does not always keep the pair working: see the
+  evidence, and keel#164 to #169.
+
+The keel text of `docs/spec.md` changes when keel#161 is fixed.
