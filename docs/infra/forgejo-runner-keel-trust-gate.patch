@@ -1,0 +1,172 @@
+diff --git a/internal/app/run/runner.go b/internal/app/run/runner.go
+index 4327d61..fdbcb6d 100644
+--- a/internal/app/run/runner.go
++++ b/internal/app/run/runner.go
+@@ -238,6 +238,11 @@ func (r *Runner) run(ctx context.Context, task *runnerv1.Task, reporter *report.
+ 
+ 	reporter.Logf("Runner %s (version:%s) received task %v of job %v, triggered by event: %s", r.name, ver.Version(), task.Id, task.Context.Fields["job"].GetStringValue(), task.Context.Fields["event_name"].GetStringValue())
+ 
++	if err := keelTrustGate(task, r.labels); err != nil {
++		reporter.Logf("%v", err)
++		return err
++	}
++
+ 	workflow, jobID, err := generateWorkflow(task)
+ 	if err != nil {
+ 		return explainFailedGenerateWorkflow(task, func(message string, args ...any) {
+diff --git a/internal/app/run/trust.go b/internal/app/run/trust.go
+new file mode 100644
+index 0000000..35b8964
+--- /dev/null
++++ b/internal/app/run/trust.go
+@@ -0,0 +1,70 @@
++// Copyright 2026 The Keel Linux project. All rights reserved.
++// SPDX-License-Identifier: MIT
++
++package run
++
++import (
++	"fmt"
++	"strings"
++
++	runnerv1 "code.forgejo.org/forgejo/actions-proto/runner/v1"
++
++	"code.forgejo.org/forgejo/runner/v13/internal/pkg/labels"
++)
++
++// Keel trust gate (handbook docs/infra/keel-lxc-2.md, "Fork pull
++// requests run in a container"). A job of a pull request that does not
++// come from a branch of the repository itself (a fork, an AGit push, or
++// an event that does not say) runs only on a runner whose every label is
++// a container backend. A runner with a host or lxc label refuses it
++// before any step runs. The rule is compiled in: no configuration file
++// that the runner user can write turns it off.
++
++// untrustedPullRequest returns a reason when the task is a pull request
++// event whose code does not come from a branch of the base repository.
++func untrustedPullRequest(task *runnerv1.Task) string {
++	fields := task.GetContext().GetFields()
++	eventName := fields["event_name"].GetStringValue()
++	if !strings.HasPrefix(eventName, "pull_request") {
++		return ""
++	}
++	repository := fields["repository"].GetStringValue()
++	pr := fields["event"].GetStructValue().GetFields()["pull_request"].GetStructValue().GetFields()
++	flow, hasFlow := pr["flow"]
++	head := pr["head"].GetStructValue().GetFields()
++	headRepo := head["repo"].GetStructValue().GetFields()["full_name"].GetStringValue()
++	switch {
++	case !hasFlow:
++		return fmt.Sprintf("event %s: the pull request has no flow field", eventName)
++	case flow.GetNumberValue() != 0:
++		return fmt.Sprintf("event %s: the pull request is not from a branch (AGit flow)", eventName)
++	case repository == "" || headRepo == "":
++		return fmt.Sprintf("event %s: the head or base repository is not known", eventName)
++	case !strings.EqualFold(headRepo, repository):
++		return fmt.Sprintf("event %s: the pull request is from %s, not from %s", eventName, headRepo, repository)
++	}
++	return ""
++}
++
++// containerOnly is true when the runner has labels and all of them use
++// the docker backend, so a job cannot run its steps on the host.
++func containerOnly(ls labels.Labels) bool {
++	if len(ls) == 0 {
++		return false
++	}
++	for _, label := range ls {
++		if label.Schema != labels.SchemeDocker {
++			return false
++		}
++	}
++	return true
++}
++
++// keelTrustGate returns an error when this runner must not run the task.
++func keelTrustGate(task *runnerv1.Task, ls labels.Labels) error {
++	reason := untrustedPullRequest(task)
++	if reason == "" || containerOnly(ls) {
++		return nil
++	}
++	return fmt.Errorf("refused by the Keel trust gate: %s; a pull request from a fork runs only on a container runner (runs-on: keel-container), see handbook docs/infra/keel-lxc-2.md", reason)
++}
+diff --git a/internal/app/run/trust_test.go b/internal/app/run/trust_test.go
+new file mode 100644
+index 0000000..7927558
+--- /dev/null
++++ b/internal/app/run/trust_test.go
+@@ -0,0 +1,74 @@
++// Copyright 2026 The Keel Linux project. All rights reserved.
++// SPDX-License-Identifier: MIT
++
++package run
++
++import (
++	"testing"
++
++	runnerv1 "code.forgejo.org/forgejo/actions-proto/runner/v1"
++	"google.golang.org/protobuf/types/known/structpb"
++
++	"code.forgejo.org/forgejo/runner/v13/internal/pkg/labels"
++)
++
++func trustTask(t *testing.T, eventName string, pr map[string]any) *runnerv1.Task {
++	t.Helper()
++	ctx := map[string]any{
++		"event_name": eventName,
++		"repository": "Keel-Linux/inithooks",
++		"event":      map[string]any{},
++	}
++	if pr != nil {
++		ctx["event"] = map[string]any{"pull_request": pr}
++	}
++	s, err := structpb.NewStruct(ctx)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return &runnerv1.Task{Context: s}
++}
++
++func prFrom(repo string, flow any) map[string]any {
++	pr := map[string]any{"head": map[string]any{"repo": map[string]any{"full_name": repo}}}
++	if flow != nil {
++		pr["flow"] = flow
++	}
++	return pr
++}
++
++func TestKeelTrustGate(t *testing.T) {
++	host := labels.Labels{labels.MustParse("keel-host:host"), labels.MustParse("keel-lxc:host")}
++	ctr := labels.Labels{labels.MustParse("keel-container:docker://keel-ci:trixie")}
++	mixed := labels.Labels{labels.MustParse("keel-container:docker://keel-ci:trixie"), labels.MustParse("keel-host:host")}
++	lxc := labels.Labels{labels.MustParse("x:lxc://debian:trixie")}
++
++	cases := []struct {
++		name    string
++		task    *runnerv1.Task
++		ls      labels.Labels
++		refused bool
++	}{
++		{"push on host", trustTask(t, "push", nil), host, false},
++		{"same repository pull request on host", trustTask(t, "pull_request", prFrom("keel-linux/inithooks", 0)), host, false},
++		{"fork pull request on host", trustTask(t, "pull_request", prFrom("emiliano-go/inithooks", 0)), host, true},
++		{"fork pull_request_target on host", trustTask(t, "pull_request_target", prFrom("emiliano-go/inithooks", 0)), host, true},
++		{"AGit pull request on host", trustTask(t, "pull_request", prFrom("Keel-Linux/inithooks", 1)), host, true},
++		{"pull request without flow on host", trustTask(t, "pull_request", prFrom("Keel-Linux/inithooks", nil)), host, true},
++		{"pull request without head on host", trustTask(t, "pull_request", map[string]any{"flow": 0}), host, true},
++		{"pull request without payload on host", trustTask(t, "pull_request", nil), host, true},
++		{"fork pull request on lxc backend", trustTask(t, "pull_request", prFrom("emiliano-go/inithooks", 0)), lxc, true},
++		{"fork pull request on a mixed runner", trustTask(t, "pull_request", prFrom("emiliano-go/inithooks", 0)), mixed, true},
++		{"fork pull request on a runner without labels", trustTask(t, "pull_request", prFrom("emiliano-go/inithooks", 0)), labels.Labels{}, true},
++		{"fork pull request on container", trustTask(t, "pull_request", prFrom("emiliano-go/inithooks", 0)), ctr, false},
++		{"AGit pull request on container", trustTask(t, "pull_request", prFrom("Keel-Linux/inithooks", 1)), ctr, false},
++	}
++	for _, c := range cases {
++		t.Run(c.name, func(t *testing.T) {
++			err := keelTrustGate(c.task, c.ls)
++			if (err != nil) != c.refused {
++				t.Fatalf("refused=%v, want %v (%v)", err != nil, c.refused, err)
++			}
++		})
++	}
++}

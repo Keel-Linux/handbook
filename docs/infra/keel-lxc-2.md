@@ -1,11 +1,17 @@
 # keel-lxc-2, the second CI runner host
 
-**Status 2026-10-15:** the GitHub runner instances `keel-lxc-2-1` to
-`keel-lxc-2-8` (`actions-runner@1` to `@8`) are stopped, disabled and
-removed from the GitHub organization, and their credentials are deleted
-(decision 0056). The CI of Keel-Linux runs on the Forgejo instances, see
-"Forgejo runner instances" below. The users `runner1` to `runner8` and
-their trees stay; the text about the GitHub instances is a record.
+**Status 2026-10-16:** the CI of Keel-Linux runs on the Forgejo
+instances, see "Forgejo runner instances" below. A job of a pull request
+from a fork runs only in a container, see "Fork pull requests run in a
+container". The GitHub runner instances `keel-lxc-2-1` to `keel-lxc-2-8`
+(`actions-runner@1` to `@8`) were stopped, disabled and removed from the
+GitHub organization on 2026-10-15 (decision 0056). On 2026-10-16 their
+users `runner1` to `runner8` were removed: linger off, the users and
+their homes, their subordinate ids, `lxc-usernet` lines, slice drop-ins,
+LXC templates and the `actions-runner@` units. No service used them. The
+text about the GitHub instances is a record. Do not run
+`keel-lxc-2-provision.pending` with its default `KEEL_RUNNERS=8` on this
+VM: it makes the GitHub users again. Use `KEEL_RUNNERS=0`.
 
 Provisioned on 2026-10-07. The second runner host of the Keel-Linux
 organization, equivalent to keel-lxc-1 (docs/ci-cd.md section 6,
@@ -223,10 +229,11 @@ stopped two jobs on 2026-10-14.
 | Part | What |
 | --- | --- |
 | Instances | `FJ_RUNNERS` (6 by default) users `runner9` to `runner14`, uid 1109 to 1114, the same subordinate range scheme (`runner9` 689824-755359 ...), LXC defaults, `lxc-usernet` quota and slice limits as `runner1` to `runner8` |
-| Runner | `forgejo-runner` 13.2.0 in `/usr/local/bin`, checked against its SHA256; state and `config.yml` in `/home/runnerI/actions-runner`, work trees in its `_work` |
+| Runner | `forgejo-runner` 13.2.0 with the trust gate in `/usr/local/bin`, checked against its SHA256; the release binary stays as `forgejo-runner-13.2.0.upstream`; state and `config.yml` in `/home/runnerI/actions-runner`, work trees in its `_work` |
 | Service | `forgejo-runner@I`: `forgejo-runner one-job --wait`, one job for each start, `Restart=always`. Before each job, `keel-runner-start-reset` (as root) and `job-reset.sh`; after it, `job-reset-completed.sh`: the same resets as the GitHub job hooks |
 | Labels | `keel-host`, `keel-lxc`, `self-hosted`, all of the host executor, registered with the registration token of the organization (not of the server), so jobs of other organizations do not come here |
-| Node | `/opt/keel-node24`, the node 24 of the GitHub runner, first in `PATH`, for the JavaScript actions |
+| Trust gate | `forgejo-runner` is the 13.2.0 release with the patch `docs/infra/forgejo-runner-keel-trust-gate.patch` (`v13.2.0+keel1`): it refuses a job of a fork pull request, see "Fork pull requests run in a container" |
+| Node | `/opt/keel-node24`, node 24 (24.21.0) first in `PATH`, for the JavaScript actions. It came from the GitHub runner; a rebuild takes the release tarball of nodejs.org |
 | Packages | what the GitHub jobs installed on ubuntu-latest with sudo (jq, python3-venv, cmake and the kcov build libraries, reprepro, debhelper, devscripts, lintian, redis-server masked, ...); the Debian kcov is 43, the pinned version |
 | `keel-need-packages` | `/usr/local/bin/keel-need-packages PKG...`: the Forgejo jobs run it in place of `sudo apt-get install`; it fails and names the packages the host does not have |
 
@@ -253,6 +260,153 @@ keel runs 94 and 102). The reusable `lxc-trixie.yml` of
 Keel-Linux/.github prints a line each minute while its commands run
 (.github#25). A job of another workflow that can be silent for 10
 minutes must do the same.
+
+## Fork pull requests run in a container
+
+Decided by the maintainer on 2026-10-16: a job of a pull request from a
+fork never runs on the VM itself. It runs only in a new container, which
+the runner removes after the job. Forgejo still holds every such run
+until a maintainer approves it (decision 0056, "Known gaps"). Approve
+each run after you read its workflow change, and do not select "always
+trust".
+
+### Why a workflow rule is not enough
+
+A fork can change `.forgejo/workflows` in its pull request, so the fork
+selects the `runs-on` label of its jobs. Forgejo 14.0.2 gives a job to
+any runner that has the label, and a runner of the organization takes
+jobs of every repository of the organization. Forgejo has no setting
+that keeps a fork job off a label, and forgejo-runner 13.2.0 has no
+setting that refuses a fork job. Thus the rule is in the runner, and it
+reads the data that Forgejo sends with the job, not the workflow file.
+
+### The trust gate
+
+`docs/infra/forgejo-runner-keel-trust-gate.patch` adds
+`internal/app/run/trust.go` to forgejo-runner 13.2.0, with its tests. The
+runner calls it when it receives a job, before it parses the workflow or
+runs a step:
+
+- A job is untrusted when its event is `pull_request...` and the pull
+  request does not come from a branch of the same repository. The test
+  uses the event payload: `pull_request.flow` must be 0 (not AGit) and
+  `pull_request.head.repo.full_name` must be the repository of the run.
+  A payload that does not have these fields is untrusted.
+- A runner refuses an untrusted job unless every label of the runner
+  uses the `docker` backend. The job fails, and its log says why and
+  points to this section.
+- The rule is compiled in. No file that the runner user can write turns
+  it off.
+
+The six host instances (`keel-fj-9` to `keel-fj-14`) have only host
+labels, so they refuse every fork job, on `keel-host`, `keel-lxc` and
+`self-hosted`. `keel-lxc` is a host label too: the steps of a `keel-lxc`
+job run on the VM, and only the containers that the job starts are
+containers.
+
+Build, on a workstation with Go 1.26.8 (the toolchain of `go.mod`):
+
+    git clone --branch v13.2.0 https://code.forgejo.org/forgejo/runner.git
+    cd runner
+    git apply /path/to/handbook/docs/infra/forgejo-runner-keel-trust-gate.patch
+    go test ./internal/app/run/ -run TestKeelTrustGate
+    CGO_ENABLED=0 go build -trimpath -tags 'netgo osusergo' \
+      -ldflags '-s -w -X "code.forgejo.org/forgejo/runner/v13/internal/pkg/ver.version=v13.2.0+keel1"' \
+      -o forgejo-runner-13.2.0-keel1 .
+    sha256sum forgejo-runner-13.2.0-keel1
+
+The build of 2026-10-16 has the SHA256
+`0e3a9b234d41a4e41797d79023348c949a0153f0bb4dc5d508305dab19f21870`. Copy
+it to the VM, then replace the binary with `mv`, not `cp`: a waiting
+instance keeps its open file, and each instance starts the new binary at
+its next job (`one-job`). No `daemon-reload` is necessary. An instance
+that waits for a long time keeps the old binary: restart the idle
+instances, then check that no `forgejo-runner one-job` process shows
+`(deleted)` in `readlink /proc/PID/exe`.
+
+Caution: if you upgrade forgejo-runner, apply the patch to the new
+release first. The release binary has no trust gate.
+
+### The container instances
+
+`docs/infra/keel-ctr-provision.pending`, run as root, idempotent, writes
+the container instances:
+
+| Part | What |
+| --- | --- |
+| Instances | `CTR_RUNNERS` (2 by default) users `runner15` and `runner16`, uid 1115 and 1116, subordinate ids `1083040`-`1148575` and `1148576`-`1214111`, the same slice limits as the host instances |
+| Label | `keel-container:docker://localhost/keel-ci:trixie` only, names `keel-fj-15` and `keel-fj-16`, registered to the organization |
+| Engine | rootless podman 5.4 of the instance user, through its `podman.socket`; cgroupfs, because the user managers have no D-Bus session bus. A container stays under the limits of the user slice |
+| Image | `localhost/keel-ci:trixie`, built for each user from `/usr/local/share/keel-runner/keel-ci/Containerfile`: `node:24-trixie` with the packages of `keel-fj-provision`, `iproute2`, `iptables`, `nftables` and `keel-need-packages`; the steps run as the user `node`. Also tagged `node:22-bookworm`, see "The workflows" |
+| Runner | `config.yml`: cache off, no volume, no Docker socket in the job, not privileged, IPv6 on |
+| Service | `forgejo-runner-ctr@I`: `one-job`, and before each job `keel-ctr-start-reset` (as root) removes every container, pod, volume, network and image of the user except `keel-ci`, and writes the home again from root's files |
+| Firewall | the `output` chain sends the traffic of uids 1115-1116 and their subordinate ids to the chain `container_runners`: DNS, `git.pop.coop` on 443 and the internet; no service of the VM, no private IPv4 range, no ULA, no link local and no other host of `2804:710:d0:5::/64` |
+
+The firewall rule is necessary because rootless podman sends the traffic
+of a container from a host process, not through `lxcbr0`.
+
+The image does not update itself. To refresh it, stop the two
+instances, then remove the image and run the script again:
+
+    systemctl stop forgejo-runner-ctr@15 forgejo-runner-ctr@16
+    for u in runner15 runner16; do (cd /tmp && runuser -u $u -- env XDG_RUNTIME_DIR=/run/user/$(id -u $u) podman rmi -f localhost/keel-ci:trixie docker.io/library/node:22-bookworm); done
+    /usr/local/sbin/keel-ctr-provision
+    systemctl start forgejo-runner-ctr@15 forgejo-runner-ctr@16
+
+Registration is the same as for the host instances, with
+`--name keel-fj-I --labels keel-container:docker://localhost/keel-ci:trixie`,
+then `systemctl enable --now forgejo-runner-ctr@I`.
+
+### The workflows
+
+A repository whose jobs do not need the LXC of the VM selects
+`runs-on: keel-container` for every job, on push and on pull request.
+Inithooks does so since inithooks#49. A fork job of such a repository
+runs and can pass.
+
+A repository that needs the LXC of the VM keeps `keel-host` or
+`keel-lxc`. The runner refuses its fork jobs, so their checks are red,
+and the pull request cannot merge on them (decision 0053). Read the
+change, then push the branch of the fork to a branch of the repository:
+that run is trusted and runs on the host.
+
+Do not select the label with an expression on the event, such as
+`runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && 'keel-host' || 'keel-container' }}`.
+Forgejo 14 evaluates `runs-on` without the github context when it makes
+the run. On 2026-10-16 such an expression gave `keel-host` to the jobs of
+a fork, and the trust gate refused them.
+
+Forgejo runs a reusable workflow inline. The inner job keeps its own
+`runs-on` (`keel-host` in Keel-Linux/.github), and the container runner
+has no label of that name. Then forgejo-runner uses its built-in image
+`node:22-bookworm`. On the container runners that name is a second tag
+of `keel-ci`, so the inner job also runs in `keel-ci`. The log shows
+`Start image=node:22-bookworm`. If an upgrade of forgejo-runner changes
+the built-in image, change `DEFAULT_IMAGE` in `keel-ctr-provision`.
+
+The steps run as the user `node` (uid 1000) of the image, not as root,
+as they do as `runnerI` on the host. A nested user namespace works for
+that user, so the tests that use a network namespace of their own
+(`tests/netns-sandbox` of inithooks) run in the container.
+
+### What a fork job can and cannot do
+
+- It runs as `node` in a user namespace of `runner15` or `runner16`. On
+  the VM that is one of the subordinate ids of the instance user, with
+  no access to the runner state of the host instances.
+- It reaches the internet, DNS and `git.pop.coop`, not the VM, its
+  sshd, the LAN or the other hosts of the segment.
+- It cannot run a workflow that needs the LXC of the VM
+  (`lxc-trixie.yml`, `test-appliance.yml`). These run after the merge,
+  or on a branch of the repository that a member pushes.
+- A container escape gives the instance user. That user can read the
+  registration of its instance and change the `keel-ci` image of its
+  instance for later fork jobs. Fork jobs have no secrets, and the host
+  instances are other users.
+- `keel-ctr-start-reset` removes everything of a job except the image.
+  It does not check the image layers.
+
+The test of 2026-10-16 is `docs/evidence/2026-10-16-fork-jobs-in-container.md`.
 
 ## What a job can still do
 

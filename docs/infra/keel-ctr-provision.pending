@@ -1,0 +1,212 @@
+#!/bin/sh
+# Container runner instances on Keel-Linux-Runner: the runners that take
+# the jobs of pull requests from forks (handbook docs/infra/keel-lxc-2.md,
+# "Fork pull requests run in a container"). Instance I (15..14+CTR_RUNNERS)
+# is user runnerI, uid 1100+I, service forgejo-runner-ctr@I. Its only
+# label is keel-container, of the docker backend, served by rootless
+# podman of runnerI: every job runs in a new container of the image
+# localhost/keel-ci:trixie, removed after the job. Run as root after
+# keel-fj-provision. Idempotent. Do not run it while a job runs.
+set -eu
+CTR_FIRST=15
+CTR_RUNNERS=${CTR_RUNNERS:-2}
+RUNNER_UID_BASE=1100 SUB_BASE=165536 SUB_COUNT=65536
+IMAGE=localhost/keel-ci:trixie
+# Forgejo runs a reusable workflow inline, and the inner job keeps its own
+# runs-on (keel-host in Keel-Linux/.github). No label of this runner
+# matches it, so forgejo-runner takes its built-in default image. That
+# name is a second tag of the CI image, so the inner job runs in it too.
+DEFAULT_IMAGE=docker.io/library/node:22-bookworm
+SHARE=/usr/local/share/keel-runner
+log() { printf '== %s\n' "$*"; }
+
+log packages
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+	podman passt uidmap catatonit netavark aardvark-dns containers-storage >/dev/null
+
+log image recipe
+install -d -m 0755 "$SHARE/keel-ci"
+install -m 0755 /usr/local/bin/keel-need-packages "$SHARE/keel-ci/keel-need-packages"
+cat > "$SHARE/keel-ci/Containerfile" << 'CF'
+# The image of the container runners: node 24 for the JavaScript actions,
+# and the packages keel-fj-provision installs on the host for the jobs.
+FROM docker.io/library/node:24-trixie
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+	jq python3-venv python3-pip python3-yaml file cmake binutils-dev libssl-dev \
+	libcurl4-openssl-dev libelf-dev libdw-dev libiberty-dev zlib1g-dev \
+	squashfs-tools xorriso attr reprepro gpgv sqv apt-utils dialog \
+	python3-dialog cpp dpkg-dev debhelper redis-server devscripts lintian \
+	equivs build-essential wireguard-tools kcov bats shellcheck zstd rsync \
+	git curl ca-certificates gnupg iproute2 iptables nftables \
+ && rm -rf /var/lib/apt/lists/*
+COPY keel-need-packages /usr/local/bin/keel-need-packages
+# The steps run as the user node (uid 1000), not root, as they do on the
+# host instances: tests that make a file unwritable expect a user that
+# the mode stops. A nested user namespace works for this user, so the
+# tests in a network namespace of their own run here too.
+USER node
+CF
+# The user managers have no D-Bus session bus, so podman cannot ask
+# systemd for a cgroup. With cgroupfs a container stays in the cgroup of
+# the podman service of its user, under the limits of the user slice.
+cat > "$SHARE/keel-ci/containers.conf" << 'CC'
+# Rootless podman of a container runner (keel-ctr-provision).
+[engine]
+cgroup_manager = "cgroupfs"
+events_logger = "file"
+CC
+
+i=$CTR_FIRST last=$((CTR_FIRST + CTR_RUNNERS - 1))
+while [ "$i" -le "$last" ]; do
+	u=runner$i uid=$((RUNNER_UID_BASE + i)) sub=$((SUB_BASE + (i - 1) * SUB_COUNT))
+	log "$u"
+	id "$u" >/dev/null 2>&1 || useradd -m -s /bin/bash -u "$uid" -U -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 "$u"
+	for f in /etc/subuid /etc/subgid; do
+		grep -qx "$u:$sub:$SUB_COUNT" "$f" || { sed -i "/^$u:/d" "$f"; echo "$u:$sub:$SUB_COUNT" >> "$f"; }
+	done
+	loginctl enable-linger "$u"
+	install -d -m 0755 -o "$u" -g "$u" "/home/$u/actions-runner"
+	cat > "/home/$u/actions-runner/config.yml" << CONF
+# forgejo-runner instance keel-fj-$i, a container runner. Its jobs run in
+# rootless podman containers of $u; no host label (keel-ctr-provision).
+log:
+  level: warn
+runner:
+  file: /home/$u/actions-runner/.runner
+  capacity: 1
+  timeout: 3h
+  envs:
+    LANG: C.UTF-8
+  labels:
+    - keel-container:docker://$IMAGE
+cache:
+  enabled: false
+container:
+  network: ""
+  enable_ipv6: true
+  privileged: false
+  valid_volumes: []
+  docker_host: "-"
+  force_pull: false
+CONF
+	chown "$u:$u" "/home/$u/actions-runner/config.yml"
+	install -d -m 0755 "/etc/systemd/system/forgejo-runner-ctr@$i.service.d" "/etc/systemd/system/user-$uid.slice.d"
+	cat > "/etc/systemd/system/forgejo-runner-ctr@$i.service.d/keel-instance.conf" << DROPIN
+# Instance $i in the slice of $u, with the podman socket of $u.
+[Unit]
+After=user@$uid.service
+
+[Service]
+Slice=user-$uid.slice
+Environment=XDG_RUNTIME_DIR=/run/user/$uid
+Environment=DOCKER_HOST=unix:///run/user/$uid/podman/podman.sock
+DROPIN
+	cat > "/etc/systemd/system/user-$uid.slice.d/90-keel-limits.conf" << DROPIN
+# The limits of instance keel-fj-$i, its runner and its containers.
+[Slice]
+MemoryAccounting=yes
+MemoryMax=2560M
+MemorySwapMax=0
+CPUWeight=100
+TasksMax=8192
+DROPIN
+	systemctl start "user@$uid.service"
+	as_user() {
+		(cd /tmp && runuser -u "$u" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+			DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@")
+	}
+	install -d -m 0755 -o "$u" -g "$u" "/home/$u/.config" "/home/$u/.config/containers"
+	install -m 0644 -o "$u" -g "$u" "$SHARE/keel-ci/containers.conf" "/home/$u/.config/containers/containers.conf"
+	as_user systemctl --user enable --now podman.socket
+	as_user podman image exists "$IMAGE" ||
+		as_user podman build -q --pull=always -t "$IMAGE" "$SHARE/keel-ci"
+	as_user podman tag "$IMAGE" "$DEFAULT_IMAGE"
+	i=$((i + 1))
+done
+for f in /etc/subuid /etc/subgid; do
+	sort -t: -k2,2n "$f" | awk -F: -v f="$f" '
+		NR > 1 && $2 < end { printf "overlap in %s: %s\n", f, $1 > "/dev/stderr"; bad = 1 }
+		{ end = $2 + $3 } END { exit bad }'
+done
+
+log reset
+cat > /usr/local/sbin/keel-ctr-start-reset << 'RESET'
+#!/bin/sh
+# keel-ctr-start-reset USER: run as root before every start of a container
+# runner instance, forgejo-runner-ctr@I.service (USER is runnerI). Every
+# container, pod, volume and network of USER goes, and every image but
+# the CI image; the user manager starts again from root's files, with the
+# podman socket only. The runner state in actions-runner stays.
+set -u
+user=${1-}
+case "$user" in
+	runner1[5-9]|runner[2-9][0-9]) ;;
+	*) echo "keel-ctr-start-reset: not a container runner user: '$user'" >&2; exit 2 ;;
+esac
+IMAGE=localhost/keel-ci:trixie
+DEFAULT_IMAGE=docker.io/library/node:22-bookworm
+home=/home/$user
+uid=$(id -u "$user") || exit 2
+pm() {
+	(cd /tmp && runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+		DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" podman "$@")
+}
+systemctl stop "user@$uid.service"
+pkill -KILL -u "$user"
+find "$home" -mindepth 1 -maxdepth 1 ! -name .local ! -name actions-runner -exec rm -rf -- {} +
+find "$home/.local" -mindepth 1 -maxdepth 1 ! -name share -exec rm -rf -- {} + 2>/dev/null
+find "$home/.local/share" -mindepth 1 -maxdepth 1 ! -name containers -exec rm -rf -- {} + 2>/dev/null
+find "$home/actions-runner" -mindepth 1 -maxdepth 1 ! -name .runner ! -name config.yml -exec rm -rf -- {} +
+for f in .bashrc .profile .bash_logout; do
+	install -m 0644 -o "$user" -g "$user" "/etc/skel/$f" "$home/$f"
+done
+install -d -m 0755 -o "$user" -g "$user" "$home/.config" "$home/.config/systemd" \
+	"$home/.config/systemd/user" "$home/.config/systemd/user/sockets.target.wants" \
+	"$home/.config/containers"
+install -m 0644 -o "$user" -g "$user" /usr/local/share/keel-runner/keel-ci/containers.conf \
+	"$home/.config/containers/containers.conf"
+ln -sf /usr/lib/systemd/user/podman.socket "$home/.config/systemd/user/sockets.target.wants/podman.socket"
+find /tmp /var/tmp /dev/shm -xdev -mindepth 1 -maxdepth 1 -user "$user" -exec rm -rf -- {} +
+systemctl start "user@$uid.service"
+pm rm -a -f -t 0 >/dev/null
+pm pod rm -a -f >/dev/null
+pm volume rm -a -f >/dev/null
+pm network prune -f >/dev/null
+keep=$(pm image inspect --format '{{.Id}}' "$IMAGE") || {
+	echo "keel-ctr-start-reset ($user): $IMAGE is missing; run keel-ctr-provision" >&2
+	exit 1
+}
+pm image ls -q --no-trunc | sed 's/^sha256://' | sort -u | while read -r id; do
+	[ "$id" = "$keep" ] || pm image rm -f "$id" >/dev/null 2>&1 || true
+done
+pm image prune -f >/dev/null
+pm tag "$IMAGE" "$DEFAULT_IMAGE"
+echo "keel-ctr-start-reset ($user): runner reset"
+RESET
+chmod 0755 /usr/local/sbin/keel-ctr-start-reset
+
+log service
+cat > /etc/systemd/system/forgejo-runner-ctr@.service << 'UNIT'
+[Unit]
+Description=Forgejo container runner keel-fj-%i (git.pop.coop, organization Keel-Linux)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=runner%i
+Group=runner%i
+WorkingDirectory=/home/runner%i/actions-runner
+ExecStartPre=+/usr/local/sbin/keel-ctr-start-reset runner%i
+ExecStart=/usr/local/bin/forgejo-runner one-job --wait -c /home/runner%i/actions-runner/config.yml
+Restart=always
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=5min
+OOMPolicy=continue
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+log finished

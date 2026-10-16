@@ -115,6 +115,15 @@ It has Forgejo Actions and runners that the project can operate itself.
   trust". This is the default of Forgejo 14; no setting was changed.
   Registration on git.pop.coop is closed, so only existing accounts can
   open such a pull request.
+- **Amended 2026-10-16 by the maintainer:** an approved fork job ran its
+  steps on the VM itself, as a runner user (inithooks#48, label
+  `keel-host`). Now a job of a pull request from a fork never runs on the
+  VM. It runs only on the label `keel-container`, in a new rootless
+  container. The runner enforces the rule, not the workflow, because a
+  fork can change its workflow: forgejo-runner carries a trust gate patch
+  and the host instances refuse a fork job. The approval of each run
+  stays. Details: docs/infra/keel-lxc-2.md, "Fork pull requests run in a
+  container".
 - The Forgejo runners run one job for each start (`forgejo-runner
   one-job`), so the resets of the GitHub job hooks run before and after
   every job (docs/infra/keel-lxc-2.md). The GitHub runners
