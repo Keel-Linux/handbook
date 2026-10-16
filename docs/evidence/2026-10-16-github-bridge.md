@@ -9,12 +9,12 @@ git.pop.coop").
 | 2. keel-bridge | Merged | keel-bridge#1, 109 tests, 99 percent branch coverage, security scan green. A security review found 4 HIGH and 8 MEDIUM items; all HIGH and 7 MEDIUM are fixed in the same pull request; the others are known gaps in the README. |
 | 3. Forgejo bot | Done | user `keel-bridge`, not an administrator; team `bridge`: issues and pulls write, code read, Actions none, on the 51 bridged repositories and `keel-bridge`. As the bot: `admin=False push=False pull=True` on keel-keys. |
 | 4. Bridge container | Done | `keel-bridge` on Keel-Linux-Runner, unprivileged (idmap 2000000), no nesting, own bridge `kbr0`. |
-| 5. Isolation | PASS | section 1 |
+| 5. Isolation | PASS | section 1: runner users 9 to 16, a probe on `lxcbr0`, a rootless podman container of runner15 |
 | 6. Fork PR of the bot waits for approval | PASS | keel-bridge#2, keel-keys#5 (sections 2 and 3) |
 | 7. Host runners refuse a bridged PR | PASS | keel-keys#5, tasks 8575 to 8578 (section 3) |
 | 8. Light GitHub CI | 46 of 51 merged | the list in section 4 |
 | 9. GitHub settings | Done | section 5 |
-| 10. inithooks archive | Unlocked | GitHub inithooks#13, 15, 17, 21, 22, 23, 24, 26, 31, 40: `locked=false` |
+| 10. inithooks archive | Unlocked, no copies yet | GitHub inithooks#13, 15, 17, 21, 22, 23, 24, 26, 31, 40: `locked=false`. The copies of 21, 26, 31 and 40 wait for the bridge start. |
 | 11. GitHub App | Waits for the maintainer | a browser step (section 6) |
 | 12. End-to-end test | Not run | needs item 11 |
 
@@ -38,6 +38,15 @@ outside the container.
       output skuid 1100-1199 tcp reject: 6 packets (runner9, runner14)
       output tcp reject (other host processes): 2 packets (root)
       forward iifname kbr0 final drop: 154 packets (apt over http before the switch to https)
+
+Second probe, after the fork rule (handbook#95), 12:45 UTC, with the
+same temporary listener:
+
+    runner15 (uid 1115), runner16 (uid 1116) on the host -> 10.0.9.2:8080, [fd4b:6b65:6c09::2]:8080:
+      curl (7) Could not connect (after 0 ms)
+    podman run --rm localhost/keel-ci:trixie as runner15 (container 60e8a4927035, rootless):
+      -> 10.0.9.2:8080, [fd4b:6b65:6c09::2]:8080: curl (7) Could not connect; https://deb.debian.org/ 200
+    counter of "meta skuid 1100-1199 ... reject with tcp reset": 6 -> 12 packets
 
 ## 2. The fork pull request of the bot waits
 
@@ -104,9 +113,20 @@ keel-linux.github.io: 20 runs, all green (for example runs 38872677714
 and 38872684127). Actions and pull requests are off there again.
 
 A scan of every GitHub copy after the mirror push (`.github/workflows`
-of each repository, the triggers and the `runs-on` lines): 46
-repositories have `pull_request` triggers only and no self-hosted label.
-The 5 above still have `push`; their Actions stays off.
+of each repository, the triggers and the `runs-on` lines): the callers
+of 46 repositories have `pull_request` triggers only and no self-hosted
+label. Keel-Linux/.github also keeps the reusable workflows of the
+Forgejo CI, with `keel-host` and `[self-hosted, keel-lxc]`: they are
+`workflow_call` only, no GitHub caller uses them, and the organization
+allows no self-hosted runner. The 5 above still have `push`; their
+Actions stays off.
+
+After the merge of handbook#96, .github#28 and keel-bridge#3 at
+12:40 UTC, the push mirror updated GitHub (`main` the same on both
+sides: handbook 055614224d85, .github e45369050989, keel-bridge
+a6e3f1273ba6). GitHub Actions is on in the three repositories, and
+`actions/runs?created>=2026-10-16T12:00:00Z` is 0 for each: a mirror
+push starts no run.
 
 ## 5. GitHub settings
 
