@@ -240,8 +240,8 @@ first, in `/var/backups/keel/postgresql/`.
    image.
 6. **keel-web#13 CI.** The `site` job stopped at its 30 minute limit
    during `apt-get install`, the first time the runners also ran the
-   appliance gates. A second run of the same commit is the verdict of
-   that PR.
+   appliance gates. A second run of the same commit passed every check,
+   the gate's boot included, and keel-web#13 merged.
 
 ## Left running
 
