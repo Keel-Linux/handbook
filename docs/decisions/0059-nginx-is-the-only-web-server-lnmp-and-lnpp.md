@@ -1,4 +1,4 @@
-# 0058: nginx is the only web server, and LNMP and LNPP are the base stacks
+# 0059: nginx is the only web server, and LNMP and LNPP are the base stacks
 
 Date: 2026-10-16
 Status: **decided by the maintainer, 2026-10-16**: "começa com LNMP nginx
