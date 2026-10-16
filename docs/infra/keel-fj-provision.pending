@@ -1,14 +1,18 @@
 #!/bin/sh
-# Forgejo runner instances on Keel-Linux-Runner (decision 0056), beside the
-# GitHub instances runner1-runner8. Instance I (9..8+FJ_RUNNERS) is user
+# Forgejo runner instances on Keel-Linux-Runner (decision 0056). The
+# GitHub instances runner1-runner8 are removed (2026-10-16). Instance I (9..8+FJ_RUNNERS) is user
 # runnerI, uid 1100+I, service forgejo-runner@I, with the same subordinate
 # range scheme, LXC defaults, slice limits and job resets as the GitHub
 # instances (docs/infra/keel-lxc-2.md). Run as root. Idempotent.
 set -eu
 FJ_FIRST=9
 FJ_RUNNERS=${FJ_RUNNERS:-6}
-FJ_VERSION=13.2.0
-FJ_SHA256=fadaec897f5e6641c363f87ecaf75f866f99c81b7097ec6b433e4c48123fcad1
+FJ_VERSION=13.2.0+keel1
+# The 13.2.0 release with the trust gate (forgejo-runner-keel-trust-gate.patch),
+# built as docs/infra/keel-lxc-2.md says and copied to FJ_BINARY first.
+FJ_BINARY=/var/cache/keel-runner/forgejo-runner-13.2.0-keel1
+FJ_SHA256=0e3a9b234d41a4e41797d79023348c949a0153f0bb4dc5d508305dab19f21870
+NODE_VERSION=24.21.0
 RUNNER_UID_BASE=1100 SUB_BASE=165536 SUB_COUNT=65536
 log() { printf '== %s\n' "$*"; }
 
@@ -44,20 +48,22 @@ NEED
 chmod 0755 /usr/local/bin/keel-need-packages
 
 log "forgejo-runner $FJ_VERSION"
-if ! /usr/local/bin/forgejo-runner --version 2>/dev/null | grep -q "$FJ_VERSION"; then
-	curl -fsSL -o /tmp/forgejo-runner \
-		"https://code.forgejo.org/forgejo/runner/releases/download/v$FJ_VERSION/forgejo-runner-$FJ_VERSION-linux-amd64"
-	echo "$FJ_SHA256  /tmp/forgejo-runner" | sha256sum -c -
-	install -m 0755 /tmp/forgejo-runner /usr/local/bin/forgejo-runner
-	rm -f /tmp/forgejo-runner
+if ! /usr/local/bin/forgejo-runner --version 2>/dev/null | grep -qF "v$FJ_VERSION"; then
+	echo "$FJ_SHA256  $FJ_BINARY" | sha256sum -c -
+	install -m 0755 "$FJ_BINARY" /usr/local/bin/forgejo-runner.new
+	mv /usr/local/bin/forgejo-runner.new /usr/local/bin/forgejo-runner
 fi
 
 log node
 # The JavaScript actions (checkout, upload-artifact) run with node 24 on the
-# host, the one the GitHub runner ships.
+# host. The SHA256 comes from SHASUMS256.txt of the release.
 if [ ! -x /opt/keel-node24/bin/node ]; then
-	cp -a /home/runner1/actions-runner/externals/node24 /opt/keel-node24
-	chown -R root:root /opt/keel-node24
+	t=node-v$NODE_VERSION-linux-x64.tar.xz
+	curl -fsSL -o "/tmp/$t" "https://nodejs.org/dist/v$NODE_VERSION/$t"
+	curl -fsSL "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt" | grep " $t\$" | (cd /tmp && sha256sum -c -)
+	install -d -m 0755 /opt/keel-node24
+	tar -C /opt/keel-node24 --strip-components=1 --no-same-owner -xJf "/tmp/$t"
+	rm -f "/tmp/$t"
 fi
 
 i=$FJ_FIRST last=$((FJ_FIRST + FJ_RUNNERS - 1))
