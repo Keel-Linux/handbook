@@ -702,3 +702,5 @@ windows of 10 minutes, at 5 ms and at 250 ms RTT.
 other node can claim, and before a MariaDB primary can acknowledge a
 write that the replica never got. The VIP itself moves as before.
 
+**Maintainer decision, 2026-10-16.** The maintainer answered "segue" to
+the amendment of 0031. The doubt mark at 6 s is part of that decision.

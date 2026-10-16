@@ -108,3 +108,8 @@ room. The cost is that a lost replica holds the writes 30 s, not 10 s,
 before the fallback, and an etcd re-election of more than 6 s holds the
 writes of the MariaDB holder until it ends.
 
+**Maintainer decision, 2026-10-16.** The maintainer reviewed this
+amendment and answered "segue". The timeout of 30 s and the read only
+state of the VIP holder after 6 s without a renewed lease are now the
+maintainer's decision, not only the coordinator's. The basis is the
+measurement above: the server went read only 6.1 s to 8.8 s after a cut.
