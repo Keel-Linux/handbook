@@ -429,6 +429,56 @@ registration in `.credentials` and modify that instance. It cannot reach
 another instance's files: the homes are each user's own, and the scratch
 trees are protected by the sticky bit. It cannot become root,
 reach the LAN or the host's sshd. The difference is what is next to it:
-this VM serves nothing and holds no other service, so what the runner's uid
-reaches here is the runner alone. The ephemeral runner options there apply
+this VM serves nothing. Since 2026-10-16 it holds one other thing, the
+bridge container `keel-bridge` (section "The bridge container
+keel-bridge"). A job cannot reach it:
+the firewall refuses every connection to it. The ephemeral runner options there apply
 to both runners.
+
+## The bridge container keel-bridge (decision 0056, amendment of 2026-10-16)
+
+The GitHub/Forgejo bridge (Keel-Linux/keel-bridge) runs in an LXC
+container on this VM. The maintainer chose this place on 2026-10-16. The
+risk and its controls are in decision 0056. This section is the rebuild
+record. No part of it changes a forgejo-runner file or unit.
+
+| Part | What |
+| --- | --- |
+| Container | `/var/lib/lxc/keel-bridge` (root, mode 0700), Debian trixie from the LXC download template, `lxc.start.auto = 1` |
+| Unprivileged | `lxc.idmap` u/g 0 2000000 65536; `/etc/subuid` and `/etc/subgid` have `root:2000000:65536`, a range that no runner user has (the runner ranges end at 1083039) |
+| No nesting, no shared mount | `lxc.apparmor.profile = generated`, `lxc.apparmor.allow_nesting = 0`, no `lxc.mount.entry` |
+| Limits | `lxc.cgroup2.memory.max = 512M`, `lxc.cgroup2.pids.max = 512` |
+| Network | bridge `kbr0` (not `lxcbr0`), host 10.0.9.1/30 and fd4b:6b65:6c09::1/64, container 10.0.9.2 and fd4b:6b65:6c09::2, static, NAT to `eth0` |
+| Firewall | table `inet keel_bridge` in `/etc/keel-bridge/keel-bridge.nft`, plus two accepts in `inet filter forward` that carry the comment `keel-bridge:` |
+| Service | `keel-bridge-net.service` (`/usr/local/sbin/keel-bridge-net up`): makes `kbr0` and loads the rules, after `nftables.service` and `lxc-net.service`, again on each reload or restart of `nftables.service` |
+| Inside | the user `keel-bridge`, the code in `/opt/keel-bridge`, the tokens in `/etc/keel-bridge` (root, 0600), the state in `/var/lib/keel-bridge`, `keel-bridge.timer` every 2 minutes |
+
+The firewall rules:
+
+- Nothing opens a connection to the container: not a CI container on
+  `lxcbr0`, not a runner user on the host (`meta skuid 1100-1199`), not
+  root, not the LAN. TCP gets a reset, other traffic a reject.
+- The container reaches the uplink only, never `lxcbr0` and never a
+  service of this host.
+- From the container: DNS to the uplink resolvers, HTTPS to git.pop.coop
+  (2804:710:d0:5::20), HTTPS to the Internet. No private range, no ULA,
+  no other address of the LAN, no other port.
+
+To rebuild:
+
+1. Copy `keel-bridge.nft`, `keel-bridge-net` and `keel-bridge-net.service`
+   from the evidence of 2026-10-16, then run
+   `systemctl enable --now keel-bridge-net`.
+2. Add `root:2000000:65536` to `/etc/subuid` and `/etc/subgid`.
+3. Write `/etc/keel-bridge/lxc.conf` (the idmap and the network above),
+   then run `lxc-create -n keel-bridge -f /etc/keel-bridge/lxc.conf -t download -- -d debian -r trixie -a amd64`.
+4. Set `lxc.apparmor.allow_nesting = 0` and the limits in the config, then
+   run `lxc-start -n keel-bridge`.
+5. In the container: disable systemd-networkd and systemd-resolved, write
+   a static `/etc/resolv.conf`, set the apt sources to https, and install
+   python3, python3-jwt, python3-cryptography, git and ca-certificates.
+6. Deploy keel-bridge as its README says.
+
+After a change of `/etc/nftables.conf`, check that `nft list table inet
+keel_bridge` still shows the rules. If it does not, run
+`systemctl restart keel-bridge-net`.
