@@ -190,9 +190,9 @@ requests bridged. git.pop.coop stays the source.
    of the same name. The items of the import of 2026-10 have the same
    number on both sides; `keel-bridge seed` links them.
 5. **The 4 open issues of the inithooks archive** (GitHub inithooks#21,
-   #26, #31 and #40) are unlocked. `keel-bridge backfill` makes their
-   copies on git.pop.coop when the bridge starts. GitHub inithooks#31 is
-   what inithooks PR #48 fixes; the copy of #31 then gets a link to #48.
+   #26, #31 and #40) are unlocked and in the sync: their copies are
+   git.pop.coop inithooks#52, #53, #54 and #55. GitHub inithooks#31 (copy
+   #55) is what inithooks PR #48 fixes; #55 and #48 link each other.
 
 ### Why a new tool
 
@@ -301,8 +301,12 @@ docs/infra/keel-lxc-2.md has the rebuild record.
   are red on Forgejo for reasons outside this change (keel#184,
   keel-nodejs-nginx#6, keel-nodebb#21, keel-wordpress#20,
   keel-postgresql#20). Turn Actions on there after each one merges.
-- The bridge container, the Forgejo bot, its team and the code are in
-  place. The GitHub App needs an owner of the GitHub organization in a
-  browser (keel-bridge `deploy/github-app-manifest.html`). The bridge
-  timer starts after that, then `keel-bridge seed` and
-  `keel-bridge backfill`, then the end-to-end test.
+- The bridge runs since 2026-10-16 13:14 UTC, with the GitHub App
+  `keel-linux-bridge` (App ID 5345455, made by hand by the maintainer, no
+  webhook, no client secret in use). The key is a file in the container,
+  so a rotation replaces only that file. `seed` linked 702 items of the
+  import, and `backfill` copied the 4 open inithooks archive issues and 11
+  open issues of git.pop.coop. The end-to-end test on keel-keys passed
+  (docs/evidence/2026-10-16-github-bridge-part2.md).
+- GitHub code scanning "default setup" (CodeQL) is off in every bridged
+  repository, because it runs on each push of the mirror.
