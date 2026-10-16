@@ -244,6 +244,16 @@ Instances: `runner9` to `runner14` (6 instances, `FJ_RUNNERS=6`) run
 since 2026-10-15, after the GitHub instances were retired. Their limits
 are 15 GB of the 23 GB VM.
 
+A job that writes no log line for 10 minutes fails. git.pop.coop keeps
+Forgejo's default `ZOMBIE_TASK_TIMEOUT` of 10 minutes: the server then
+archives the log and marks the job failed, while the commands still run
+on the runner. The runner's journal says `ReportLog error: already_exists:
+log file has been archived` (Keel-Linux/keel#177: "mesh / trixie" of
+keel runs 94 and 102). The reusable `lxc-trixie.yml` of
+Keel-Linux/.github prints a line each minute while its commands run
+(.github#25). A job of another workflow that can be silent for 10
+minutes must do the same.
+
 ## What a job can still do
 
 The same as on keel-lxc-1 (docs/ci-cd.md section 6, "What a job can still
