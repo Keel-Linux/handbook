@@ -190,8 +190,9 @@ requests bridged. git.pop.coop stays the source.
    of the same name. The items of the import of 2026-10 have the same
    number on both sides; `keel-bridge seed` links them.
 5. **The 4 open issues of the inithooks archive** (GitHub inithooks#21,
-   #26, #31 and #40) are unlocked and in the sync, with copies on
-   git.pop.coop. GitHub inithooks#31 is what inithooks PR #48 fixes.
+   #26, #31 and #40) are unlocked. `keel-bridge backfill` makes their
+   copies on git.pop.coop when the bridge starts. GitHub inithooks#31 is
+   what inithooks PR #48 fixes; the copy of #31 then gets a link to #48.
 
 ### Why a new tool
 
@@ -264,8 +265,9 @@ escapes to root on the VM can read the two tokens. The controls:
   nesting and no shared mount with a runner user.
 - It is on its own bridge `kbr0`, not on `lxcbr0`. The nft table
   `inet keel_bridge` refuses every connection to it: from the job
-  containers, from the runner users (`meta skuid 1100-1199`), from root
-  and from the LAN. It can open outbound HTTPS and DNS only.
+  containers on `lxcbr0`, from the rootless podman containers of the
+  `keel-container` runners, from the runner users (`meta skuid
+  1100-1199`, `runner9` to `runner16`), from root and from the LAN. It can open outbound HTTPS and DNS only.
 - The tokens are files in the container, root only (0600). The service
   reads them as root, then changes to the user `keel-bridge` before it
   opens a connection. The fetch from GitHub runs with no token, and the

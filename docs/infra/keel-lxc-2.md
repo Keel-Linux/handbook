@@ -456,8 +456,10 @@ record. No part of it changes a forgejo-runner file or unit.
 The firewall rules:
 
 - Nothing opens a connection to the container: not a CI container on
-  `lxcbr0`, not a runner user on the host (`meta skuid 1100-1199`), not
-  root, not the LAN. TCP gets a reset, other traffic a reject.
+  `lxcbr0`, not a rootless podman container of `keel-fj-15` and
+  `keel-fj-16` (its traffic leaves the host as the runner uid), not a
+  runner user on the host (`meta skuid 1100-1199`), not root, not the
+  LAN. TCP gets a reset, other traffic a reject.
 - The container reaches the uplink only, never `lxcbr0` and never a
   service of this host.
 - From the container: DNS to the uplink resolvers, HTTPS to git.pop.coop
