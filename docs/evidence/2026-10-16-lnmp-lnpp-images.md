@@ -58,9 +58,9 @@ After the variable came back:
 
 ## Build and signatures
 
-Build host `tkldev`, tooling `/srv/keel-apt/apt` at apt main, script
-`/var/tmp/keel-testbuild/s7/rel.sh` (the s5 flow with root's keyring in
-place of an empty one). Release directory `/srv/keel-release/2026-10-16`.
+Build host `tkldev`, tooling `/srv/keel-apt/apt` at apt main.
+keel-release builds, scans and signs (decision 0055). Release directory
+`/srv/keel-release/2026-10-16`.
 
 1. web 19.0-6 on the store core 19.0-10: `web rc=0/0`.
 2. lnmp 19.0-1: refused at `fab-install`: "E: Unable to locate package
@@ -68,8 +68,10 @@ place of an empty one). Release directory `/srv/keel-release/2026-10-16`.
 3. lnpp 19.0-1: `lnpp rc=0/0`. After keel-lnpp#2, lnpp 19.0-2:
    `rc=0/0`.
 
-Each run printed "keel-release: signing with subkey" with 2 subkeys,
-and "MANIFEST: signed". keel-release runs the key scan before it signs.
+Each run printed "MANIFEST: signed". keel-release runs the key scan
+before it signs. The signature of an image is its `.sha512.asc`. The
+release `MANIFEST` covers only the appliance of the last run, because
+each run writes it again.
 
 On the workstation, with the public keyrings of apt `keys/`:
 
@@ -215,6 +217,44 @@ first, in `/var/backups/keel/postgresql/`.
 ![lnpp-c](2026-10-16-lnmp-lnpp-images/lnpp-c-keel-check-anubis.png)
 ![lnpp-d](2026-10-16-lnmp-lnpp-images/lnpp-d-keel-check-anubis.png)
 
+## Firewall
+
+keel loads its firewall in cloud advanced only (0041). CTs 9090
+(lnmp-fw) and 9091 (lnpp-fw) boot the two images with
+`installation.mode: cloud_advanced`, `etcd: disabled` and
+`firewall.enabled: true`. On both, after the first boot:
+
+```
+nft list table inet keel
+  chain input { type filter hook input priority filter; policy drop;
+    iif "lo" accept; ct state established,related accept; ...
+    tcp dport { 22, 80, 443, 12321 } accept }
+keel diff   derived.firewall: same; derived.firewall.loaded: same; no drift
+```
+
+From the workstation: 443 answers 200, 22 is open, and 3306, 5432,
+8923 (Anubis) and 9999 do not answer.
+
+With a WireGuard overlay declared, the keel of the image renders the
+database port on `wg0` only (offline, no rule loaded):
+
+```
+lnmp:  tcp dport { 22, 80, 443, 12321 } accept
+       iifname "wg0" tcp dport 3306 accept
+lnpp:  tcp dport { 22, 80, 443, 12321 } accept
+       iifname "wg0" tcp dport 5432 accept
+```
+
+On the pairs, the database listens on the loopbacks, the overlay
+address and the VIP, never on the uplink:
+
+```
+lnmp-a  127.0.0.1:3306  [fd98:a500:292e::1]:3306  [fd98:a500:292e::ffff:1]:3306  [::1]:3306
+lnpp-c  127.0.0.1:5432  [fd73:91ce:d3a8::1]:5432  [fd73:91ce:d3a8::ffff:1]:5432  [::1]:5432
+```
+
+`WEBMIN_FW_TCP_INCOMING` is `22 80 443 12321` in both recipes.
+
 ## Findings
 
 1. **keel#183 (new).** The first LNPP pair (image 19.0-1, CTs 9085 and
@@ -229,8 +269,7 @@ first, in `/var/backups/keel/postgresql/`.
 3. **The Anubis key of a replica.** `keel-overlay-anubis-key` makes no
    key on a database replica: "the key is shared and comes from the
    primary". Nothing copies it, so `anubis@keel` does not start until
-   the operator copies the key (step 4 above). A pair procedure needs
-   this step written, or a copy over the members' channel.
+   the operator copies the key (step 4 above). common#56 (new).
 4. **Anubis refuses headless Chromium** by its user agent ("Access
    Denied"). The screenshots use a desktop user agent. curl gets the
    page, as the bot policy allows it.
@@ -245,6 +284,7 @@ first, in `/var/backups/keel/postgresql/`.
 
 ## Left running
 
-CTs 9081, 9083, 9084, 9087, 9088 and 9089 run the delivered images.
+CTs 9081, 9083, 9084, 9087, 9088, 9089, 9090 and 9091 run the delivered
+images.
 CTs 9082, 9085 and 9086 run lnpp 19.0-1, which keel-lnpp#2 replaces.
 They are kept for keel#183 and can be removed.
