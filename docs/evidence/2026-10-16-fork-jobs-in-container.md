@@ -13,7 +13,8 @@ Machines:
 - Throwaway accounts, deleted after the test: `keel-fork-probe` (not a
   member, opened the fork pull requests) and `keel-fork-approver`
   (write access to the two test repositories only, during each approval).
-  The repository `Keel-Linux/fork-gate-probe` and both forks are deleted.
+  The repositories `Keel-Linux/fork-gate-probe` and
+  `Keel-Linux/container-options-probe` and both forks are deleted.
   inithooks#50 (the fork probe) is closed.
 
 ## Summary
@@ -31,6 +32,9 @@ Machines:
 | 9. inithooks#49, every job on `keel-container` | PASS | runs 33 and 34: security, tests, python, package green. Merged as 3b19630. |
 | 10. Fork pull request on inithooks, inithooks#50 | PASS | runs 35 and 36: the 4 jobs green on `keel-fj-15` and `keel-fj-16`. |
 | 11. Users `runner1` to `runner8` | Removed | No process but their idle user managers, no unit, no cron. |
+| 12. `container:` and `services:` options of a job on `keel-container` | PASS | `-v /home:/h`, `--mount type=bind`, a service `-v /etc:/hostetc`: no mount in the job. `--network host`: the job stayed on its own network. Probes as in item 6. |
+| 13. Reproducible build of the patched runner | PASS | a new clone of v13.2.0, the patch, the documented command: the same SHA256. |
+| 14. Slice limits of the container instances | PASS | `memory.max` 2684354560 and `pids.max` 8192 for `user-1115.slice` and `user-1116.slice`. |
 
 ## 1. Why the rule is in the runner
 
@@ -130,3 +134,24 @@ stop `user@UID`, `userdel -r`, remove the lines in `/etc/subuid`,
 `actions-runner@.service` unit and its drop-in. After: `loginctl` lists
 `runner9` to `runner14` (and `runner15`, `runner16`, the container
 instances), no file of the removed users outside the removed homes.
+
+## 12. Job container options
+
+A trusted push to the throwaway repository `container-options-probe`
+(the runner code is the same for a fork job). The job had
+`container: { image: localhost/keel-ci:trixie, options: -v /home:/h
+--mount type=bind,src=/run/user,dst=/s --privileged --network host }`
+and a service with `options: -v /etc:/hostetc`. Run 2:
+
+    [/home] is not a valid volume, will be ignored
+    uid=1000(node) gid=1000(node) groups=1000(node)
+    ls: cannot access '/h': No such file or directory
+    ls: cannot access '/s': No such file or directory
+    cat: /h/runner15/actions-runner/.runner: No such file or dir
+    ls: cannot access '/hostetc': No such file or directory
+    eth0@if5         UP             10.89.0.3/24 fd2d:23ee:5bff:62db::3/64
+    127.0.0.1 port 22: blocked
+    2804:710:d0:5::bbba port 22: blocked
+    10.88.5.254 port 80: blocked
+    2804:710:d0:5::20 port 443: open
+    pypi.org port 443: open

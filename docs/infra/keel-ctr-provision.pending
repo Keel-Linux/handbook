@@ -67,7 +67,7 @@ while [ "$i" -le "$last" ]; do
 	done
 	loginctl enable-linger "$u"
 	install -d -m 0755 -o "$u" -g "$u" "/home/$u/actions-runner"
-	cat > "/home/$u/actions-runner/config.yml" << CONF
+	cat > "$SHARE/keel-ci/config.$u.yml" << CONF
 # forgejo-runner instance keel-fj-$i, a container runner. Its jobs run in
 # rootless podman containers of $u; no host label (keel-ctr-provision).
 log:
@@ -90,7 +90,7 @@ container:
   docker_host: "-"
   force_pull: false
 CONF
-	chown "$u:$u" "/home/$u/actions-runner/config.yml"
+	install -m 0644 -o "$u" -g "$u" "$SHARE/keel-ci/config.$u.yml" "/home/$u/actions-runner/config.yml"
 	install -d -m 0755 "/etc/systemd/system/forgejo-runner-ctr@$i.service.d" "/etc/systemd/system/user-$uid.slice.d"
 	cat > "/etc/systemd/system/forgejo-runner-ctr@$i.service.d/keel-instance.conf" << DROPIN
 # Instance $i in the slice of $u, with the podman socket of $u.
@@ -130,6 +130,37 @@ for f in /etc/subuid /etc/subgid; do
 		{ end = $2 + $3 } END { exit bad }'
 done
 
+log firewall
+# Rootless podman sends the traffic of a container from a process of the
+# instance user, so the forward rules of lxcbr0 do not apply. These rules
+# give the uids of the instances and their subordinate ids the same reach.
+first_uid=$((RUNNER_UID_BASE + CTR_FIRST)) last_uid=$((RUNNER_UID_BASE + last))
+first_sub=$((SUB_BASE + (CTR_FIRST - 1) * SUB_COUNT)) last_sub=$((SUB_BASE + last * SUB_COUNT - 1))
+cat > /etc/nftables.keel-ctr.nft << NFT
+# Written by keel-ctr-provision (handbook docs/infra/keel-lxc-2.md):
+# the container runners and their subordinate ids.
+table inet filter {
+	chain container_runners {
+		ct state established,related accept
+		oif "lo" ip daddr 127.0.0.53 meta l4proto { tcp, udp } th dport 53 accept comment "container runners: the DNS stub"
+		oif "lo" drop comment "container runners: no service of this host, sshd included"
+		meta l4proto { tcp, udp } th dport 53 accept comment "container runners: DNS of the LAN resolvers"
+		ip6 daddr 2804:710:d0:5::20 tcp dport 443 accept comment "container runners: git.pop.coop"
+		ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } drop comment "container runners: no private ranges, the LAN included"
+		ip6 daddr { fc00::/7, fe80::/10, 2804:710:d0:5::/64 } drop comment "container runners: no ULA, link local or the public LAN segment"
+		accept
+	}
+}
+add rule inet filter output meta skuid { $first_uid-$last_uid, $first_sub-$last_sub } jump container_runners
+NFT
+grep -qx 'include "/etc/nftables.keel-ctr.nft"' /etc/nftables.conf ||
+	echo 'include "/etc/nftables.keel-ctr.nft"' >> /etc/nftables.conf
+nft -c -f /etc/nftables.conf
+# Load the chain without "flush ruleset", which would stop the NAT of lxc-net.
+if ! nft list chain inet filter container_runners >/dev/null 2>&1; then
+	nft -f /etc/nftables.keel-ctr.nft
+fi
+
 log reset
 cat > /usr/local/sbin/keel-ctr-start-reset << 'RESET'
 #!/bin/sh
@@ -137,7 +168,8 @@ cat > /usr/local/sbin/keel-ctr-start-reset << 'RESET'
 # runner instance, forgejo-runner-ctr@I.service (USER is runnerI). Every
 # container, pod, volume and network of USER goes, and every image but
 # the CI image; the user manager starts again from root's files, with the
-# podman socket only. The runner state in actions-runner stays.
+# podman socket only. config.yml is written again from root's copy; only
+# the registration (.runner) and the CI image stay from job to job.
 set -u
 user=${1-}
 case "$user" in
@@ -157,7 +189,8 @@ pkill -KILL -u "$user"
 find "$home" -mindepth 1 -maxdepth 1 ! -name .local ! -name actions-runner -exec rm -rf -- {} +
 find "$home/.local" -mindepth 1 -maxdepth 1 ! -name share -exec rm -rf -- {} + 2>/dev/null
 find "$home/.local/share" -mindepth 1 -maxdepth 1 ! -name containers -exec rm -rf -- {} + 2>/dev/null
-find "$home/actions-runner" -mindepth 1 -maxdepth 1 ! -name .runner ! -name config.yml -exec rm -rf -- {} +
+find "$home/actions-runner" -mindepth 1 -maxdepth 1 ! -name .runner -exec rm -rf -- {} +
+install -m 0644 -o "$user" -g "$user" "/usr/local/share/keel-runner/keel-ci/config.$user.yml" "$home/actions-runner/config.yml"
 for f in .bashrc .profile .bash_logout; do
 	install -m 0644 -o "$user" -g "$user" "/etc/skel/$f" "$home/$f"
 done

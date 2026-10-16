@@ -10,8 +10,11 @@ users `runner1` to `runner8` were removed: linger off, the users and
 their homes, their subordinate ids, `lxc-usernet` lines, slice drop-ins,
 LXC templates and the `actions-runner@` units. No service used them. The
 text about the GitHub instances is a record. Do not run
-`keel-lxc-2-provision.pending` with its default `KEEL_RUNNERS=8` on this
-VM: it makes the GitHub users again. Use `KEEL_RUNNERS=0`.
+`keel-lxc-2-provision.pending` on this VM: it writes `/etc/nftables.conf`
+and the `actions-runner@` unit again, and with its default
+`KEEL_RUNNERS=8` it makes the GitHub users again. On a new VM, run it
+with `KEEL_RUNNERS=0`, then `keel-fj-provision`, then
+`keel-ctr-provision`.
 
 Provisioned on 2026-10-07. The second runner host of the Keel-Linux
 organization, equivalent to keel-lxc-1 (docs/ci-cd.md section 6,
@@ -339,8 +342,8 @@ the container instances:
 | Engine | rootless podman 5.4 of the instance user, through its `podman.socket`; cgroupfs, because the user managers have no D-Bus session bus. A container stays under the limits of the user slice |
 | Image | `localhost/keel-ci:trixie`, built for each user from `/usr/local/share/keel-runner/keel-ci/Containerfile`: `node:24-trixie` with the packages of `keel-fj-provision`, `iproute2`, `iptables`, `nftables` and `keel-need-packages`; the steps run as the user `node`. Also tagged `node:22-bookworm`, see "The workflows" |
 | Runner | `config.yml`: cache off, no volume, no Docker socket in the job, not privileged, IPv6 on |
-| Service | `forgejo-runner-ctr@I`: `one-job`, and before each job `keel-ctr-start-reset` (as root) removes every container, pod, volume, network and image of the user except `keel-ci`, and writes the home again from root's files |
-| Firewall | the `output` chain sends the traffic of uids 1115-1116 and their subordinate ids to the chain `container_runners`: DNS, `git.pop.coop` on 443 and the internet; no service of the VM, no private IPv4 range, no ULA, no link local and no other host of `2804:710:d0:5::/64` |
+| Service | `forgejo-runner-ctr@I`: `one-job`, and before each job `keel-ctr-start-reset` (as root) removes every container, pod, volume, network and image of the user except `keel-ci`, and writes the home and `config.yml` again from root's files. Only the registration (`.runner`) and the image stay from job to job |
+| Firewall | `/etc/nftables.keel-ctr.nft`, included at the end of `/etc/nftables.conf`: the `output` chain sends the traffic of uids 1115-1116 and their subordinate ids (1083040-1214111) to the chain `container_runners`: DNS, `git.pop.coop` on 443 and the internet; no service of the VM, no private IPv4 range, no ULA, no link local and no other host of `2804:710:d0:5::/64` |
 
 The firewall rule is necessary because rootless podman sends the traffic
 of a container from a host process, not through `lxcbr0`.
@@ -399,12 +402,22 @@ that user, so the tests that use a network namespace of their own
 - It cannot run a workflow that needs the LXC of the VM
   (`lxc-trixie.yml`, `test-appliance.yml`). These run after the merge,
   or on a branch of the repository that a member pushes.
-- A container escape gives the instance user. That user can read the
-  registration of its instance and change the `keel-ci` image of its
-  instance for later fork jobs. Fork jobs have no secrets, and the host
-  instances are other users.
-- `keel-ctr-start-reset` removes everything of a job except the image.
-  It does not check the image layers.
+- It cannot get a volume, a bind mount or the host network through
+  `container:` or `services:`. Tested on 2026-10-16 with `-v /home:/h`,
+  `--mount type=bind,src=/run/user,...`, a service with `-v /etc:/hostetc`
+  and `--network host`: the runner dropped the mounts (`valid_volumes`
+  is empty), and the job stayed on its own network. `--privileged` stays
+  inside the user namespace of rootless podman.
+- A container escape gives the instance user. The container instances
+  also run the trusted jobs of the repositories that use
+  `keel-container` (inithooks on push and on pull request). Thus an
+  escape can change the `keel-ci` image of its instance and the result
+  of later jobs, trusted ones too, and it can read the registration of
+  its instance. The host instances are other users, and no job has
+  secrets. If you suspect an escape, remove the image and the
+  registration of that instance and make them again.
+- `keel-ctr-start-reset` removes everything of a job except the image
+  and the registration. It does not check the image layers.
 
 The test of 2026-10-16 is `docs/evidence/2026-10-16-fork-jobs-in-container.md`.
 
