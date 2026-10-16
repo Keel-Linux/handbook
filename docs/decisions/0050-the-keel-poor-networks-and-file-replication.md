@@ -378,6 +378,45 @@ checksums.
   kept etcd stable at 250 ms with a heartbeat of 300 ms and an election
   timeout of 3 s, and it still re-elected under loss and partition.
 
+## Amendment 2026-10-15: a stalled TCP connection ends after 5 retransmissions
+
+Decided by the coordinator under the maintainer's delegation, from the
+netns evidence of Keel-Linux/keel#167
+(`evidence/2026-10-15-etcd-stalled-peer-stream.md` in the keel
+repository). Implemented by the pull request for keel#167.
+
+**What changes.** On each node that runs etcd, keel writes
+`/etc/sysctl.d/90-keel-etcd.conf` with `net.ipv4.tcp_retries2 = 5` and
+sets the value live. The kernel's default is 15. The setting holds for
+the network namespace of the node, for IPv4 and IPv6, and for each TCP
+connection in it.
+
+**Why the current approach is not enough.** On real nodes under netem,
+etcd had no leader for 111 seconds after a cut of the leader's site.
+In the netns harness, a peer connection that lost its segments in a cut
+doubled its retransmission timeout up to 58 seconds. etcd went on
+writing raft's messages to that connection and saw no error. The votes
+of a survivor waited in it, also after the heal. Of 12 leader cuts of
+40 seconds, 1 had no leader for the whole cut, and the members were
+back 24 to 61 seconds after the heal. In CI, a follower rejoined 19 to
+51 seconds after the heal in all 33 runs. A longer election timeout
+does not help a stalled connection, and etcd has no setting that ends
+one.
+
+**Whether it can be made to work.** With 5, the kernel ends such a
+connection after about 14 seconds of retransmissions. etcd sees the
+error and dials again. In the same 12 cuts, the new leader came 8 to 13
+seconds after each cut, and the members were back 8 to 16 seconds after
+the heal. No peer connection went above a backoff of 4. At the design
+case's 2% loss, the kernel ends a working connection only if 6 copies
+of one segment are lost in a row, which comes once in 10^10 segments.
+
+**Why this is better.** The fix is one standard kernel value, set where
+etcd runs, and not a change to etcd. The other TCP users of a node,
+such as the replication of a database pair, also see a dead peer after
+about 14 seconds instead of about 15 minutes, and they dial again. A
+cut shorter than 14 seconds ends no connection.
+
 [^keel]: The maintainer, 2026-10-03, in Portuguese: "Todo barco, por mais
     antigo que seja, ele precisa de uma quilha. É uma tecnologia antiga,
     chumbo, pesado embaixo, mas é o que garante que ele seja estável, que
