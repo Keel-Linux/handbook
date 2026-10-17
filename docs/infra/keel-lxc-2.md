@@ -1,5 +1,6 @@
 # keel-lxc-2, the second CI runner host
 
+**Status 2026-10-17:** the host instances are two classes, 5 for `keel-lxc` jobs and 4 for `keel-host` jobs, see "Forgejo runner instances".
 **Status 2026-10-16:** the CI of Keel-Linux runs on the Forgejo
 instances, see "Forgejo runner instances" below. A job of a pull request
 from a fork runs only in a container, see "Fork pull requests run in a
@@ -231,7 +232,7 @@ stopped two jobs on 2026-10-14.
 
 | Part | What |
 | --- | --- |
-| Instances | `FJ_RUNNERS` (6 by default) users `runner9` to `runner14`, uid 1109 to 1114, the same subordinate range scheme (`runner9` 689824-755359 ...), LXC defaults, `lxc-usernet` quota and slice limits as `runner1` to `runner8` |
+| Instances | two classes of `forgejo-runner@I`. Class `lxc` (`FJ_LXC_IDS`, `runner9` to `runner13`, 5 instances, label `keel-lxc`, memory limit 1792 MB) takes the jobs that start a container. Class `host` (`FJ_HOST_IDS`, `runner17` to `runner20`, 4 instances, label `keel-host`, memory limit 1024 MB) takes the jobs that run on the VM (`tests`, `package`, `security`). Both also carry `self-hosted`. The users have uid 1100 plus the id, the same subordinate range scheme (`runner9` 689824-755359 ...), LXC defaults and `lxc-usernet` quota as `runner1` to `runner8`; the slice has `CPUWeight=100`. Ids 15 and 16 are the container instances |
 | Runner | `forgejo-runner` 13.2.0 with the trust gate in `/usr/local/bin`, checked against its SHA256; the release binary stays as `forgejo-runner-13.2.0.upstream`; state and `config.yml` in `/home/runnerI/actions-runner`, work trees in its `_work` |
 | Service | `forgejo-runner@I`: `forgejo-runner one-job --wait`, one job for each start, `Restart=always`. Before each job, `keel-runner-start-reset` (as root) and `job-reset.sh`; after it, `job-reset-completed.sh`: the same resets as the GitHub job hooks |
 | Labels | `keel-host`, `keel-lxc`, `self-hosted`, all of the host executor, registered with the registration token of the organization (not of the server), so jobs of other organizations do not come here |
@@ -246,13 +247,44 @@ or organization administrator), for instance I:
 
     cd /home/runnerI/actions-runner
     runuser -u runnerI -- forgejo-runner register --no-interactive \
-      --instance https://git.pop.coop --token TOKEN --name keel-fj-I \
-      --labels keel-lxc:host,self-hosted:host,keel-host:host -c config.yml
+      --instance https://git.pop.coop --token TOKEN --name keel-fj-CLASS-I \
+      --labels LABEL:host,self-hosted:host -c config.yml
     systemctl enable --now forgejo-runner@I
 
-Instances: `runner9` to `runner14` (6 instances, `FJ_RUNNERS=6`) run
-since 2026-10-15, after the GitHub instances were retired. Their limits
-are 15 GB of the 23 GB VM.
+CLASS is `lxc` with LABEL `keel-lxc`, or `host` with LABEL `keel-host`.
+The script does this itself for an instance that has no `.runner` file,
+when `FJ_REG_TOKEN` holds the token (read it from stdin, do not write it to
+a file). Forgejo 14 has no API to list or delete a runner: remove an old
+registration in the organization settings, Actions, Runners.
+
+Instances: since 2026-10-17, 5 `lxc` instances (`runner9` to `runner13`)
+and 4 `host` instances (`runner17` to `runner20`). Before, `runner9` to
+`runner14` took all three labels, so a `tests` job of 18 minutes could hold
+one of the 6 slots of `keel-lxc` jobs. The memory limits of the 9 are
+5 x 1792 MB and 4 x 1024 MB, 12.75 GB. With the 2 container instances of
+2560 MB each, the limits add up to 17.75 GB of the 23 GB VM. A job uses
+less than its limit: the largest anonymous memory seen in one slice was
+0.9 GB, and `memory.events` shows no OOM kill; the kernel takes back the
+page cache at the limit.
+
+The number of `lxc` instances is a CPU limit, not a count to raise. The VM
+has 16 cores of 2.6 GHz, and the 8 `keel-lxc` jobs of a pull request use
+0.15 to 1.8 cores each on average, with short bursts of 3 to 10 cores.
+Measured on 2026-10-17 (docs/evidence/2026-10-17-ci-parallel-runners.md):
+
+- With 12 instances the 11 jobs of one pull request ran at once, the load
+  average reached 40, the CPU use was above 80 % for four minutes, and 2
+  jobs failed on their timing bounds.
+- With 6 `lxc` instances, 4 of 7 runs had a failed job.
+- With 5 `lxc` instances, 1 of 7 runs had a failed job, as often as before
+  the change (7 of 23 full runs in the history, 1 of 3 of the first
+  measurement).
+- A fixed set of 2 cores for each `lxc` instance (`AllowedCPUs`) was worse:
+  both runs failed, because the jobs need more than 2 cores in a burst.
+
+The wall time of one pull request does not drop with more instances,
+because the `tests` job (18 minutes, one core) sets it. Do not add `lxc`
+instances without a new measurement, and do not loosen a timing bound.
 
 A job that writes no log line for 10 minutes fails. git.pop.coop keeps
 Forgejo's default `ZOMBIE_TASK_TIMEOUT` of 10 minutes: the server then
@@ -301,7 +333,7 @@ runs a step:
 - The rule is compiled in. No file that the runner user can write turns
   it off.
 
-The six host instances (`keel-fj-9` to `keel-fj-14`) have only host
+The nine host instances (`keel-fj-lxc-9` to `keel-fj-lxc-13` and `keel-fj-host-17` to `keel-fj-host-20`) have only host
 labels, so they refuse every fork job, on `keel-host`, `keel-lxc` and
 `self-hosted`. `keel-lxc` is a host label too: the steps of a `keel-lxc`
 job run on the VM, and only the containers that the job starts are
