@@ -1,12 +1,24 @@
 #!/bin/sh
 # Forgejo runner instances on Keel-Linux-Runner (decision 0056). The
-# GitHub instances runner1-runner8 are removed (2026-10-16). Instance I (9..8+FJ_RUNNERS) is user
+# GitHub instances runner1-runner8 are removed (2026-10-16). Instance I (in FJ_LXC_IDS or FJ_HOST_IDS) is user
 # runnerI, uid 1100+I, service forgejo-runner@I, with the same subordinate
 # range scheme, LXC defaults, slice limits and job resets as the GitHub
 # instances (docs/infra/keel-lxc-2.md). Run as root. Idempotent.
 set -eu
-FJ_FIRST=9
-FJ_RUNNERS=${FJ_RUNNERS:-6}
+# The host instances, in two classes. A job of a keel-lxc label runs the
+# timing-sensitive tests (netem at 250 ms) in a container; a job of the
+# keel-host label runs on the VM and needs one core. Each class has its own
+# instances, so a host job never takes a keel-lxc slot, and the number of
+# keel-lxc jobs that run at once (the CPU of the VM) is the number of lxc
+# instances. 15 and 16 are the container instances of keel-ctr-provision
+# (forgejo-runner-ctr@), so the lists skip them.
+FJ_LXC_IDS=${FJ_LXC_IDS:-"9 10 11 12 13"}
+FJ_HOST_IDS=${FJ_HOST_IDS:-"17 18 19 20"}
+FJ_LXC_MEM=1792M FJ_HOST_MEM=1024M
+# Set FJ_REG_TOKEN (the registration token of the organization, read from
+# stdin by the caller, never written to a file) to register an instance
+# that has no .runner file yet.
+FJ_REG_TOKEN=${FJ_REG_TOKEN:-}
 FJ_VERSION=13.2.0+keel1
 # The 13.2.0 release with the trust gate (forgejo-runner-keel-trust-gate.patch),
 # built as docs/infra/keel-lxc-2.md says and copied to FJ_BINARY first.
@@ -66,8 +78,10 @@ if [ ! -x /opt/keel-node24/bin/node ]; then
 	rm -f "/tmp/$t"
 fi
 
-i=$FJ_FIRST last=$((FJ_FIRST + FJ_RUNNERS - 1))
-while [ "$i" -le "$last" ]; do
+for spec in $(for i in $FJ_LXC_IDS; do echo "lxc:$i"; done) $(for i in $FJ_HOST_IDS; do echo "host:$i"; done); do
+	class=${spec%%:*} i=${spec#*:}
+	case $class in lxc) label=keel-lxc mem=$FJ_LXC_MEM ;; *) label=keel-host mem=$FJ_HOST_MEM ;; esac
+	case $i in 15 | 16) echo "id $i is a container instance, see keel-ctr-provision" >&2; exit 1 ;; esac
 	u=runner$i uid=$((RUNNER_UID_BASE + i)) sub=$((SUB_BASE + (i - 1) * SUB_COUNT))
 	log "$u"
 	id "$u" >/dev/null 2>&1 || useradd -m -s /bin/bash -u "$uid" -U -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 "$u"
@@ -91,7 +105,7 @@ LXCDEF
 	install -m 0644 -o "$u" -g "$u" "/usr/local/share/keel-runner/lxc-default.$u.conf" "/home/$u/.config/lxc/default.conf"
 	install -m 0664 -o "$u" -g "$u" /usr/local/share/keel-runner/runner.env "/home/$u/actions-runner/.env"
 	cat > "/home/$u/actions-runner/config.yml" << CONF
-# forgejo-runner instance keel-fj-$i (decision 0056).
+# forgejo-runner instance keel-fj-$class-$i (decision 0056).
 log:
   level: warn
 runner:
@@ -107,6 +121,11 @@ host:
   workdir_parent: /home/$u/actions-runner/_work
 CONF
 	chown "$u:$u" "/home/$u/actions-runner/config.yml"
+	if [ -n "$FJ_REG_TOKEN" ] && [ ! -e "/home/$u/actions-runner/.runner" ]; then
+		(cd "/home/$u/actions-runner" && runuser -u "$u" -- forgejo-runner register --no-interactive \
+			--instance https://git.pop.coop --token "$FJ_REG_TOKEN" --name "keel-fj-$class-$i" \
+			--labels "$label:host,self-hosted:host" -c config.yml >/dev/null)
+	fi
 	loginctl enable-linger "$u"
 	install -d -m 0755 "/etc/systemd/system/forgejo-runner@$i.service.d" "/etc/systemd/system/user-$uid.slice.d"
 	cat > "/etc/systemd/system/forgejo-runner@$i.service.d/keel-slice.conf" << DROPIN
@@ -118,15 +137,14 @@ After=user-runtime-dir@$uid.service
 Slice=user-$uid.slice
 DROPIN
 	cat > "/etc/systemd/system/user-$uid.slice.d/90-keel-limits.conf" << DROPIN
-# The limits of instance keel-fj-$i, its runner, its job and its containers.
+# The limits of instance keel-fj-$class-$i, its runner, its job and its containers.
 [Slice]
 MemoryAccounting=yes
-MemoryMax=2560M
+MemoryMax=$mem
 MemorySwapMax=0
 CPUWeight=100
 TasksMax=8192
 DROPIN
-	i=$((i + 1))
 done
 for f in /etc/subuid /etc/subgid; do
 	sort -t: -k2,2n "$f" | awk -F: -v f="$f" '
