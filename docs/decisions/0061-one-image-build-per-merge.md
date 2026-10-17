@@ -225,3 +225,33 @@ CI tree, and it publishes nothing.
 - Infrastructure: the drop user on the runner VM, the bot user on
   Forgejo, the timer on the build host.
 - Evidence: `docs/evidence/2026-10-16-image-per-merge.md`.
+
+## Amendment of 2026-10-17, from the first runs
+
+Decided by the coordinator under the maintainer's delegation, after the
+first runs on the build host (evidence
+`docs/evidence/2026-10-16-image-per-merge.md`):
+
+1. **The CI builds the testing track** (`KEEL_APT_TRACK=testing`, 0043).
+   A CI build is an image of the testing channel, so it reads
+   `trixie-testing` too, and its `keel.sources` follows that suite. On
+   the stable track every appliance above web failed its project package
+   check, because the layers had keel and confconsole from
+   `trixie-testing`. So a testing image carries the keel package of
+   `trixie-testing`, never a build of keel `main`.
+2. **Each appliance is built on its own.** An appliance that fails to
+   build gets its issue, and the other appliances go on to the boot test
+   and to testing. One `keel-release --sign-only` run then writes one
+   staged `MANIFEST` that names every appliance built.
+3. **The build tree of each checkout is removed after the build.** fab
+   leaves its deck mounted in `build/`, about 2 GB for each layer. The
+   poll unmounts it and removes it, and `git clean` leaves `build/`
+   alone.
+4. **The heads are recorded only after a verdict:** a build that fails,
+   or a boot test that passes or fails. A fetch, a push, a dispatch or a
+   run that does not end leaves them unrecorded, so the next poll tries
+   again. The issue is opened once for each set of heads.
+5. **A commit that changes only CI files also builds the layer again.**
+   `--match-source` compares commits, not paths. This costs build time,
+   not correctness. It is not changed now.
+

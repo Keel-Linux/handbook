@@ -453,6 +453,36 @@ that user, so the tests that use a network namespace of their own
 
 The test of 2026-10-16 is `docs/evidence/2026-10-16-fork-jobs-in-container.md`.
 
+## The drop user of the image build per merge (decision 0061)
+
+Since 2026-10-16 the build host pushes each staged image build to this
+VM. The build host connects here; this VM does not connect to the build
+host.
+
+| Part | What |
+| --- | --- |
+| User | `keel-image-drop`, a system user, home `/var/lib/keel-image-drop`, shell `/bin/sh` (sshd runs the forced command through the shell) |
+| Drop directory | `/var/lib/keel-image-drop/incoming`, owned by `keel-image-drop`, mode 0755: the runner users read it and cannot write to it |
+| Key | `/var/lib/keel-image-drop/.ssh/authorized_keys`, owned by root: one key of the build host, with `restrict,command="/usr/bin/rrsync -wo /var/lib/keel-image-drop/incoming"` |
+| What the key can do | write and delete under the drop directory with rsync. It cannot open a shell, run another command or read a file (measured 2026-10-16: `rrsync error: SSH_ORIGINAL_COMMAND does not run rsync`, `reading from write-only server is not allowed`) |
+
+Each push replaces the whole drop directory (`rsync --delete`), so it
+holds one build at most. The job `image-boot.yml` of
+`Keel-Linux/image-gate` reads `incoming/<build>/` and checks the staging
+signature and every digest before it boots anything.
+
+To rebuild it, as root:
+
+    useradd --system --home-dir /var/lib/keel-image-drop --create-home \
+      --shell /bin/sh keel-image-drop
+    install -d -o keel-image-drop -g keel-image-drop -m 0755 \
+      /var/lib/keel-image-drop/incoming
+    install -d -o root -g root -m 0755 /var/lib/keel-image-drop/.ssh
+    # one line: restrict,command="/usr/bin/rrsync -wo /var/lib/keel-image-drop/incoming" <public key>
+    $EDITOR /var/lib/keel-image-drop/.ssh/authorized_keys
+
+The public key is `/etc/keel-image-ci/drop-key.pub` on the build host.
+
 ## What a job can still do
 
 The same as on keel-lxc-1 (docs/ci-cd.md section 6, "What a job can still
