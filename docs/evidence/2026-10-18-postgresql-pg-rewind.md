@@ -20,7 +20,7 @@ build host made it after keel 0.23.45 reached `trixie-testing`.
 
 | Case | Link | Result |
 | --- | --- | --- |
-| (a) The holder is cut for 90 s with no writer | base | The old primary rejoins by `pg_rewind`: streaming 15.9 s after the heal, the rewind 9.5 s. No copy of the holder, no divergence record, no alert |
+| (a) The holder is cut for 90 s with no writer | base | The old primary rejoins by `pg_rewind`: streaming 15.9 s after the heal, the rewind 9.5 s. No copy of the holder, no divergence record, and no `database-rejoin` line in the journal of the round |
 | (b) The holder is cut while it takes writes | base | The rewind discards 1 write that the sync standby never received. 0 of 1048 acknowledged writes are lost. Old and new primary hold the same ids afterwards |
 | (c) `pg_rewind` is impossible on the old primary | base | keel falls back. The divergence is recorded 14.3 s after the heal and the node stays read only. The confirmed reseed streams 16.9 s after it starts |
 | (d) A second failover in a row | base | Case (b) ran 80 s after the heal of case (a), and the VIP fence of the first node was clear. The VIP landed 20.07 s after the cut and the first write came 2.00 s later |
@@ -116,6 +116,24 @@ cheaper than the reseed only when the data is large: the files that
 changed are the only data that `pg_rewind` copies besides the WAL.
 
 
+## The image
+
+No watched repository changed, so no merge started a build. The image
+came from this path:
+
+1. keel 0.23.45 went to `trixie-testing` with apt#56.
+2. A first forced build failed. `keel-project-packages` requires the
+   package to come from `archive.keellinux.org`, and that archive did not
+   hold it yet. The failure opened image-gate#20, which was closed with a
+   note.
+3. `keel-publish-mirror --archive-only` put 0.23.45 on the public archive.
+   `trixie` stays at 0.23.21.
+4. A forced build of postgresql followed: the saved head of
+   `keel-postgresql` was set to a wrong value in
+   `/srv/keel-ci/state/heads` on the build host, so the next poll rebuilt
+   the layer. The pool refresh found nothing to add, the layers matched,
+   and the boot gate passed.
+
 ## The test
 
 Nodes: CT 9151 (W, BR1), 9152 (B, BR1) on `hw12-br1`, and CT 9153 (C,
@@ -159,7 +177,12 @@ the tree of keel#213 copied in), before the image above existed:
   clusters back to the reseed that needs `--destroy-local-database`.
 - The pair keeps up to 256 MB more WAL on each node (`wal_keep_size`).
 - A node that failed halfway needs the operator. The mark and the reseed
-  are in place, and the alert for it is the existing divergence alert.
+  are in place. No alert names this state: the divergence alert comes from
+  the fallback path only, and the watch of the holder alerts that it
+  commits alone. Keel-Linux/keel#214 asks for the alert.
+- The CTs had no alert channel: every alert attempt logged "no alert sent
+  (/etc/keel/monitor.json: secret file not found)". The test proves the
+  alert text by its absence from the journal, not by delivery.
 - The image gate run 26 booted the image. It does not test a failover.
 
 Question for the maintainer, as one yes or no: should keel rewind only
