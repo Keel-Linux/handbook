@@ -129,7 +129,7 @@ and in the products of the build host.
 | Where | What | Action |
 | --- | --- | --- |
 | `keel-apache-php`, `keel-lamp`, `keel-lapp` | Apache layers. Archived on git.pop.coop | Stay archived. The layers `apache-php`, `lamp`, `lamp-client`, `lapp` and `lapp-client` leave `conf/appliances` of `apt`, so no release builds them. Their published files stay until a withdrawal, which is a separate act |
-| `keel-wordpress` | WordPress on Apache and PHP, a layer on `mariadb` | Step 4: WordPress on `lnmp` |
+| `keel-wordpress` | WordPress on Apache and PHP, a layer on `mariadb` | Step 4: WordPress on `lnmp`. Done on 2026-10-18 (docs/evidence/2026-10-18-wordpress-nginx-cross-site.md) |
 | `keel-moodle` | `lamp.mk`, `apache-credit`, `sites-available/moodle.conf` | Step 5: Moodle on `lnmp` |
 | `keel-odoo` | `lapp.mk`: Odoo 16 behind Apache | Step 6: Odoo on `lnpp`, as 0022 describes |
 | `keel-ejabberd` | The `apache` overlay for its web pages | Step 7: on Web |
@@ -148,7 +148,7 @@ The order:
 3. `keel-lnmp`, then `keel-lnpp`, released as testing pre-releases
    (0052, section 8) and tested on the real platform with evidence
    (0053).
-4. WordPress on LNMP.
+4. WordPress on LNMP (done on 2026-10-18).
 5. Moodle on LNMP.
 6. Odoo on LNPP.
 7. ejabberd on Web.
