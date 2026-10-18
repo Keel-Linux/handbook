@@ -225,6 +225,12 @@ The rule:
   keel does not restart a primary that serves clients to change it. A
   node where the setting is off is not rewound. It takes the fallback,
   and the next apply restarts it as the converge did before.
+- **`wal_keep_size`.** `pg_rewind` reads the WAL of the old primary back
+  to its last checkpoint before the fork, and the server recycles that
+  WAL at its shutdown checkpoint. The pair drop-in now sets
+  `wal_keep_size = 256MB`. The server takes this setting on a reload, so
+  an apply of the older drop-in writes the new line and reloads. It
+  never restarts a primary that serves clients for this change.
 - **The source role.** `pg_rewind` reads files of the holder through
   SQL. The holder grants the replication role the four functions that
   the PostgreSQL manual names for this, in the `postgres` database
@@ -236,7 +242,7 @@ The rule:
 The cost, accepted: the rewind needs the WAL of the old primary since the
 fork point, and the holder must have made a checkpoint after its
 promotion. When one of these is missing, `pg_rewind` refuses and the
-fallback applies.
+fallback applies. The pair keeps up to 256 MB more WAL on each node.
 
 The measured times of the rewind and of the reseed are in
 `evidence/2026-10-18-postgresql-pg-rewind.md`.
