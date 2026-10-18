@@ -252,3 +252,44 @@ fallback applies. The pair keeps up to 256 MB more WAL on each node.
 
 The measured times of the rewind and of the reseed are in
 `evidence/2026-10-18-postgresql-pg-rewind.md`.
+
+## Amendment 2026-10-18 (second): keel picks the cheaper rejoin, and keeps the old data
+
+Decided by the maintainer on 2026-10-18. The question came from
+`evidence/2026-10-18-postgresql-pg-rewind.md`: on a link of 250 ms and
+1.5 % loss, `pg_rewind` of a small cluster took 21 minutes, and the reseed
+2.4 minutes. The maintainer's answer was: "manda bala".
+
+The rule:
+
+- **The estimate.** Before the rejoin, keel estimates how much
+  `pg_rewind` would copy: the WAL files of the holder from the segment of
+  the fork on, plus the WAL that the old primary wrote after the fork as
+  a measure of the changed files. It estimates what a base backup would
+  copy: the size of the databases of the holder, compressed. It times a
+  read of 256 KB of the holder's WAL, which gives the speed of the link.
+- **The choice.** If the rewind is expected to take 120 s or less, keel
+  rewinds: it keeps the data and the cost is small. Otherwise keel picks
+  the smaller estimate. If keel cannot make the estimate, it rewinds, as
+  before.
+- **The automatic reseed.** The reseed that keel picks by this estimate
+  needs no `--destroy-local-database`. The proof that allows it is the
+  proof that allows the rewind: the old node is a fenced standby that
+  follows nobody, and the holder answers over TLS as a primary that holds
+  the newest claim of the VIP. Without this proof keel requires the flag,
+  as before. The reseed that `pg_rewind` could not avoid, because it
+  refused, still needs the flag.
+- **The old data is kept.** keel does not delete the old data directory
+  at a reseed. It renames the directory to `<datadir>.keel-kept-<UTC
+  stamp>`, writes the path to the log, and sends an alert with the path.
+  keel keeps at least the newest copy. It deletes the others when they
+  are older than 7 days, or oldest first when the free space on the
+  file system is below the larger of 1 GiB and 5 % of it. If there is not
+  enough room to keep a copy, the automatic reseed does not run, and the
+  flag is required. The reseed with the flag keeps a copy when there is
+  room, and deletes the old data when there is not.
+- **An alert for an unusable copy.** When `pg_rewind` fails after it
+  began to copy, keel sends an alert once, with the command that replaces
+  the copy (Keel-Linux/keel#214).
+
+The cost, accepted: a kept copy uses disk space until it is pruned.
