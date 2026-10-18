@@ -12,7 +12,7 @@ The `tests` job runs on 4 pytest-xdist workers. The job takes 10.4 to 11.5
 minutes instead of 17.9 to 18.2 minutes. The coverage is the same, 98.23
 percent, and the gate stays 95 percent.
 
-The wall time of a whole pull request does not fall. The 8 jobs with a
+The wall time of a whole pull request does not fall with this change alone (see "Job order" for the next change). The 8 jobs with a
 container wait for 5 `keel-lxc` instances, and the last of them ends
 about 19 to 20 minutes after the push. The `tests` job is no longer the
 longest job. The queue of the container jobs is the limit now.
@@ -143,16 +143,32 @@ cases.
 - Keel-Linux/keel#207: `.forgejo/workflows/tests.yml` sets `workers: "4"`.
   `tests/README.md` shows how to run the suite with `-n 4`.
 
+## Job order (keel#210)
+
+The 8 jobs with a container start in the order of the file, 5 at a time.
+The file now lists them by length: `mesh`, `postgres`, `vip-upgrade`,
+`mariadb`, `vip`, `etcd`, `etcd-auth`, `mariadb-simple`. The jobs are the
+same. A pure reorder: the sorted lines of the file are the same.
+
+| Measure | Before (runs 9, 10, 11 above) | After (3 runs) |
+| --- | --- | --- |
+| Pull request, push to last job (min) | 19.2, 20.0, 19.1 | 15.2, 15.3, 14.8 |
+| `tests` job (min) | 10.6, 11.5, 10.4 | 13.5, 11.0, 10.3 |
+| Jobs that failed | 0, 0, 0 | 0, 0, 0 |
+
+- The gain is 4 to 5 minutes. The last jobs are now `etcd`, `etcd-auth` and
+  `mariadb-simple`, which are short.
+- A first run of the new order took 25.6 min and passed all jobs. It waited
+  behind the push run that the merge of the previous pull request started
+  on main. It is not in the table.
+- The `tests` job of the first run after the change took 13.5 min. At that
+  time 5 jobs with a container started at once, as in the other runs.
+- Issues for the two flakes: keel#208 (postgres slot read) and keel#209
+  (`test_mesh_channel`).
+
 ## Left for the maintainer
 
-- To make the pull request faster, run the `keel-lxc` jobs in the order of
-  their length. The jobs start in the order of the file: `mesh`, `etcd`,
-  `vip`, `vip-upgrade`, `etcd-auth`, `mariadb`, `mariadb-simple`,
-  `postgres`. The longest, `postgres` (10.7 min), starts last, after about 8
-  minutes. With `postgres`, `mesh`, `vip-upgrade`, `mariadb` and `vip` first,
-  the last job would end near minute 14. This was not tried.
-- The postgres test reads the replication slot once. Waiting for the slot
-  with a bound, as the test does for `synchronous_standby_names`, would
-  remove that flake without a loosened bound.
-- The flake of `test_mesh_channel.py` (end of file at the TLS handshake of
-  the second client) needs its own issue.
+- The two flakes have issues: keel#208 (the postgres test reads the
+  replication slot once) and keel#209 (`test_mesh_channel.py`, end of file
+  at the TLS handshake of the second client).
+- The timing flake of `mariadb-simple` (bound 3.0 s) needs its own work.
