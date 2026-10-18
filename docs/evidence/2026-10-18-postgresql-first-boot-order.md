@@ -17,7 +17,7 @@ were never printed.
 | 2. keel-postgresql#20 cause | A race at the first boot. The cluster started before the snakeoil certificate existed. |
 | 2. Fix | inithooks#57, package 2.3.6+keel27, in trixie-testing only. |
 | 2. Real boot on BR1 | Without the fix 35pgsqlpass and 36pgsqlverify fail. With the fix both pass. |
-| 3. Light CI of five repositories | All five merged on green. GitHub Actions are on for all five. |
+| 3. Light CI of five repositories | Four merged on green and have GitHub Actions on. keel#184 is red on timing tests and stays open. |
 
 ## 1. The image build for common#51
 
@@ -177,7 +177,7 @@ The check `tests / appliance` of keel-postgresql#20 ran again. It took
 | keel-nodejs-nginx | #6 | #7, then merged |
 | keel-nodebb | #21 | #22, then merged |
 | keel-wordpress | #20 | #21, then merged |
-| keel | #184 | see "Open" |
+| keel | #184 | not merged: red twice on timing tests, see "Open" |
 
 keel-nodejs-nginx, keel-nodebb and keel-wordpress have no layer on the
 mirror. The check `appliance` of the full CI therefore failed on every
@@ -200,8 +200,18 @@ before the switch (same commit on both sides).
 
 ## Open
 
-- keel#184 (light CI of keel): see the final status in the pull request.
-  GitHub Actions of `keel` stay off until it merges.
+- keel#184 (light CI of keel) is not merged. The change only adds
+  `.github/workflows`. Two runs on the same commit each failed other timing
+  tests of the netns suites, while other jobs ran on the same VM. Run 1:
+  `mesh` (`test_a_client_without_tls_does_not_stop_the_listener`, 620 s)
+  and `mariadb-simple` (`writable_after_carried_s` 3.94 s against 3.0 s).
+  Run 2: `mesh` (`test_a_b_and_c_are_roots_without_evidence`),
+  `vip-upgrade` (`test_a_the_holder_restarted_as_an_upgrade_does`, gap
+  1.215 s against 1.0 s) and `postgres`
+  (`test_c_the_unplanned_failover_loses_no_acknowledged_row`). These are
+  the known load flakes. The rule is no merge on a red check, so the pull
+  request waits for a quiet VM or for the pytest-xdist work. GitHub
+  Actions of `keel` stay off until it merges.
 - Retention keeps the last 3 builds of all appliances together. Decision
   0061 says 3 promoted builds of each appliance. The `latest-*` builds
   are always kept, so no image is lost. A change is optional.
