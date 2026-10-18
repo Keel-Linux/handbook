@@ -13,31 +13,39 @@ random and are in no file of this repository.
 
 | Image | sha512 (first 16) | keel | Result |
 | --- | --- | --- | --- |
-| `debian-13-keel-wordpress_19.0-6_amd64.tar.zst` | `d6ff8ae12ba042a0` | 0.23.43 | PASS, every item of the list below |
+| `debian-13-keel-wordpress_19.0-6_amd64.tar.zst` | `c97e2b2302dad586` | 0.23.43 | PASS, every item of the list below |
 
-The chain is Core 19.0-10, Web 19.0-6 (keel-web 0.3.0), LNMP 19.0-4 and
-WordPress 19.0-6. The image has no Apache package. Sources: keel-wordpress
-`5c648b0` (merged as `b5f7438`), apt `9060356`.
+This is the image of the build `20261018T074801Z` of the image build per
+merge (decision 0061). It passed the image gate (run 16), it is the image of
+this test, and it is the image of the pre-release: one file. The image has
+no Apache package. The chain is Core 19.0-10, Web 19.0-6, LNMP 19.0-4 and
+WordPress 19.0-6, at the commits keel-core `15f535f`, keel-web `6941c26`,
+keel-lnmp `57c075c` and keel-wordpress `f692d90` (common `846894f`).
+The test ran twice. The first candidate was a hand build of the layer on
+the Core of 2026-10-16 (image `d6ff8ae12ba042a0`, not published). It passed
+the same list, and it found the 2 defects in "Defects that the test found".
+The second run, below, is on the image that the gate passed.
 
 | Item | Result |
 | --- | --- |
-| First boot | 3 of 3 CTs complete the first boot headless; `systemd-modules-load` is the only failed unit; keel 0.23.43 on all |
+| First boot | 3 of 3 CTs complete the first boot headless; no failed unit; keel 0.23.43 on all |
 | WordPress at the first boot | W and C install the site; B (spec role `replica`) writes `wp-config.php` and nothing in the database |
 | Replica seed | `keel spec apply --system-only` on B seeds it from C with no `--destroy-local-database` (the image holds no WordPress schema) |
 | Mesh and etcd | 3 voters healthy, 2 on BR1 and 1 on BR2 |
-| Check page and site at the VIP | `/keel-check/` 200, `/` 200, `/hello-world/` 200 (pretty permalink), `/wp-json/` 200; all through Anubis and Coraza |
+| Check page and site at the VIP | `/keel-check/` 200, `/` 200, `/hello-world/` 200 (pretty permalink), `/wp-json/` 200; all through Anubis and Coraza. `app.domain` is recorded as the site URL (`https://wp-vip.test`) and the VIP answers `/` with 200 and no redirect |
 | Login | the right password: 302, the `wordpress_logged_in_` cookie, `/wp-admin/` 200; a wrong password: 200 and no cookie; a headless Chromium logs in through the Anubis challenge and shows the dashboard |
 | Writes replicate | a post made on the holder is on the replica 3 s later; 16 posts on both nodes at the end |
 | Block editor | a JSON `POST /wp-json/wp/v2/posts` with a block body answers 201 after every failover |
-| Failover 1, network cut of C | VIP lands on B 19.0 s after the cut; first write 2.13 s after the VIP; 0 acknowledged writes on C after the cut; 0 of 3047 ids lost |
+| Failover 1, network cut of C | VIP lands on B 19.4 s after the cut; first write 2.17 s after the VIP; 0 acknowledged writes on C after the cut; 0 of 2848 ids lost |
 | Reseed | `--destroy-local-database` on C: 1 errant GTID discarded, seeded, streaming, semi-synchronous again, VIP fence cleared |
-| Failover 2, `pct stop` of B | VIP lands on C 18.6 s after the stop; first write 1.63 s after the VIP; 0 of 2641 ids lost; B returns read only and replicates with no operator step |
-| netem, cut of C | 250 ms ±25 ms, 1.5 % loss: VIP on B 22.3 s after the cut; first write 1.87 s after the VIP; 0 of 2876 ids lost; reseed works |
-| netem, `pct stop` of B | VIP on C 20.5 s after the stop; first write 0.37 s after the VIP; 0 of 1808 ids lost |
+| Failover 2, `pct stop` of B | VIP lands on C 19.6 s after the stop; first write 1.24 s after the VIP; 0 of 2696 ids lost; B returns read only and replicates with no operator step |
+| netem, cut of C | 250 ms ±25 ms, 1.5 % loss: VIP on B 21.3 s after the cut; first write 2.20 s after the VIP; 0 of 3155 ids lost; reseed works |
+| netem, `pct stop` of B | VIP on C 21.3 s after the stop; first write 0.89 s after the VIP; 0 of 1886 ids lost |
 | A cut in which the old primary took no write | C, the first primary, holds its first-boot GTIDs and the WordPress installation. After the cut and the heal it returns with "rejoined: no errant GTID" and needs no reseed |
 | Firewall | the same input chain on all 3 CTs; 3306 answers on `wg0` only; see "Firewall" |
 | `keel diff` | exit 0 on the 3 CTs, after every round |
-| End | no netem, no test nft table; every one of 10372 acknowledged ids is on both nodes (10374 rows); the GTID state is the same on both nodes |
+| End | no netem, no test nft table; every one of 10585 acknowledged ids is on both nodes (10588 rows); the GTID state is the same on both nodes |
+| Image | no `keel-pool.sources` and no `/keel-pool` in the image (the Core of the day leaves none) |
 | Screenshots | the check page and the site at the VIP, the dashboard after a login, the check page of B and of C |
 
 ## What the move changed
@@ -126,34 +134,34 @@ returned 0. Times are in seconds after the fault.
 
 | Round | Fault | Network | VIP left the old holder | VIP landed | First write after the VIP | Acks on the old holder after the fault | Acked ids missing on the survivor | Old holder returns |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | cut of C (the holder) | base | +11.7 | +19.0 | 2.13 s | 0 | 0 of 3047 | read only, "diverged" by 1 transaction, dump kept; reseed |
-| 2 | `pct stop` of B (the holder) | base | stopped | +18.6 | 1.63 s | 0 | 0 of 2641 | read only, replicates by itself, no reseed needed |
-| 3 | cut of C (the holder) | netem | +11.9 | +22.3 | 1.87 s | 0 | 0 of 2876 | read only, "diverged" by 1 transaction, dump kept; reseed |
-| 4 | `pct stop` of B (the holder) | netem | stopped | +20.5 | 0.37 s | 0 | 0 of 1808 | read only, replicates by itself, no reseed needed |
+| 1 | cut of C (the holder) | base | +11.6 | +19.4 | 2.17 s | 0 | 0 of 2848 | read only, "diverged" by 1 transaction, dump kept; reseed |
+| 2 | `pct stop` of B (the holder) | base | stopped | +19.6 | 1.24 s | 0 | 0 of 2696 | read only, replicates by itself, no reseed needed |
+| 3 | cut of C (the holder) | netem | +12.9 | +21.3 | 2.20 s | 0 | 0 of 3155 | read only, "diverged" by 1 transaction, dump kept; reseed |
+| 4 | `pct stop` of B (the holder) | netem | stopped | +21.3 | 0.89 s | 0 | 0 of 1886 | read only, replicates by itself, no reseed needed |
 
 Rounds 2 and 4 are the second failover in a row. In rounds 1 and 3 the
-writes that waited on C when the cut came ended with an error 6.9 s and
-7.1 s later at most (the fence ended their connections), and none was
+writes that waited on C when the cut came ended with an error 7.3 s and
+7.8 s later at most (the fence ended their connections), and none was
 acknowledged. The netem profile on the BR2 CT is `delay 250ms 25ms loss
-1.5%`. Overlay ping from W to C: 231 / 253 / 279 ms (min / avg / max), 0 of
+1.5%`. Overlay ping from W to C: 233 / 253 / 277 ms (min / avg / max), 0 of
 30 lost, 3 etcd voters healthy.
 
 After each failover, at the new holder, and through Anubis and Coraza:
 the login of the administrator, a post through the REST API with a JSON
 body, and a post through wp-cli all worked (rounds 1 to 4 and the cut
-with no write).
+with no write): 6 logins and 5 REST posts, all answered as they should.
 
 ### A cut in which the old primary took no write
 
 C holds the GTIDs of its first boot and of the WordPress installation
-(`0-1025956766-100`), written before the pair formed. No writer ran. The
-cut came at 1792302362.0.
+(`0-869217910-93`), written before the pair formed. No writer ran. The
+cut came at 1792311156.2.
 
 ```
 VIP on B 24.5 s after the cut   (login, REST post and wp-cli post at the VIP: all worked)
-heal at +86.7 s
-C replicating 7.6 s after the heal
-database.server.role: rejoined: no errant GTID, replicating from [...] over TLS from 0-95505031-141
+heal at +87.2 s
+C replicating 7.5 s after the heal
+database.server.role: rejoined: no errant GTID, replicating from [...] over TLS from 0-1327582348-141
 ```
 
 No reseed, no `--destroy-local-database`. A planned failback then worked:
@@ -200,7 +208,8 @@ At the time of the shots C held the VIP: the page of C says "writable
 ## Defects that the test found
 
 The first candidate of the image (not published) failed in two places that
-only the cloud modes show. Both are fixed in the published image.
+only the cloud modes show. Both are fixed in the published image, and the
+second run confirms it.
 
 1. **The login looped.** Behind Anubis a request reaches PHP-FPM from a
    unix socket, with `X-Forwarded-Proto: https` and no `HTTPS` variable.
@@ -242,29 +251,28 @@ cron job.
 
 ## Build and gate
 
-The image was built on the build host with `keel-release` (Core 19.0-10,
-Web 19.0-6 and LNMP 19.0-4 as for LNMP 19.0-4, and the new WordPress
-layer), from keel-wordpress `5c648b0`. The tested image and the published
-image are the same file. The Forgejo pre-release is
-`testing-19.0-6-20261018` on Keel-Linux/keel-wordpress, a pre-release on
-the commit `5c648b0`. The stable index is not changed, and keel is not
+The image gate built it, and the gate passed it. The build `20261018T074801Z`
+of the image build per merge (decision 0061) used `keel-release --staging
+--match-source` on the build host. The runner booted it as built, and the
+build host signed the same files with the main key and the images key and
+promoted them to testing. The Forgejo pre-release
+`testing-19.0-6-20261018` on Keel-Linux/keel-wordpress is that file, at
+the commit `f692d90`. The stable index is not changed, and keel is not
 changed (0.23.43, in trixie-testing since 2026-10-17).
 
 ```
-sha512 d6ff8ae12ba042a0b4c9a3841e4e1a6ad9cf42ba49e8c78083271ea5168977a1d8aa2d8ae6d6113fcc38ff1e3a3f786e2c406d9bd8b354e83608b0989294e36c  debian-13-keel-wordpress_19.0-6_amd64.tar.zst
+sha512 c97e2b2302dad5860b2cb190b5634739dfc7daee9e1b2e2cb8877668cf473914db80de8b827a65b68c059cc32ac163fe9e2c4efef72722ac7a8d9a8d3475eba5  debian-13-keel-wordpress_19.0-6_amd64.tar.zst
 sqv --keyring keel-archive-keyring.gpg   AD0964BE3F09DED469A3B6B2148E951314703180   (main key)
 sqv --keyring keel-images-keyring.gpg    E71DB9C3CA6AC18075395CC3ED3A709C4F3E2F3C   (images key)
 ```
 
-Size: 305,175,119 bytes. The `.sha512.asc` file holds one signature of each
+Size: 305,197,501 bytes. The `.sha512.asc` file holds one signature of each
 key, and each key verifies it alone.
 
-### The image gate (decision 0061)
+### The image gate
 
-The merges to `master` of keel-wordpress and the line in `conf/image-ci` of
-apt made the build host build the layer and run `image-boot` on the
-runner. It took 4 runs of the gate to pass. Each failure was a defect of the
-boot test of this repository, not of the image:
+It took 4 runs of the gate to pass. Each failure was a defect of the boot
+test of this repository, not of the image:
 
 | Run | Result | Cause | Fix |
 | --- | --- | --- | --- |
@@ -273,12 +281,7 @@ boot test of this repository, not of the image:
 | 15 | failed | `apt-get update could not fetch https://archive.keellinux.org`: the runner has no route to the archive (tracker#5) | keel-wordpress#25: the boot test keeps the file checks and drops the 4 proofs that ask the archive, as keel-lnmp has none |
 | 16 | **passed** | build 20261018T074801Z, from `f692d90`: first boot, the check page, a pretty permalink, the REST API, the 3 refusals, the login and the dashboard, a wrong password refused, `keel diff` with no drift | |
 
-The gate promoted build `20261018T074801Z` to testing (`latest-wordpress`).
-That build uses the Core that `common` produced on 2026-10-18, so it is not
-the image of the pre-release: the pre-release is the image of the test of
-this file.
-
-The proofs of the gate on the new image, from the job log of run 16:
+The proofs of the gate on the image, from the job log of run 16:
 
 ```
 boot-test: port 443 answered 200, title 'Keel WordPress boot test'
@@ -294,6 +297,10 @@ boot-test: /wp-admin/ answered 200 with the dashboard for the logged in admin
 boot-test: wordpress boot test passed
 ```
 
+The build host opened image-gate#14, #15 and #16 for the 3 failed runs of
+this recipe, and they are closed with the cause. image-gate#13 (a build of
+postgresql that failed at 03:59) has the same cause as the pool item above.
+
 ### Pull requests
 
 | PR | What |
@@ -301,7 +308,7 @@ boot-test: wordpress boot test passed
 | keel-wordpress#22 | The move: nginx, the route, the manifest, the replica rule, the first boot, the examples, the tests |
 | keel-wordpress#23, #24, #25 | The 3 fixes of the boot test above |
 | apt#48 | The parent of `wordpress` is `lnmp`, and `wordpress` is in the CI set of the image build per merge |
-| handbook (this file) | The evidence, and the note of decision 0059 |
+| handbook#106 and this change | The evidence, and the note of decision 0059 |
 
 Issues opened: Keel-Linux/common#59 (the JSON body processor of Coraza) and
 Keel-Linux/keel-web#15 (the body limit of the front site).
@@ -309,5 +316,5 @@ Keel-Linux/keel-web#15 (the body limit of the front site).
 ### The test machines
 
 CTs 9134, 9135 (BR1) and 9136 (BR2) stay running for the maintainer. The
-CTs of the LNMP 19.0-4 test (9131, 9132 and 9133) were removed after this
-test passed.
+CTs of the LNMP 19.0-4 test (9131, 9132 and 9133) were removed after the
+first run passed.
