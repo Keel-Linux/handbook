@@ -49,15 +49,22 @@ Before this build, mariadb and postgresql never passed the gate (no
 
 ### Retention
 
-Decision 0061 asks for the last 3 builds and for every build that a
-`latest-*` link names. `imageci_retention` in `lib/imageci.sh` does this
-for `staged` and for `testing`. The test "retention keeps the last builds
-and every build a latest link names" in `tests/image-ci.bats` covers it.
-The journal shows the pruning at work: `retention: removed
-staged/20261016T211031Z` at the start of this build. `testing` holds 4
-builds now. Two of them are older than the last 3 because `latest-core`,
-`latest-web` and `latest-lnpp` still name them, which is the rule. So no
-pruning code was added.
+Old builds are pruned. `imageci_retention` in `lib/imageci.sh` keeps the
+last 3 builds and every build that a `latest-*` link names, in `staged` and
+in `testing`. The test "retention keeps the last builds and every build a
+latest link names" in `tests/image-ci.bats` checks both directories
+(builds 1 and 2 of 5 are removed from each, and the build that
+`latest-redis` names stays in `testing`). The journal shows the pruning at
+work: `retention: removed staged/20261016T211031Z` at the start of this
+build. `testing` holds 4 builds now. Two of them are older than the last 3
+because `latest-core`, `latest-web` and `latest-lnpp` still name them. So
+disk use is bounded and no pruning code was added.
+
+One gap stays. Decision 0061 says "the last 3 promoted builds of each
+appliance". The code keeps the last 3 builds of all appliances together,
+and the `latest-*` links. Most builds hold one appliance, so a busy
+appliance can push the builds of a quiet one out, except the build that its
+`latest-*` link names. That build is always kept. This is listed in "Open".
 
 ## 2. keel-postgresql#20
 
@@ -116,18 +123,21 @@ CT 9161 (new, mine) on `hw12-br1`, unprivileged, bridge `vtnet88`, from
 the image `debian-13-keel-postgresql_19.0-7_amd64.tar.zst` of build
 20261018T025251Z (sha512 `efc1b8db2ff1...`, copied from the build host).
 The CI flow was copied: first boot units masked, upgrade, unmask, first
-boot with `DB_PASS` in the conf. The CT was destroyed after each run.
+boot with `DB_PASS` in the conf. The CT was destroyed after each run. The
+rows with a local package used a `.deb` built from the branch of
+inithooks#57. The last row used the published package.
 
 | Run | inithooks | 35pgsqlpass | 36pgsqlverify | login with the declared password |
 | --- | --- | --- | --- | --- |
 | Layer of 2026-10-09 (keel 0.23.13), plain first boot, no fix | 2.3.6+keel23 | failed | failed | refused |
 | Same layer, CI flow, upgraded to keel 0.23.43 | 2.3.6+keel26 | failed | failed | refused |
 | Same layer, plain first boot, drop-in put in the rootfs by hand | 2.3.6+keel23 | passed | passed | works |
-| Same layer, CI flow, with inithooks 2.3.6+keel27 | 2.3.6+keel27 | passed | passed | works |
+| Same layer, CI flow, with the local `.deb` of 2.3.6+keel27 | 2.3.6+keel27 | passed | passed | works |
 | New image, CI flow, no fix | 2.3.6+keel26 | failed | failed | refused |
-| New image, CI flow, with inithooks 2.3.6+keel27 | 2.3.6+keel27 | passed | passed | works |
+| New image, CI flow, with the local `.deb` of 2.3.6+keel27 | 2.3.6+keel27 | passed | passed | works |
+| New image, CI flow, upgrade from the public trixie-testing (after the publication below) | 2.3.6+keel27 | passed | passed | works |
 
-The last two lines are the proof on a new image. One plain first boot of the
+The last three lines are the proof on a new image. One plain first boot of the
 new image without the fix passed, because the race depends on timing. CT 9161 and the copy of
 the image on BR1 are gone. No CT 9054 or 9062 or any other CT was touched.
 
@@ -183,13 +193,18 @@ For keel-postgresql, keel-nodejs-nginx, keel-nodebb and keel-wordpress
 GitHub Actions are now on, the same way as for the other repositories:
 actions enabled, allowed actions "selected" (GitHub owned only, set at the
 organization), the default token read only, approval for all external
-contributors. The mirror had the new `.github/workflows/tests.yml`
+contributors. CodeQL default setup was on for keel-nodebb and
+keel-wordpress. It ran on mirror pushes, so it was turned off there, as it
+was for the other 26 repositories. The mirror had the new `.github/workflows/tests.yml`
 before the switch (same commit on both sides).
 
 ## Open
 
 - keel#184 (light CI of keel): see the final status in the pull request.
   GitHub Actions of `keel` stay off until it merges.
+- Retention keeps the last 3 builds of all appliances together. Decision
+  0061 says 3 promoted builds of each appliance. The `latest-*` builds
+  are always kept, so no image is lost. A change is optional.
 - The image build for common#51 is not promoted. The layers hold
   inithooks 2.3.6+keel26. A build with keel27 in the
   captured pool is needed. No watched repository changes with the package,
