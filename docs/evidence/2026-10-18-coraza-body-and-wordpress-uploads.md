@@ -201,13 +201,13 @@ includes the page cache. `oom_kill` is 0 on the 3 CTs.
 
 ## Limits that stay open
 
-- **The witness has a failed unit.** `keel-database-follow.service` on W
+- **The witness has a failed unit (closed in 19.0-9, see the last section).** `keel-database-follow.service` on W
   fails with "this node declares no appliance.vip". The path unit starts it
   when the file `/var/lib/keel/vip` changes. The same unit failed on the CT
   9134 of the 19.0-6 test, so it is not new. It is a defect of keel for a
   node with no pair (Keel-Linux/keel#211). It does not touch
   WordPress.
-- **256 KiB for a form, JSON or XML body is a regression against 19.0-6.**
+- **256 KiB for a form, JSON or XML body is a regression against 19.0-6 (closed for WordPress in 19.0-9, see the last section).**
   In 19.0-6 a JSON write to `/wp-json/` went through up to the 1 MB limit of
   the front site. Now a block editor save of more than 256 KiB of text is
   refused with 413. Measured at the VIP, logged in, with a block post of
@@ -244,3 +244,40 @@ includes the page cache. `oom_kill` is 0 on the 3 CTs.
 
 keel-web 0.3.1 is not in any image that was published. The CTs 9137, 9138
 (BR1) and 9139 (BR2) stay running for the maintainer.
+
+## Follow-up: Keel WordPress 19.0-9
+
+The coordinator asked for 2 changes after the test above: the JSON limit of
+the block editor (Keel-Linux/common#61), and the failed unit of the witness
+(Keel-Linux/keel#211). Both are in the image
+`debian-13-keel-wordpress_19.0-9_amd64.tar.zst` (sha512 first 16:
+`d2c7b670d53ce78f`), build `20261018T164951Z`, image-gate run 21. The
+Forgejo pre-release `testing-19.0-9-20261018` holds the same file, signed by
+the main key and the images key (each verifies alone). The stable index is
+not changed. keel 0.23.44 is in trixie-testing only.
+
+| Change | Pull request |
+| --- | --- |
+| Rule 10102 in `keel-wordpress-before.conf`: `ctl:requestBodyLimit=1048576` for a JSON write to `/wp-json/`, after the rule of the overlay in the same phase. 4 tests, 3 red first | keel-wordpress#28 |
+| `keel database follow` says "nothing to follow" and exits 0 on a node with no `appliance.vip`. A spec apply that declares a role still refuses. 2 tests, both red first. keel 0.23.44 | keel#212, apt#54 |
+
+The test used new CTs 9137, 9138 (BR1) and 9139 (BR2) from the new image,
+which replaced the CTs of the first test. The 3 nodes run keel 0.23.44,
+keel-web 0.3.2 and keel-overlay-coraza 0.1.4. They have no failed unit, also
+the witness, at the first boot and at the end.
+
+| Item | Result |
+| --- | --- |
+| Block editor save at the VIP, body of 200096, 921696 and 1572956 bytes | 201, 201, 413; the same after the failover |
+| Same writes on the holder, with the worker RSS | 921696 bytes: 201 in 0.55 s, worker 48656 to 58216 kB (+9.3 MiB); 1536096 bytes: 413 in 0.09 s, no growth |
+| Failover with writes: netem 250 ms ±25 ms, 1.5 % loss (overlay ping 233 / 257 / 279 ms, 0 of 30 lost), cut of C, the holder | VIP left +12.81 s, landed +21.61 s; first write 2.67 s after the VIP; 0 acknowledged writes on the old holder after the cut; 0 of 2631 acknowledged ids lost |
+| After the failover, at the new holder | login 302 and dashboard 200; REST post 201; wp-cli post; uploads of ZIP 3 MiB (0.59 s, worker +0.2 MB), ZIP 32 MiB (2.98 s, +13.9 MB), PNG 3 MiB, all 201 |
+| End | after a reseed of C and a failback with `keel vip promote`, `keel diff` exits 0 and no unit is failed on the 3 CTs |
+
+`keel diff` exits 13 on the node that holds the VIP while that node is
+declared a replica in the spec, because the server is a primary and
+`database.server.replication.primary.host` is unknown there. This is the
+behavior of the 19.0-6 test too, and it ends with the failback.
+
+Odoo and the other layers keep the 256 KiB cap. Odoo was not tested, and its
+CTs were not touched. Keel-Linux/common#61 stays open for that part.
