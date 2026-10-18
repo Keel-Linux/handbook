@@ -179,3 +179,70 @@ the window before keel stops it.
 The cost, accepted: until the reseed of the old primary, each commit is
 on one node only. A loss of the new primary in that time loses those
 commits.
+
+## Amendment 2026-10-18: the old primary rejoins by `pg_rewind` when it can
+
+Decided by the maintainer on 2026-10-18. The question came from the Odoo
+release test (`evidence/2026-10-18-odoo-nginx-cross-site.md`, "A primary
+that took no write"): should the PostgreSQL pair rejoin an old primary
+without a full reseed, as the MariaDB pair does since keel 0.23.43
+(Keel-Linux/keel#202)? The maintainer's answer was: "sim".
+
+This amendment replaces two statements above: "Rejoin after a promotion
+is a reseed, never a rewind" and "failback is a confirmed reseed". The
+reseed stays, as the fallback.
+
+The rule:
+
+- **When.** An old primary returns, and keel fences it: a standby that
+  follows nobody, with the VIP held by the other member. The holder
+  answers over TLS.
+- **What keel does.** keel keeps the dump of the old primary, as before.
+  Then it stops the old primary cleanly and runs `pg_rewind` against the
+  holder, the new primary. Then it writes the follow drop-in, starts the
+  server as a standby, and the standby follows the new timeline through
+  the pair's slot. No confirmation flag is needed: `pg_rewind` only
+  discards on the old primary and never changes the holder.
+- **What is lost, and what is not.** The rewind discards what the old
+  primary wrote after the fence point, and this data never comes back.
+  The rewind never changes the new primary, so every write that the new
+  primary acknowledged stays. The dump that keel kept first holds what
+  was discarded.
+- **The checks before the copy.** keel runs `pg_rewind --dry-run` first.
+  The dry run changes nothing. It proves that both clusters have the
+  same system identifier, that the holder is a primary, that the old
+  primary was shut down cleanly, and that `wal_log_hints` or data
+  checksums are on.
+- **The fallback.** If the dry run fails, keel changes nothing and the
+  existing path applies: the divergence record, and the reseed only with
+  `--destroy-local-database`. If the real run fails after the dry run
+  passed, the copy is unusable. keel records this, never runs
+  `pg_rewind` on that copy again, and the reseed with
+  `--destroy-local-database` is the only path.
+- **`wal_log_hints`.** The pair drop-in has written `wal_log_hints = on`
+  on both nodes since 0054, so a node that keel converged already has
+  it. keel reads the setting of the running server before the rewind.
+  keel does not restart a primary that serves clients to change it. A
+  node where the setting is off is not rewound. It takes the fallback,
+  and the next apply restarts it as the converge did before.
+- **`wal_keep_size`.** `pg_rewind` reads the WAL of the old primary back
+  to its last checkpoint before the fork, and the server recycles that
+  WAL at its shutdown checkpoint. The pair drop-in now sets
+  `wal_keep_size = 256MB`. The server takes this setting on a reload, so
+  an apply of the older drop-in writes the new line and reloads. It
+  never restarts a primary that serves clients for this change.
+- **The source role.** `pg_rewind` reads files of the holder through
+  SQL. The holder grants the replication role the four functions that
+  the PostgreSQL manual names for this, in the `postgres` database
+  only. The role has the right to copy the whole cluster already. The
+  functions also read files that are outside of the data directory, and
+  the cost is accepted for that reason. A dedicated role would add a
+  second secret to the pair for no gain.
+
+The cost, accepted: the rewind needs the WAL of the old primary since the
+fork point, and the holder must have made a checkpoint after its
+promotion. When one of these is missing, `pg_rewind` refuses and the
+fallback applies. The pair keeps up to 256 MB more WAL on each node.
+
+The measured times of the rewind and of the reseed are in
+`evidence/2026-10-18-postgresql-pg-rewind.md`.
