@@ -50,6 +50,7 @@ Every pull request merged with every check green, merge commits only.
 | --- | --- |
 | keel-odoo#4 | The layer on `lnpp`, with no Apache: Odoo 18.0 from a pinned snapshot, the Nginx route, peer authentication, attachments in the database, the first boot hook, the follow timer, the CRS exclusion and the tests. Changelog 19.0 (1) |
 | keel-odoo#5 | The build asserts that no active user has a password. The first build of 19.0 (1) stopped there, so 19.0 (1) is not published. Changelog 19.0 (2) |
+| keel-odoo#6 | The spec of the boot test names no appliance (found by the first gate run) |
 | apt#50 | `odoo lnpp` in `conf/appliances`, and `keel-odoo` in `conf/image-ci`, so the image build per merge (decision 0061) boots the layer |
 | `Keel-Linux/odoo` | A new repository: one commit that is the tree of `odoo/odoo` branch `18.0` at `1f2b50ade7a1`, with the tag `snapshot-18.0-1f2b50ade7a1` |
 | common#58 | An issue: a WebSocket does not pass the Anubis front |
@@ -299,17 +300,29 @@ answer clears the Anubis cookie of the whole page. Each page was read.
   its own start. A warm standby would cut this time, but a standby refuses
   the writes of the cron jobs of Odoo, so it needs a design of its own.
 - **The `appliance` gate of keel-odoo cannot boot the layer** until it is on
-  the mirror (the same as keel-lnmp and keel-lnpp). The real boot proof is
-  the nodes of this file, and the image build per merge (apt#50) boots the
-  image on the runner with `tests/boot-test.sh`.
+  the mirror (the same as keel-lnmp and keel-lnpp). The boot gate of
+  decision 0061 is the image build per merge. Its first run (image-gate run
+  18, on f6755f1) failed: `keel spec apply` on the host of the gate refused
+  `appliance.name: odoo` in `tests/instance.yaml`, because the host has no
+  `odoo.yaml` (keel-odoo#6 removes the section, as keel-lnpp has none). Its
+  second run (image-gate run 19, build 20261018T125821Z, on bbc1346, with
+  the pool refreshed from trixie-testing) booted all 9 appliances and
+  passed. The Odoo boot test passed: the login page answers 200 with its
+  form, the admin user logs in with the declared password, a script
+  bundle of the web client is served (14857 bytes), the check page answers,
+  and `keel diff` shows no drift. That image is a new build, so its bits
+  differ from the bits of this test. The layer has the same content.
 - **The first boot of PostgreSQL** (keel-postgresql#20, fixed in inithooks
   2.3.6+keel27 of trixie-testing) is not in this image: it carries the
   inithooks of LNPP 19.0-5. The first boot passed on 3 of 3 CTs. A new LNPP
   layer with the fix, and an Odoo layer on it, remove the risk.
-- **keel-odoo has no branch protection.** keel-lnpp requires the checks
-  `tests / appliance`, `tests / package`, `tests / python`, `tests / stack`,
-  `tests / tests` and `security / security`. This work merged only with all
-  six green.
+- **keel-odoo had no branch protection**, and the image build per merge
+  refuses a repository whose branch is not protected ("the branch master is
+  not protected, so it is not built"). The branch has the rule of keel-lnpp
+  now: the checks `tests / appliance`, `tests / package`, `tests /
+  python`, `tests / stack`, `tests / tests` and `security / security` are
+  required, and nobody pushes to it. This work merged only with all six
+  green.
 - The check page title says "Keel LNPP: the stack works" on an Odoo image:
   the page is the one of the lnpp layer.
 - Test CTs left running: 9145 (BR1, witness), 9146 (BR1) and 9147 (BR2).
