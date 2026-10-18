@@ -208,17 +208,23 @@ The rule:
   The rewind never changes the new primary, so every write that the new
   primary acknowledged stays. The dump that keel kept first holds what
   was discarded.
-- **The checks before the copy.** keel runs `pg_rewind --dry-run` first.
-  The dry run changes nothing. It proves that both clusters have the
-  same system identifier, that the holder is a primary, that the old
-  primary was shut down cleanly, and that `wal_log_hints` or data
-  checksums are on.
-- **The fallback.** If the dry run fails, keel changes nothing and the
-  existing path applies: the divergence record, and the reseed only with
-  `--destroy-local-database`. If the real run fails after the dry run
-  passed, the copy is unusable. keel records this, never runs
-  `pg_rewind` on that copy again, and the reseed with
-  `--destroy-local-database` is the only path.
+- **The checks before the copy.** Before it stops the server, keel reads
+  the settings of the running server (`wal_log_hints` or data checksums,
+  and `full_page_writes`) and asks the holder whether it is a primary.
+  `pg_rewind` itself proves, before it copies, that both clusters have
+  the same system identifier and that the old primary was shut down
+  cleanly. keel runs `pg_rewind` once, with `--progress`, and does not
+  run `--dry-run` first: a dry run reads as much from the holder as the
+  run does, and on the design case's link (250 ms, 1.5 % loss) that read
+  takes 20 minutes. The line `need to copy` of `--progress` marks the
+  start of the copy.
+- **The fallback.** If `pg_rewind` fails before it prints `need to copy`,
+  it changed nothing. keel starts the server again as the fenced standby
+  it was, and the existing path applies: the divergence record, and the
+  reseed only with `--destroy-local-database`. keel asks again after 10
+  minutes. If `pg_rewind` fails after it printed `need to copy`, the copy
+  is unusable. keel records this, never runs `pg_rewind` on that copy
+  again, and the reseed with `--destroy-local-database` is the only path.
 - **`wal_log_hints`.** The pair drop-in has written `wal_log_hints = on`
   on both nodes since 0054, so a node that keel converged already has
   it. keel reads the setting of the running server before the rewind.
