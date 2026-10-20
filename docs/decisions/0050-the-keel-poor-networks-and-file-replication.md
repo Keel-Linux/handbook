@@ -417,6 +417,88 @@ such as the replication of a database pair, also see a dead peer after
 about 14 seconds instead of about 15 minutes, and they dial again. A
 cut shorter than 14 seconds ends no connection.
 
+## Amendment 2026-10-20: how keel carries out the replication
+
+Decided by the coordinator under the maintainer's delegation, least
+power each time. The maintainer set the order on 2026-10-20: the file
+replication and the database pair work on a real pair across two sites
+before any application is released again, and each application repository
+declares the paths it replicates.[^axe] Nothing here is implemented yet.
+
+**Why the current approach is not enough.** A pair of WordPress or Odoo
+today replicates the database and no file. After a failover the new
+primary has the rows and not the uploads, the themes or the filestore.
+For Nextcloud the file cache is in the database, so the new primary lists
+files that it does not hold. The open points 4, 6 and 7 of this note, and
+the seams that the keel code offers, need answers before the work starts.
+
+**The choices.**
+
+1. **Modes (open point 7).** Files replicate on every node of a database
+   pair, in `cloud_simple` and in `cloud_advanced`. A pair without its
+   files is not a working pair. This amends docs/manifest-v1.md, where the
+   derivation row says `cloud_advanced` only.
+2. **Run-time code (open point 6).** An application declares every path
+   that it writes at run time, code included. For WordPress that is
+   `wp-content/uploads`, `wp-content/themes` and `wp-content/plugins`.
+   Syncthing writes a local copy on each node, so the request path stays
+   local, and the rule of section 2 holds. This amends the WordPress
+   example of 0041.
+3. **The device identity.** keel makes the key and the certificate of
+   Syncthing on each node, once, owned by the `syncthing` user. A device ID
+   is public. keel sends it to the other member of the pair in a new signed
+   message of the members' channel, kind `device`, and answers it only to
+   that member, as it does for `secret`. This works with and without etcd.
+4. **The configuration.** keel renders `config.xml` from the manifest and
+   the role, and restarts the service when the file changes, as it does
+   for etcd. Discovery, relays and NAT traversal are off. The service
+   listens on the overlay address only, and the peer is the overlay
+   address of the other member. The GUI and the REST API listen on the
+   loopback, with an API key in a 0600 file. The watcher delay is 1 s.
+   Each receive-only folder keeps old versions with simple versioning.
+5. **The flip.** `keel database follow` sets the folder type in the same
+   operation that sets the database role, next to the write of
+   `/var/lib/keel/role`, which then says `replicates=database,files`.
+   A proven primary sends only. A replica receives only. A node that is in
+   doubt or not proven pauses its folders, so that a cut primary sends no
+   file that the other site did not write.
+6. **Ownership.** The service runs as the `syncthing` user, with
+   `CAP_CHOWN`, `CAP_FOWNER` and `CAP_DAC_OVERRIDE` as ambient
+   capabilities, `ProtectSystem=strict`, and write access to its home and
+   to the replicated paths only. Each folder sets
+   `copyOwnershipFromParent`, so a file on a replica keeps the owner of
+   the application, `www-data` or `odoo`. The first test on an
+   unprivileged LXC container must show that this works.
+7. **Role hooks.** After the flip, keel runs each executable in
+   `/usr/lib/keel/roles.d/` with the argument `primary` or `replica`.
+   An application ships its own hook. Nextcloud runs `occ files:scan
+   --all` there. keel itself knows no application.
+8. **The old primary (open point 4).** When an old primary becomes a
+   replica, versioning keeps each of its files that the new primary
+   replaces. keel reports `receiveOnlyChangedFiles` and `needFiles` in
+   `keel diff` and alerts once while the count is not zero, as the
+   database watch does for a diverged replica.
+
+**Whether it can be made to work.** Every part has a seam in keel today:
+`dbfollow._follow` is the one place where a role takes effect, the
+members' channel already carries signed messages to the pair member,
+`system/etcd.py` already renders the configuration of a service that
+runs as its own user, and the `syncthing` 2.1.6 package is in the
+trixie-testing archive.
+
+**Why this is better.** The file flip and the database flip are one
+operation, so they cannot disagree after a failover. Nothing about
+folders is typed by an operator, and keel knows no application by name.
+
+**Done when** the "done when" of this note passes on built images of
+WordPress and Odoo, across BR1 and BR2, under the five netem profiles,
+with an evidence file.
+
+[^axe]: The maintainer, 2026-10-20, in Portuguese: "syncthing e bancos de
+    dados master slave tem que estar funcionando antes de soltar as
+    aplicações [...] cada repo de cada aplicação precisa declarar isso dai
+    então foca em afiar o machado antes de começar a cortar a arvore!"
+
 [^keel]: The maintainer, 2026-10-03, in Portuguese: "Todo barco, por mais
     antigo que seja, ele precisa de uma quilha. É uma tecnologia antiga,
     chumbo, pesado embaixo, mas é o que garante que ele seja estável, que
