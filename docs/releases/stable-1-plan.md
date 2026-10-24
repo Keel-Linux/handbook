@@ -218,9 +218,9 @@ only.
 | 6 | Push a branch `publish/DATE-promote-stable-1`. Open a PR. Wait for green checks. Merge with a merge commit | git, PR | none |
 | 7 | **gate.** On the workstation, run `keel-publish-mirror --archive-only`. It must say that `trixie`, `trixie-testing` and `trixie-security` verify | `keel-publish-mirror` | none (the public host has no key) |
 | 8 | Run `verify-repo https://archive.keellinux.org --dist trixie`. Compare the package list with section 1.1. In a clean trixie container with only the stable source, run `apt-get -s install keel-core keel-web` | `verify-repo`, `apt` | none |
-| 9 | Make the frozen pool `stable-1` (below). Check it | `keel-pool` | none |
+| 9 | Make the frozen pool `stable-1` (below). Check it | `keel-stable`, `keel-pool` | none |
 | 10 | Bring the hand tree to the release commits. Add `products/ntfy`. Set `KEEL_APT_TRACK=stable` and `KEEL_POOL_ID=stable-1`. Run `keel-release --no-wait --date DATE --drop-from-index keel-postgresql --drop-from-index keel-redis core web lnmp lnpp ntfy` in one session. It builds, stages, makes the templates, and signs the digests, the index and the MANIFEST | `keel-release` | main and images |
-| 11 | Run the check of the stable packages (below) on the 5 `.packages` files | shell | none |
+| 11 | Run the check of the stable packages (below) on the 5 `.packages` files | `keel-stable` | none |
 | 12 | Run section 4 on the staged files. Write the evidence file. A failure stops the procedure. Fix, then build again with a new date | tests | none |
 | 13 | **gate.** Move the stable pointer to the release: `keel-channel set stable DATE REV` | `keel-channel` | channel (the staging role) |
 | 14 | **gate.** On the workstation, run `keel-publish-mirror DATE`. It installs the images, the layers, the index and the pointer, and verifies the public names | `keel-publish-mirror` | none |
@@ -233,20 +233,23 @@ change after they are public.
 
 ### The frozen pool (step 9)
 
-1. Copy `/srv/keel-pool/dists/2026-10-08` to `dists/stable-1`.
-2. Remove every line for a Keel package whose version is not the version in
-   `trixie`. The lines for Debian packages stay.
-3. Run `keel-pool index stable-1` and `keel-pool verify stable-1`.
+The tool is `bin/keel-stable` of the apt tooling (apt#65).
+
+1. Run `keel-stable freeze stable-1 --from 2026-10-08` with
+   `--stable-index` set to `dists/trixie/main/binary-amd64/Packages` and
+   `--testing-index` set to the file of `dists/trixie-testing`.
+2. It copies the member list of the pool `2026-10-08`. It drops each Keel
+   package that `trixie` does not have at that version. Debian packages stay.
+3. It writes the index of the new pool. Run `keel-pool verify stable-1`.
 4. Do not run `keel-pool current stable-1`. The image build per merge uses
    `current` and must go on in the testing track.
 
 ### The check of the stable packages (step 11)
 
-For each of the 5 `<layer>.packages` files, take every line whose name is in
-`dists/trixie/main/binary-amd64/Packages`. The version must be the version
-in that file. A name that is in `dists/trixie-testing` and not in
-`dists/trixie` must not appear. The check must find 0 differences, and it
-must find no keel-overlay-syncthing, syncthing, keel-mariadb or keel-web 0.3.4.
+Run `keel-stable check` with the same two indexes and the 5 `.packages`
+files. It prints each package that one index names and that `trixie` does not
+have at that version. The exit code must be 0. The packages keel-overlay-syncthing,
+syncthing, keel-mariadb and keel-web 0.3.4 must not appear in any file.
 Also check that each `keel.sources` has `Enabled: no` for `trixie-testing`.
 
 ## 4. Release test matrix
@@ -265,7 +268,7 @@ staged files of step 10 and records their sha512.
 | C2 | Stable track: `keel.sources` has `trixie-testing` off. `apt-get -s upgrade` shows nothing to install. `apt-cache policy` shows every Keel package from `trixie` |
 | C3 | First boot headless from a spec on each CT. `systemctl --failed` is empty. `keel diff` exits 0 |
 | C4 | The key audit of `keel-release` found no private key (exit 12 did not happen). Two CTs of one image have different SSH host keys and machine ids |
-| U | Upgrade. Start a CT from the Core 19.0-9 template of the current index (keel 0.23.21). Run `apt upgrade` to the promoted set. Run `keel diff`. Then repeat on a PostgreSQL pair node of the test hosts if one is free. Run it at step 5 and again at step 12 against the public archive |
+| U | Upgrade. Start a CT from the Core 19.0-9 template of the current index (keel 0.23.21). Run `apt upgrade` to the promoted set. Run `keel diff`. Then repeat on a PostgreSQL pair node of the test hosts if one is free. Step 5 did it on a private archive: `2026-10-24-stable-1-upgrade-private.md`. Run it again at step 12 against the public archive. A machine of an old pre-release image must run `apt-get install keel-core` or `keel-web` after the upgrade, because the public `trixie` removes them today |
 
 ### Items by image
 

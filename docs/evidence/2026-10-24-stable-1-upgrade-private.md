@@ -41,8 +41,7 @@ The private archive:
    source with `Trusted: yes`. We signed nothing. The tar of the archive has
    sha256 `92523bd753cde635` (first 16).
 
-The two stages, in `upg.sh` and `upg2.sh` (the scripts are in the PR text of
-the apt tooling and in this file):
+The three stages (the scripts are not kept; the stages are the list):
 
 1. Stage A. Turn the `trixie-testing` source off, as on a stable machine. Run
    `apt-get update` and `apt-get dist-upgrade` against the public `trixie`.
