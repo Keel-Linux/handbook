@@ -494,6 +494,15 @@ folders is typed by an operator, and keel knows no application by name.
 WordPress and Odoo, across BR1 and BR2, under the five netem profiles,
 with an evidence file.
 
+**Note 2026-10-24: languages.** `languages` is a fourth WordPress run-time
+directory: WordPress writes it at run time (language pack updates), and a
+replica without it serves the site untranslated after a failover. Item 2's
+list for WordPress is `wp-content/uploads`, `wp-content/themes`,
+`wp-content/plugins` and `wp-content/languages`. The WordPress example of
+docs/manifest-v1.md shows one folder per directory and no `exclude`: rule
+23 wants an exclude strictly inside a replicated path, and `cache`,
+`upgrade` and `upgrade-temp-backup` sit inside none of the four.
+
 [^axe]: The maintainer, 2026-10-20, in Portuguese: "syncthing e bancos de
     dados master slave tem que estar funcionando antes de soltar as
     aplicações [...] cada repo de cada aplicação precisa declarar isso dai

@@ -938,9 +938,10 @@ services:
     defaults: {name: wordpress, user: wordpress}
 state:
   replicate:
-    - /var/www/wordpress/wp-content
-  exclude:
-    - /var/www/wordpress/wp-content/cache
+    - /var/www/wordpress/wp-content/uploads
+    - /var/www/wordpress/wp-content/themes
+    - /var/www/wordpress/wp-content/plugins
+    - /var/www/wordpress/wp-content/languages
 workers:
   - name: wp-cron
     unit: wordpress-cron.service
@@ -1039,11 +1040,11 @@ services:
     secret: db_password
     defaults: {name: wordpress, user: wordpress}
 state:
-  replicate: [/var/www/wordpress/wp-content]
-  exclude:
-    - /var/www/wordpress/wp-content/cache
-    - /var/www/wordpress/wp-content/upgrade
-    - /var/www/wordpress/wp-content/upgrade-temp-backup
+  replicate:
+    - /var/www/wordpress/wp-content/uploads
+    - /var/www/wordpress/wp-content/themes
+    - /var/www/wordpress/wp-content/plugins
+    - /var/www/wordpress/wp-content/languages
 workers:
   - {name: wp-cron, unit: wordpress-cron.service, every: 5min}
 web:
@@ -1065,9 +1066,9 @@ hooks:
 
 | Derived | Result |
 | --- | --- |
-| Backup | `wp-content` without the three excludes; the `wordpress` database dumped when it is embedded |
+| Backup | the four `wp-content` directories (`uploads`, `themes`, `plugins`, `languages`); the `wordpress` database dumped when it is embedded |
 | Monit | the embedded `mariadb` overlay's process and check; the `wp-cron` timer; `/wp-login.php` through Nginx; and Keel PHP's, Web's and Core's |
-| Replication | one folder, `wp-content`, in cloud advanced |
+| Replication | one folder per directory (`uploads`, `themes`, `plugins`, `languages`), in cloud simple and cloud advanced (0050's amendment of 2026-10-20) |
 | Firewall | nothing added: MariaDB's 3306 is `loopback` when embedded |
 
 The `mariadb` overlay is carried because the database is `embedded` in the
@@ -1075,6 +1076,14 @@ two simple modes, and rule 21 needs an overlay that provides the engine
 `enabled` wherever a service is embedded. It is `disabled` in cloud
 advanced, where the database is `discovered` on another node; it is in the
 image all the same (0013), so an operator can still turn it on.
+
+The four `state.replicate` directories are the paths WordPress writes at
+run time (0050's amendment of 2026-10-20, item 2, and its note of
+2026-10-24, which adds `languages`: without it a replica serves the site
+untranslated after a flip). No `state.exclude` is declared: rule 23 wants
+an exclude strictly inside a replicated path, and `cache`, `upgrade` and
+`upgrade-temp-backup` sit inside none of the four, so they replicate
+nowhere.
 
 `auth_salts` is `shared` because a visitor logged in on the primary is
 logged out by a standby that signed its cookies with other salts.
