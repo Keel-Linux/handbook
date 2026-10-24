@@ -178,10 +178,11 @@ What must change before the stable build:
    although `trixie` does not have it. The stable build uses its own pool
    id (`KEEL_POOL_ID`), and a check compares the result with `trixie`.
 3. **The hand tree is old.** On the build host `/turnkey/fab-keel` has
-   common at `35648b5` (the tested one is `84ff6a2`), keel-core at `b420d53`
-   (tested `15f535f`), keel-web at `493438a` (tested `3702d2d`) and keel-lnmp at
-   `9ed7a2b` (tested `57c075c`). `products/ntfy` does not exist. The stable build uses
-   a tree at the commits of the release, as section 3 says.
+   common at `35648b5` (the tested one is `84ff6a2`), and `products/ntfy` does
+   not exist. Its remotes point to GitHub. The stable build does not use it. It
+   uses its own tree `/srv/keel-stable1`, made on 2026-10-24 with clones from
+   `git.pop.coop`, like the tree of the image build per merge. The script
+   `/srv/keel-stable1/sync REPO=SHA...` puts each checkout at an exact commit.
 4. **A changelog entry in each product.** The lnmp and lnpp entries say
    "keel 0.23.42 from trixie-testing". The new entries say keel 0.23.49
    from `trixie`.
@@ -210,7 +211,7 @@ only.
 
 | Step | Action | Tool | Role |
 | --- | --- | --- | --- |
-| 1 | Stop `keel-image-ci.timer` on the build host. Wait for the build lock to be free. Record the HEAD of `/srv/keel-apt/apt`. Copy `/srv/keel-apt/repo/db` to a dated archive. Keep the old `.deb` files of `trixie` in `/srv/keel-apt/done/` | `systemctl`, `tar` | none |
+| 1 | Stop `keel-image-ci.timer` on the build host. Wait for the build lock to be free. The backup is done: `/srv/keel-apt/backup-stable1/` holds `repo-db-before-promote.tgz` (db and dists) and `pages-head.txt` (`e635138`). The old `.deb` files of `trixie` are in `/srv/keel-apt/done/` | `systemctl`, `tar` | none |
 | 2 | Merge the open decisions of section 6. Make one changelog PR for each of the 5 product repositories. Each PR passes its checks and merges. Add E8 to the handbook | PRs | none |
 | 3 | Check `bin/promote` as a dry run with the 46 arguments. The output must show 46 lines, and "was none" for 43 of them | `bin/promote` | none (it reads the signing state only) |
 | 4 | **gate.** Run `bin/promote --yes` with the same 46 arguments. It copies the packages and makes a commit in the Pages checkout | `bin/promote` | main |
@@ -219,7 +220,7 @@ only.
 | 7 | **gate.** On the workstation, run `keel-publish-mirror --archive-only`. It must say that `trixie`, `trixie-testing` and `trixie-security` verify | `keel-publish-mirror` | none (the public host has no key) |
 | 8 | Run `verify-repo https://archive.keellinux.org --dist trixie`. Compare the package list with section 1.1. In a clean trixie container with only the stable source, run `apt-get -s install keel-core keel-web` | `verify-repo`, `apt` | none |
 | 9 | Make the frozen pool `stable-1` (below). Check it | `keel-stable`, `keel-pool` | none |
-| 10 | Bring the hand tree to the release commits. Add `products/ntfy`. Set `KEEL_APT_TRACK=stable` and `KEEL_POOL_ID=stable-1`. Run `keel-release --no-wait --date DATE --drop-from-index keel-postgresql --drop-from-index keel-redis core web lnmp lnpp ntfy` in one session. It builds, stages, makes the templates, and signs the digests, the index and the MANIFEST | `keel-release` | main and images |
+| 10 | Run `/srv/keel-stable1/sync` with the 6 commits (common `84ff6a2` and the merged changelog commit of each product, keel-web from the branch `stable-1`). Then run, in one session, `env KEEL_APT_TRACK=stable KEEL_POOL_ID=stable-1 KEEL_FAB_PATH=/srv/keel-stable1/fab KEEL_PRODUCTS=/srv/keel-stable1/products KEEL_LAYERS_DIR=/srv/keel-stable1/builds/layers KEEL_GIT_BASE=https://git.pop.coop/Keel-Linux keel-release --no-wait --date DATE --drop-from-index keel-postgresql --drop-from-index keel-redis core web lnmp lnpp ntfy`. It builds, stages, makes the templates, and signs the digests, the index and the MANIFEST | `keel-release` | main and images |
 | 11 | Run the check of the stable packages (below) on the 5 `.packages` files | `keel-stable` | none |
 | 12 | Run section 4 on the staged files. Write the evidence file. A failure stops the procedure. Fix, then build again with a new date | tests | none |
 | 13 | **gate.** Move the stable pointer to the release: `keel-channel set stable DATE REV` | `keel-channel` | channel (the staging role) |
