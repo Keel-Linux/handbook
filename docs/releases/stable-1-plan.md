@@ -1,6 +1,7 @@
 # Stable 1: the plan of the first stable release
 
-Date: 2026-10-24. Status: plan. Nothing in this note was executed. No
+Date: 2026-10-24. Status: approved by the maintainer on 2026-10-24, answers in
+section 6. Execution is in steps. Nothing in this note was signed or made public. No
 package was promoted, no file was signed, no tag or release was made.
 Decisions: 0016, 0039, 0043, 0052, 0055, 0061, 0063. Text follows
 `docs/writing.md`.
@@ -112,7 +113,7 @@ cannot change what moves.
 ### 1.3 Not in `trixie-testing`, and it must stay out
 
 - keel 0.23.51 is merged, built nowhere, and has no test on a real node.
-  If the maintainer wants it, see question 2.
+  The maintainer chose keel 0.23.49 (answer 2), so it stays out.
 - keel-web 0.3.4 is on `master`. It adds the Depends on
   keel-overlay-syncthing, which needs keel 0.23.52 (keel#221, not merged).
   Nobody must publish it to `trixie-testing` before the stable build ends.
@@ -186,18 +187,18 @@ What must change before the stable build:
    from `trixie`.
 5. **Names.** The pre-releases already use `core_19.0-10`, `lnmp_19.0-4`,
    `lnpp_19.0-5` and `web_19.0-5` as asset names, with other bits. 0043
-   makes a stable name immutable. Question 3 proposes new numbers.
+   makes a stable name immutable. The maintainer chose new numbers (answer 3).
 
 ### 2.3 Gaps in the release tooling and in the decisions
 
 | Gap | Effect |
 | --- | --- |
-| Decision 0052: an official release has the ISO and the `.tar.zst`. buildtasks#9 (the ISO builder) is open and `keel-release` has no ISO step | A stable release of the `.tar.zst` alone breaks 0052. Question 1 |
-| 0043 names `SHA512SUMS`, the `stable/INDEX` files and `bin/keel-publish-github`. None exists in `keel-release`, `keel-publish-mirror` or `bin/` | The release has the per-file `.sha512` and `.asc` only. GitHub releases are made by hand. Question 6 |
+| Decision 0052: an official release has the ISO and the `.tar.zst`. buildtasks#9 (the ISO builder) is open and `keel-release` has no ISO step | The maintainer waived it for stable 1 (answer 1). 0052 has a dated note |
+| 0043 names `SHA512SUMS`, the `stable/INDEX` files and `bin/keel-publish-github`. None exists in `keel-release`, `keel-publish-mirror` or `bin/` | The release has the per-file `.sha512` and `.asc` only. GitHub is a push mirror, so the release is on Forgejo only (answer 6) |
 | No channel pointer exists. `keel-channel set stable` was never run | The first `set` creates `stable`. A client that reads the pointer gets its first answer |
-| The Proxmox index has postgresql 19.0-5 and redis 19.0-8 | They stay in the index of a stable release unless a release drops them. Question 5 |
-| The 23 webmin packages come from TurnKey and were signed again. tracker#52 lists 21 of them | The stable suite would hold third-party binaries. Question 4 |
-| The product commit for the tag contains the keel-web 0.3.4 packaging | The image has 0.3.3. The tag is on a commit whose package is not the image. Question 7 |
+| The Proxmox index has postgresql 19.0-5 and redis 19.0-8 | They stay in the index of a stable release unless a release drops them. The maintainer chose to drop them (answer 5) |
+| The 23 webmin packages come from TurnKey and were signed again. tracker#52 lists 21 of them | The stable suite would hold third-party binaries. The maintainer accepted it (answer 4) |
+| `master` of keel-web contains the keel-web 0.3.4 packaging | The tag goes on the commit that built the packages of the image (answer 7). The web release uses a branch `stable-1` from `14aea11`, which has 0.3.3 |
 
 ## 3. Procedure
 
@@ -213,22 +214,22 @@ only.
 | 2 | Merge the open decisions of section 6. Make one changelog PR for each of the 5 product repositories. Each PR passes its checks and merges. Add E8 to the handbook | PRs | none |
 | 3 | Check `bin/promote` as a dry run with the 46 arguments. The output must show 46 lines, and "was none" for 43 of them | `bin/promote` | none (it reads the signing state only) |
 | 4 | **gate.** Run `bin/promote --yes` with the same 46 arguments. It copies the packages and makes a commit in the Pages checkout | `bin/promote` | main |
-| 5 | Test the upgrade before the archive is public. Use the loopback mirror of the build host through the maintainer tunnel. Section 4, item U | `ssh -L`, `apt` | none |
+| 5 | Test the upgrade before the archive is public. Use the loopback mirror of the build host through the maintainer tunnel. Section 4, item U. Run it on a private archive of the 46 files, with no signature of ours (see the evidence file `2026-10-24-stable-1-upgrade-private.md`) | `apt` | none |
 | 6 | Push a branch `publish/DATE-promote-stable-1`. Open a PR. Wait for green checks. Merge with a merge commit | git, PR | none |
 | 7 | **gate.** On the workstation, run `keel-publish-mirror --archive-only`. It must say that `trixie`, `trixie-testing` and `trixie-security` verify | `keel-publish-mirror` | none (the public host has no key) |
 | 8 | Run `verify-repo https://archive.keellinux.org --dist trixie`. Compare the package list with section 1.1. In a clean trixie container with only the stable source, run `apt-get -s install keel-core keel-web` | `verify-repo`, `apt` | none |
 | 9 | Make the frozen pool `stable-1` (below). Check it | `keel-pool` | none |
-| 10 | Bring the hand tree to the release commits. Add `products/ntfy`. Set `KEEL_APT_TRACK=stable` and `KEEL_POOL_ID=stable-1`. Run `keel-release --no-wait --date DATE core web lnmp lnpp ntfy` in one session. It builds, stages, makes the templates, and signs the digests, the index and the MANIFEST | `keel-release` | main and images |
+| 10 | Bring the hand tree to the release commits. Add `products/ntfy`. Set `KEEL_APT_TRACK=stable` and `KEEL_POOL_ID=stable-1`. Run `keel-release --no-wait --date DATE --drop-from-index keel-postgresql --drop-from-index keel-redis core web lnmp lnpp ntfy` in one session. It builds, stages, makes the templates, and signs the digests, the index and the MANIFEST | `keel-release` | main and images |
 | 11 | Run the check of the stable packages (below) on the 5 `.packages` files | shell | none |
 | 12 | Run section 4 on the staged files. Write the evidence file. A failure stops the procedure. Fix, then build again with a new date | tests | none |
 | 13 | **gate.** Move the stable pointer to the release: `keel-channel set stable DATE REV` | `keel-channel` | channel (the staging role) |
 | 14 | **gate.** On the workstation, run `keel-publish-mirror DATE`. It installs the images, the layers, the index and the pointer, and verifies the public names | `keel-publish-mirror` | none |
 | 15 | Check from a clean host: `sha512sum -c`, `sqv` with the main keyring and with the images keyring, `keel pull` and `keel verify` on the channel, and `pveam` on a Proxmox host | shell | none |
-| 16 | **gate.** After a soak that the maintainer sets, make the GitHub releases (question 6): tag `19.0-N`, not a pre-release, immutable, with the `.tar.zst`, `.sha512` and `.sha512.asc` | `gh` | none |
+| 16 | **gate.** After a soak that the maintainer sets, tag the commit that built each image with `19.0-N` on Forgejo. Make a release that is not a pre-release, with the `.tar.zst`, `.sha512` and `.sha512.asc`. Do nothing on GitHub: it is a push mirror | Forgejo API | none |
 | 17 | Commit the evidence file, update `STATUS.md`, and restart `keel-image-ci.timer` | git, `systemctl` | none |
 
-Step 15 comes before step 16 because a GitHub stable release cannot be
-replaced (decision 0043, section 9).
+Step 15 comes before step 16 because a tag and a stable release must not
+change after they are public.
 
 ### The frozen pool (step 9)
 
@@ -272,9 +273,9 @@ staged files of step 10 and records their sha512.
 | --- | --- | --- |
 | keel-core 19.0-N | 3 CTs form the mesh. etcd has 3 voters, 2 on BR1 and 1 on BR2. The VIP moves on a cut of the holder and on `pct stop`, with and without netem. Enable CrowdSec and WireGuard. Test the console (confconsole) by hand | E8 and E1 give the method and the numbers to compare. **None of them is a pass for these bits** |
 | keel-web 19.0-N | The core items. nginx runs in simple. In a cloud mode, Coraza and Anubis run. The check page answers at the VIP and through Anubis. A WebSocket passes Anubis. A JSON body and an XML body pass Coraza. A failover with HTTP load under netem | E4 for the Coraza bodies and E2 for the WebSocket, if the overlay and library versions are the same. They are the same in this release |
-| keel-lnmp 19.0-N | The web items. The MariaDB pair on BR1 and BR2 with the witness. Writes replicate. Cut of the holder, then `pct stop`, with netem. The old primary returns read only and rejoins by GTID with no reseed (keel#202). The reseed path works. The semi-sync timeout is 30 s and the read-only holder acts at 6 s (decisions 0031 and 0049) | E1 is the script and the numbers. The keel delta from 0.23.43 to 0.23.49 is PostgreSQL and witness changes, so the maintainer may reduce this to one cut, one `pct stop` and the rejoin. **Question 8** |
-| keel-lnpp 19.0-N | The web items. The PostgreSQL pair on BR1 and BR2 with the witness. Failover with writers under netem. The old primary rejoins by `pg_rewind` or by the reseed that keel picks (decision 0054). A `systemctl stop` of `postgresql@17-main` with an idle client takes under 5 s. The bootstrap has no hang | E2 is the same keel (0.23.49) on the same stack. It can replace the long run if the maintainer agrees. A bootstrap, one failover and one rejoin remain |
-| keel-ntfy 19.0-N | ntfy is a node of one (decision 0063), so the pair rule does not fit. Run 3 standalone nodes: 2 CTs on BR1 and 1 CT on BR2, with one more CT of Core on BR2 as the sender. First boot headless. Port 80 serves only the ACME challenge and a 301 (19.0-2). The API answers on 443 only. The accounts and tokens work. `ntfy-client.service` is off. `keel notify` from the Core CT reaches each server across the sites under netem. An alert reaches the server after a cut of the link ends | The CTs 9190 and 9191 of 2026-10-23 ran 19.0-2, but no evidence file exists. **Question 2 decides if the sender sends to one server or to a list** |
+| keel-lnmp 19.0-N | The web items. The MariaDB pair on BR1 and BR2 with the witness. Writes replicate. Cut of the holder, then `pct stop`, with netem. The old primary returns read only and rejoins by GTID with no reseed (keel#202). The reseed path works. The semi-sync timeout is 30 s and the read-only holder acts at 6 s (decisions 0031 and 0049) | E1 is the script and the numbers. The run is full (answer 8) |
+| keel-lnpp 19.0-N | The web items. The PostgreSQL pair on BR1 and BR2 with the witness. Failover with writers under netem. The old primary rejoins by `pg_rewind` or by the reseed that keel picks (decision 0054). A `systemctl stop` of `postgresql@17-main` with an idle client takes under 5 s. The bootstrap has no hang | E2 is the same keel (0.23.49) on the same stack. The run is full all the same (answer 8) |
+| keel-ntfy 19.0-N | ntfy is a node of one (decision 0063), so the pair rule does not fit. Run 3 standalone nodes: 2 CTs on BR1 and 1 CT on BR2, with one more CT of Core on BR2 as the sender. First boot headless. Port 80 serves only the ACME challenge and a 301 (19.0-2). The API answers on 443 only. The accounts and tokens work. `ntfy-client.service` is off. `keel notify` from the Core CT reaches each server across the sites under netem. An alert reaches the server after a cut of the link ends | The CTs 9190 and 9191 of 2026-10-23 ran 19.0-2, but no evidence file exists. keel 0.23.49 sends to one server (answer 2), so the test sends to each server in turn |
 
 Item U is the one test that no earlier file covers. It checks that an
 existing stable-track machine moves from 0.23.21 to 0.23.49 with its conffiles
@@ -289,20 +290,25 @@ and its drop-ins.
 | After step 7 | The archive is public. Run `reprepro remove trixie` for the 43 new names. Run `reprepro includedeb trixie` for keel 0.23.21, confconsole 2.2.3+keel2 and inithooks 2.3.6+keel26 from `/srv/keel-apt/done/`. Commit, merge, and run `keel-publish-mirror --archive-only`. The role is main. `bin/promote` cannot do it, because it refuses a downgrade (exit 8) |
 | A machine that already took the new packages | It stays on the new version. The pin 990 never goes back (tracker#23). The fix is a forward fix: a higher version in `trixie-testing`, then a new promotion |
 | After step 14 | Blobs and release revisions are immutable (decision 0016). No earlier stable pointer exists, so a pointer cannot move back. Publish a new date that drops the records with `keel-release --drop-from-index keel-core keel-web keel-lnmp keel-lnpp keel-ntfy`. Add a line to `WITHDRAWN.txt`, as on 2026-10-02. The old records core 19.0-9 and web 19.0-4 do not come back |
-| After step 16 | A GitHub stable release cannot be replaced. A correction is a new `<rel>` (decision 0043). This is why step 16 is last |
+| After step 16 | A published tag and release must not change. A correction is a new `<rel>`. This is why step 16 is last |
 
-## 6. Questions for the maintainer
+## 6. Answers of 2026-10-24
 
-1. Decision 0052 asks for the ISO in every official release. May stable 1 ship
-   the `.tar.zst` alone, with a note in 0052? If no, stable 1 waits for buildtasks#9.
-2. Does stable 1 ship keel 0.23.49, the tested one? If no, keel 0.23.51 needs
-   a publication to `trixie-testing`, a rebuild of the 5 images and the
-   whole of section 4 again, with the ntfy list.
-3. Do we give each image a new `<rel>`: core 19.0-11, web 19.0-10, lnmp 19.0-5,
-   lnpp 19.0-6, ntfy 19.0-3?
-4. May the 23 webmin packages from TurnKey go into `trixie` (tracker#52)?
-5. Do we drop the records keel-postgresql 19.0-5 and keel-redis 19.0-8 from the index?
-6. Do I make the GitHub releases by hand with `gh`, as no `keel-publish-github` exists?
-7. Is it acceptable that the tag is on a product commit that has the keel-web
-   0.3.4 packaging, while the image has 0.3.3?
-8. Do you accept the reduced MariaDB run and the reduced LNPP run of section 4?
+The maintainer approved the plan with these answers.
+
+1. Stable 1 ships the `.tar.zst` alone. The ISO comes in a later release
+   (buildtasks#9). Decision 0052 has a dated note.
+2. Stable 1 ships keel 0.23.49.
+3. The new numbers are core 19.0-11, web 19.0-10, lnmp 19.0-5, lnpp 19.0-6
+   and ntfy 19.0-3.
+4. The TurnKey webmin packages go into `trixie`.
+5. The release drops the records keel-postgresql 19.0-5 and keel-redis
+   19.0-8 from the Proxmox index.
+6. Nobody makes a GitHub release by hand. GitHub is a push mirror only.
+   Nobody pushes or creates anything there. The release is on Forgejo.
+7. The tag goes on the exact commit that built the packages of the image,
+   not on a later commit. For keel-web this is a commit on the branch
+   `stable-1` that starts at `14aea11`.
+8. There are no reduced runs. All 5 images get the full matrix of section 4,
+   with 2 LXC on BR1, 1 LXC on BR2 and netem. MariaDB and PostgreSQL get full
+   runs too.
