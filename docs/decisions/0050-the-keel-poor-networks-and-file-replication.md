@@ -378,6 +378,136 @@ checksums.
   kept etcd stable at 250 ms with a heartbeat of 300 ms and an election
   timeout of 3 s, and it still re-elected under loss and partition.
 
+## Amendment 2026-10-15: a stalled TCP connection ends after 5 retransmissions
+
+Decided by the coordinator under the maintainer's delegation, from the
+netns evidence of Keel-Linux/keel#167
+(`evidence/2026-10-15-etcd-stalled-peer-stream.md` in the keel
+repository). Implemented by the pull request for keel#167.
+
+**What changes.** On each node that runs etcd, keel writes
+`/etc/sysctl.d/90-keel-etcd.conf` with `net.ipv4.tcp_retries2 = 5` and
+sets the value live. The kernel's default is 15. The setting holds for
+the network namespace of the node, for IPv4 and IPv6, and for each TCP
+connection in it.
+
+**Why the current approach is not enough.** On real nodes under netem,
+etcd had no leader for 111 seconds after a cut of the leader's site.
+In the netns harness, a peer connection that lost its segments in a cut
+doubled its retransmission timeout up to 58 seconds. etcd went on
+writing raft's messages to that connection and saw no error. The votes
+of a survivor waited in it, also after the heal. Of 12 leader cuts of
+40 seconds, 1 had no leader for the whole cut, and the members were
+back 24 to 61 seconds after the heal. In CI, a follower rejoined 19 to
+51 seconds after the heal in all 33 runs. A longer election timeout
+does not help a stalled connection, and etcd has no setting that ends
+one.
+
+**Whether it can be made to work.** With 5, the kernel ends such a
+connection after about 14 seconds of retransmissions. etcd sees the
+error and dials again. In the same 12 cuts, the new leader came 8 to 13
+seconds after each cut, and the members were back 8 to 16 seconds after
+the heal. No peer connection went above a backoff of 4. At the design
+case's 2% loss, the kernel ends a working connection only if 6 copies
+of one segment are lost in a row, which comes once in 10^10 segments.
+
+**Why this is better.** The fix is one standard kernel value, set where
+etcd runs, and not a change to etcd. The other TCP users of a node,
+such as the replication of a database pair, also see a dead peer after
+about 14 seconds instead of about 15 minutes, and they dial again. A
+cut shorter than 14 seconds ends no connection.
+
+## Amendment 2026-10-20: how keel carries out the replication
+
+Decided by the coordinator under the maintainer's delegation, least
+power each time. The maintainer set the order on 2026-10-20: the file
+replication and the database pair work on a real pair across two sites
+before any application is released again, and each application repository
+declares the paths it replicates.[^axe] Nothing here is implemented yet.
+
+**Why the current approach is not enough.** A pair of WordPress or Odoo
+today replicates the database and no file. After a failover the new
+primary has the rows and not the uploads, the themes or the filestore.
+For Nextcloud the file cache is in the database, so the new primary lists
+files that it does not hold. The open points 4, 6 and 7 of this note, and
+the seams that the keel code offers, need answers before the work starts.
+
+**The choices.**
+
+1. **Modes (open point 7).** Files replicate on every node of a database
+   pair, in `cloud_simple` and in `cloud_advanced`. A pair without its
+   files is not a working pair. This amends docs/manifest-v1.md, where the
+   derivation row says `cloud_advanced` only.
+2. **Run-time code (open point 6).** An application declares every path
+   that it writes at run time, code included. For WordPress that is
+   `wp-content/uploads`, `wp-content/themes` and `wp-content/plugins`.
+   Syncthing writes a local copy on each node, so the request path stays
+   local, and the rule of section 2 holds. This amends the WordPress
+   example of 0041.
+3. **The device identity.** keel makes the key and the certificate of
+   Syncthing on each node, once, owned by the `syncthing` user. A device ID
+   is public. keel sends it to the other member of the pair in a new signed
+   message of the members' channel, kind `device`, and answers it only to
+   that member, as it does for `secret`. This works with and without etcd.
+4. **The configuration.** keel renders `config.xml` from the manifest and
+   the role, and restarts the service when the file changes, as it does
+   for etcd. Discovery, relays and NAT traversal are off. The service
+   listens on the overlay address only, and the peer is the overlay
+   address of the other member. The GUI and the REST API listen on the
+   loopback, with an API key in a 0600 file. The watcher delay is 1 s.
+   Each receive-only folder keeps old versions with simple versioning.
+5. **The flip.** `keel database follow` sets the folder type in the same
+   operation that sets the database role, next to the write of
+   `/var/lib/keel/role`, which then says `replicates=database,files`.
+   A proven primary sends only. A replica receives only. A node that is in
+   doubt or not proven pauses its folders, so that a cut primary sends no
+   file that the other site did not write.
+6. **Ownership.** The service runs as the `syncthing` user, with
+   `CAP_CHOWN`, `CAP_FOWNER` and `CAP_DAC_OVERRIDE` as ambient
+   capabilities, `ProtectSystem=strict`, and write access to its home and
+   to the replicated paths only. Each folder sets
+   `copyOwnershipFromParent`, so a file on a replica keeps the owner of
+   the application, `www-data` or `odoo`. The first test on an
+   unprivileged LXC container must show that this works.
+7. **Role hooks.** After the flip, keel runs each executable in
+   `/usr/lib/keel/roles.d/` with the argument `primary` or `replica`.
+   An application ships its own hook. Nextcloud runs `occ files:scan
+   --all` there. keel itself knows no application.
+8. **The old primary (open point 4).** When an old primary becomes a
+   replica, versioning keeps each of its files that the new primary
+   replaces. keel reports `receiveOnlyChangedFiles` and `needFiles` in
+   `keel diff` and alerts once while the count is not zero, as the
+   database watch does for a diverged replica.
+
+**Whether it can be made to work.** Every part has a seam in keel today:
+`dbfollow._follow` is the one place where a role takes effect, the
+members' channel already carries signed messages to the pair member,
+`system/etcd.py` already renders the configuration of a service that
+runs as its own user, and the `syncthing` 2.1.6 package is in the
+trixie-testing archive.
+
+**Why this is better.** The file flip and the database flip are one
+operation, so they cannot disagree after a failover. Nothing about
+folders is typed by an operator, and keel knows no application by name.
+
+**Done when** the "done when" of this note passes on built images of
+WordPress and Odoo, across BR1 and BR2, under the five netem profiles,
+with an evidence file.
+
+**Note 2026-10-24: languages.** `languages` is a fourth WordPress run-time
+directory: WordPress writes it at run time (language pack updates), and a
+replica without it serves the site untranslated after a failover. Item 2's
+list for WordPress is `wp-content/uploads`, `wp-content/themes`,
+`wp-content/plugins` and `wp-content/languages`. The WordPress example of
+docs/manifest-v1.md shows one folder per directory and no `exclude`: rule
+23 wants an exclude strictly inside a replicated path, and `cache`,
+`upgrade` and `upgrade-temp-backup` sit inside none of the four.
+
+[^axe]: The maintainer, 2026-10-20, in Portuguese: "syncthing e bancos de
+    dados master slave tem que estar funcionando antes de soltar as
+    aplicações [...] cada repo de cada aplicação precisa declarar isso dai
+    então foca em afiar o machado antes de começar a cortar a arvore!"
+
 [^keel]: The maintainer, 2026-10-03, in Portuguese: "Todo barco, por mais
     antigo que seja, ele precisa de uma quilha. É uma tecnologia antiga,
     chumbo, pesado embaixo, mas é o que garante que ele seja estável, que

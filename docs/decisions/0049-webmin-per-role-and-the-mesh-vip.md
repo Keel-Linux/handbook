@@ -637,3 +637,70 @@ after a move and a rejoin.
 - **0019**: unchanged; Webmin still changes no network, and keel, not
   Webmin, writes miniserv's address keys.
 - **0044**: unchanged; the VIP never faces the public, as it says.
+
+## Amendment 2026-10-15: the holder drops the address after 15 seconds
+
+Decided by the coordinator under the maintainer's delegation, from the
+evidence of `docs/evidence/2026-10-15-br3-thin-etcd-witness.md`
+(Keel-Linux/keel#167). Implemented by Keel-Linux/keel#174.
+
+**What changes.** The holder drops the address after 15 seconds without
+a renewal, not 10 seconds. The TTL of the lease stays 20 seconds. The
+rest of "The lease" above does not change.
+
+**Why the current approach is not enough.** A cut of the site that held
+etcd's leader made the holder drop the VIP for 2 to 4 seconds on real
+nodes. The new leader came 7.4 seconds after the cut. The kernel ended
+the address about 8 seconds after the last renewal that the majority
+confirmed. The claim "10 seconds rides out one re-election" did not
+hold under loss. The drop also stopped the PostgreSQL server of the
+holder (keel#168).
+
+**Whether it can be made to work.** With 15 seconds, the kernel keeps
+the address up to 14 seconds after that renewal. This covers one
+election of 5 to 10 seconds and the next renewal. etcd cannot expire
+the lease before 20 seconds after it received that renewal, and the
+holder counts from the send. Thus a holder cut off from the majority
+has dropped the address at least 5 seconds before any other node can
+win it. The kernel enforces this time, also for a frozen process.
+
+**Why this is better.** The VIP does not move and does not stop on a
+cut of the leader's site, and the margin against 2 holders stays 5
+seconds or more. A failover after a cut of the holder takes the same
+time as before: the other node claims when the lease expires, after
+20 seconds.
+
+The safety argument of the 0054 amendment of 2026-10-15 holds with
+these numbers: the old primary dropped the VIP 15 seconds after its
+last confirmed renewal, before etcd expired the lease.
+
+## Amendment 2026-10-16: the holder marks the doubt of its lease
+
+Decided by the coordinator under the maintainer's delegation, with the
+amendment of 0031 of the same day. Implemented by Keel-Linux/keel#197
+(keel#195).
+
+**What changes.** When the last renewal of the lease that the majority
+confirmed is 6 s old, the controller marks its doubt in
+`/var/lib/keel/vip/<vip>.unconfirmed`. The holder keeps the VIP until
+the release at 15 s, as the amendment of 2026-10-15 says. The mark goes
+at the next confirmed renewal. keel database follow uses the mark to
+fence a MariaDB holder (decision 0031, amendment of 2026-10-16).
+
+**Why the current approach is not enough.** A cut holder kept its
+database writable until the release, and the release on a cut holder
+wrote no state, so the database fence came from the watch, up to 35 s
+later.
+
+**Whether it can be made to work.** The mark needs no new process: the
+controller already counts the age of its last confirmed renewal, and
+its root half writes only in `/var/lib/keel/vip`. On real nodes the
+mark came 5.1 s to 7.1 s after a cut, and no mark came in quiet
+windows of 10 minutes, at 5 ms and at 250 ms RTT.
+
+**Why this is better.** The database learns the doubt before any
+other node can claim, and before a MariaDB primary can acknowledge a
+write that the replica never got. The VIP itself moves as before.
+
+**Maintainer decision, 2026-10-16.** The maintainer answered "segue" to
+the amendment of 0031. The doubt mark at 6 s is part of that decision.

@@ -375,3 +375,11 @@ and both reach the mirror and the GitHub release together.
   the others.
 - **0036**: `common` gains `plans/turnkey/machine`; what is common and what
   is an appliance does not change.
+
+## Note of 2026-10-24: stable 1 has no ISO
+
+The maintainer decided on 2026-10-24 that the first stable release, stable 1
+(`docs/releases/stable-1-plan.md`), ships the `.tar.zst` alone. The ISO
+builder does not exist yet (buildtasks#9). The ISO comes in a later release.
+This note waives the rule "both formats" for stable 1 only. The rule stays in
+force for every later release.

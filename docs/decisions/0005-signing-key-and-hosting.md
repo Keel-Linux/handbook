@@ -1,7 +1,8 @@
 # 0005: Signing key custody and repository hosting: procedure and options
 
 Date: 2026-09-26
-Status: options prepared; the maintainer generates the key and picks the hosting
+Status: options prepared; the maintainer generates the key and picks the hosting.
+The "keep the release key human" paragraph is superseded by 0055 (2026-10-14).
 
 ## Part 1: the signing key
 

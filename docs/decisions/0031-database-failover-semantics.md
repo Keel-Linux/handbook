@@ -65,3 +65,51 @@ vocabulary, primary and replica.
 - keel 0.11.x already has a read-only replica (see also tracker#26). A hot
   standby that serves no traffic goes further; the read-only mode stays
   useful as the state between promotion steps.
+
+## Amendment 2026-10-16: the MariaDB timeout is 30 s, and a cut holder acknowledges no write
+
+Decided by the coordinator under the maintainer's delegation, from the
+cross-site release test of LNMP 19.0-3 and its rehearsals
+(`docs/evidence/2026-10-16-lnmp-lnpp-19.0-3-cross-site.md`).
+Implemented by Keel-Linux/keel#190 (keel#186, keel#193) and
+Keel-Linux/keel#197 (keel#195).
+
+**What changes.**
+
+1. `rpl_semi_sync_master_timeout` is 30 s, not 10 s. This changes the
+   maintainer's answer of 2026-10-03. The fallback to asynchronous
+   commits when the replica is lost stays: it comes 30 s after the last
+   acknowledgement.
+2. The holder that loses the confirmation of its lease for 6 s turns
+   its MariaDB server read only and ends the client connections, before
+   it drops the VIP. It takes writes again at the next confirmed
+   renewal.
+
+**Why the current approach is not enough.** On a cut MariaDB primary,
+acknowledged writes were lost. A write that waited for the replica
+returned OK after the 10 s timeout, and the next writes returned OK at
+once, until the old primary dropped the VIP at 15 s. MariaDB also
+returns OK for a waiting write when the dump thread to the cut replica
+ends, about 12.6 s after the cut. The new primary does not have these
+writes. Rehearsal 1 lost 12 of 1906 acknowledged ids.
+
+**Whether it can be made to work.** On real nodes on BR1 and BR2, the
+fence at the doubt made the server read only 6.1 s to 8.8 s after a
+cut, before the dump thread could end. The waiting write got an error,
+not OK. In rehearsal 3, 0 acknowledged ids were lost in 2 network cuts
+and 1 stop of a CT, at 5 ms and at 250 ms
+RTT, with a writer on the local socket and a writer at the VIP. Two
+quiet windows of 10 minutes gave no false doubt.
+
+**Why this is better.** A cut of the primary site loses no write that a
+client was told is stored, which the release test requires. With a 10 s
+timeout, the worst case measured leaves 1.2 s. With 30 s, the fence has
+room. The cost is that a lost replica holds the writes 30 s, not 10 s,
+before the fallback, and an etcd re-election of more than 6 s holds the
+writes of the MariaDB holder until it ends.
+
+**Maintainer decision, 2026-10-16.** The maintainer reviewed this
+amendment and answered "segue". The timeout of 30 s and the read only
+state of the VIP holder after 6 s without a renewed lease are now the
+maintainer's decision, not only the coordinator's. The basis is the
+measurement above: the server went read only 6.1 s to 8.8 s after a cut.

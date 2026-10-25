@@ -1,0 +1,183 @@
+#!/bin/sh
+# Forgejo runner instances on Keel-Linux-Runner (decision 0056). The
+# GitHub instances runner1-runner8 are removed (2026-10-16). Instance I (in FJ_LXC_IDS or FJ_HOST_IDS) is user
+# runnerI, uid 1100+I, service forgejo-runner@I, with the same subordinate
+# range scheme, LXC defaults, slice limits and job resets as the GitHub
+# instances (docs/infra/keel-lxc-2.md). Run as root. Idempotent.
+set -eu
+# The host instances, in two classes. A job of a keel-lxc label runs the
+# timing-sensitive tests (netem at 250 ms) in a container; a job of the
+# keel-host label runs on the VM and needs one core. Each class has its own
+# instances, so a host job never takes a keel-lxc slot, and the number of
+# keel-lxc jobs that run at once (the CPU of the VM) is the number of lxc
+# instances. 15 and 16 are the container instances of keel-ctr-provision
+# (forgejo-runner-ctr@), so the lists skip them.
+FJ_LXC_IDS=${FJ_LXC_IDS:-"9 10 11 12 13"}
+FJ_HOST_IDS=${FJ_HOST_IDS:-"17 18 19 20"}
+FJ_LXC_MEM=1792M FJ_HOST_MEM=1024M
+# Set FJ_REG_TOKEN (the registration token of the organization, read from
+# stdin by the caller, never written to a file) to register an instance
+# that has no .runner file yet.
+FJ_REG_TOKEN=${FJ_REG_TOKEN:-}
+FJ_VERSION=13.2.0+keel1
+# The 13.2.0 release with the trust gate (forgejo-runner-keel-trust-gate.patch),
+# built as docs/infra/keel-lxc-2.md says and copied to FJ_BINARY first.
+FJ_BINARY=/var/cache/keel-runner/forgejo-runner-13.2.0-keel1
+FJ_SHA256=0e3a9b234d41a4e41797d79023348c949a0153f0bb4dc5d508305dab19f21870
+NODE_VERSION=24.21.0
+RUNNER_UID_BASE=1100 SUB_BASE=165536 SUB_COUNT=65536
+log() { printf '== %s\n' "$*"; }
+
+log packages
+# Tools of the jobs that GitHub ran on ubuntu-latest with sudo apt-get.
+# The Forgejo jobs have no sudo, so the host has them.
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+	jq python3-venv python3-pip file cmake binutils-dev libssl-dev \
+	libcurl4-openssl-dev libelf-dev libdw-dev libiberty-dev zlib1g-dev \
+	squashfs-tools xorriso attr reprepro gpgv sqv apt-utils dialog \
+	python3-dialog cpp dpkg-dev debhelper redis-server devscripts lintian \
+	equivs build-essential wireguard-tools >/dev/null
+# redis-server is here for its binary only (unit-redis tests start their own).
+systemctl disable --now redis-server >/dev/null 2>&1 || true
+systemctl mask redis-server >/dev/null 2>&1 || true
+
+log keel-need-packages
+# The Forgejo jobs have no sudo: in place of apt-get install they run
+# keel-need-packages, which fails when the host lacks a package.
+cat > /usr/local/bin/keel-need-packages << 'NEED'
+#!/bin/sh
+# Fails, and names them, when a Debian package is not installed on this
+# runner host. Ask the maintainer of the runner to add it to
+# keel-fj-provision.sh (handbook docs/infra/keel-lxc-2.md).
+missing=
+for p in "$@"; do
+	dpkg-query -W -f '${db:Status-Status}' "$p" 2>/dev/null | grep -qx installed || missing="$missing $p"
+done
+[ -z "$missing" ] && exit 0
+echo "::error::the runner host does not have these packages:$missing"
+exit 1
+NEED
+chmod 0755 /usr/local/bin/keel-need-packages
+
+log "forgejo-runner $FJ_VERSION"
+if ! /usr/local/bin/forgejo-runner --version 2>/dev/null | grep -qF "v$FJ_VERSION"; then
+	echo "$FJ_SHA256  $FJ_BINARY" | sha256sum -c -
+	install -m 0755 "$FJ_BINARY" /usr/local/bin/forgejo-runner.new
+	mv /usr/local/bin/forgejo-runner.new /usr/local/bin/forgejo-runner
+fi
+
+log node
+# The JavaScript actions (checkout, upload-artifact) run with node 24 on the
+# host. The SHA256 comes from SHASUMS256.txt of the release.
+if [ ! -x /opt/keel-node24/bin/node ]; then
+	t=node-v$NODE_VERSION-linux-x64.tar.xz
+	curl -fsSL -o "/tmp/$t" "https://nodejs.org/dist/v$NODE_VERSION/$t"
+	curl -fsSL "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt" | grep " $t\$" | (cd /tmp && sha256sum -c -)
+	install -d -m 0755 /opt/keel-node24
+	tar -C /opt/keel-node24 --strip-components=1 --no-same-owner -xJf "/tmp/$t"
+	rm -f "/tmp/$t"
+fi
+
+for spec in $(for i in $FJ_LXC_IDS; do echo "lxc:$i"; done) $(for i in $FJ_HOST_IDS; do echo "host:$i"; done); do
+	class=${spec%%:*} i=${spec#*:}
+	case $class in lxc) label=keel-lxc mem=$FJ_LXC_MEM ;; *) label=keel-host mem=$FJ_HOST_MEM ;; esac
+	case $i in 15 | 16) echo "id $i is a container instance, see keel-ctr-provision" >&2; exit 1 ;; esac
+	u=runner$i uid=$((RUNNER_UID_BASE + i)) sub=$((SUB_BASE + (i - 1) * SUB_COUNT))
+	log "$u"
+	id "$u" >/dev/null 2>&1 || useradd -m -s /bin/bash -u "$uid" -U -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 "$u"
+	for f in /etc/subuid /etc/subgid; do
+		grep -qx "$u:$sub:$SUB_COUNT" "$f" || { sed -i "/^$u:/d" "$f"; echo "$u:$sub:$SUB_COUNT" >> "$f"; }
+	done
+	grep -qx "$u veth lxcbr0 10" /etc/lxc/lxc-usernet || echo "$u veth lxcbr0 10" >> /etc/lxc/lxc-usernet
+	cat > "/usr/local/share/keel-runner/lxc-default.$u.conf" << LXCDEF
+# Unprivileged containers of the CI runner (docs/ci-cd.md section 6).
+# The generated AppArmor profile of /etc/lxc/default.conf needs mac_admin,
+# which an unprivileged user does not have. The preloaded nesting profile
+# allows the rbind mounts systemd services use for their sandboxing.
+lxc.net.0.type = veth
+lxc.net.0.link = lxcbr0
+lxc.net.0.flags = up
+lxc.apparmor.profile = lxc-container-default-with-nesting
+lxc.idmap = u 0 $sub $SUB_COUNT
+lxc.idmap = g 0 $sub $SUB_COUNT
+LXCDEF
+	install -d -m 0755 -o "$u" -g "$u" "/home/$u/.config" "/home/$u/.config/lxc" "/home/$u/actions-runner" "/home/$u/actions-runner/_work"
+	install -m 0644 -o "$u" -g "$u" "/usr/local/share/keel-runner/lxc-default.$u.conf" "/home/$u/.config/lxc/default.conf"
+	install -m 0664 -o "$u" -g "$u" /usr/local/share/keel-runner/runner.env "/home/$u/actions-runner/.env"
+	cat > "/home/$u/actions-runner/config.yml" << CONF
+# forgejo-runner instance keel-fj-$class-$i (decision 0056).
+log:
+  level: warn
+runner:
+  file: /home/$u/actions-runner/.runner
+  capacity: 1
+  timeout: 3h
+  envs:
+    LANG: C.UTF-8
+cache:
+  enabled: true
+  dir: /home/$u/actions-runner/_work/_cache
+host:
+  workdir_parent: /home/$u/actions-runner/_work
+CONF
+	chown "$u:$u" "/home/$u/actions-runner/config.yml"
+	if [ -n "$FJ_REG_TOKEN" ] && [ ! -e "/home/$u/actions-runner/.runner" ]; then
+		(cd "/home/$u/actions-runner" && runuser -u "$u" -- forgejo-runner register --no-interactive \
+			--instance https://git.pop.coop --token "$FJ_REG_TOKEN" --name "keel-fj-$class-$i" \
+			--labels "$label:host,self-hosted:host" -c config.yml >/dev/null)
+	fi
+	loginctl enable-linger "$u"
+	install -d -m 0755 "/etc/systemd/system/forgejo-runner@$i.service.d" "/etc/systemd/system/user-$uid.slice.d"
+	cat > "/etc/systemd/system/forgejo-runner@$i.service.d/keel-slice.conf" << DROPIN
+# Instance $i in the slice of runner$i.
+[Unit]
+After=user-runtime-dir@$uid.service
+
+[Service]
+Slice=user-$uid.slice
+DROPIN
+	cat > "/etc/systemd/system/user-$uid.slice.d/90-keel-limits.conf" << DROPIN
+# The limits of instance keel-fj-$class-$i, its runner, its job and its containers.
+[Slice]
+MemoryAccounting=yes
+MemoryMax=$mem
+MemorySwapMax=0
+CPUWeight=100
+TasksMax=8192
+DROPIN
+done
+for f in /etc/subuid /etc/subgid; do
+	sort -t: -k2,2n "$f" | awk -F: -v f="$f" '
+		NR > 1 && $2 < end { printf "overlap in %s: %s\n", f, $1 > "/dev/stderr"; bad = 1 }
+		{ end = $2 + $3 } END { exit bad }'
+done
+
+log service
+# One job for each start: forgejo-runner one-job takes one job and exits,
+# so the resets of the GitHub job hooks run around every job.
+cat > /etc/systemd/system/forgejo-runner@.service << 'UNIT'
+[Unit]
+Description=Forgejo runner keel-fj-%i (git.pop.coop, organization Keel-Linux)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=runner%i
+Group=runner%i
+WorkingDirectory=/home/runner%i/actions-runner
+Environment=PATH=/opt/keel-node24/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStartPre=+/usr/local/sbin/keel-runner-start-reset runner%i
+ExecStartPre=/usr/local/libexec/keel-runner/job-reset.sh
+ExecStart=/usr/local/bin/forgejo-runner one-job --wait -c /home/runner%i/actions-runner/config.yml
+ExecStopPost=/usr/local/libexec/keel-runner/job-reset-completed.sh
+Restart=always
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=5min
+OOMPolicy=continue
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+log finished
