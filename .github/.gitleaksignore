@@ -1,3 +1,12 @@
 # gitleaks false positives, by fingerprint. Each was read; none is a secret.
 # docs/build-host.md: quotes the fingerprint of the public TurnKey signing key.
 a4b120acec491eae56859d64413a55ddb566e253:docs/build-host.md:generic-api-key:213
+# docs/evidence: WireGuard public keys and etcd cluster tokens from test nodes.
+63b9fd16a58f5cc3fa84b00893a929b9242e1cf1:docs/evidence/2026-10-10-rollout-0.23.13.md:generic-api-key:282
+1902bfc96364af7119942ace1b290d9e56d6c3c6:docs/evidence/2026-10-08-mariadb-pair-real.md:generic-api-key:399
+1902bfc96364af7119942ace1b290d9e56d6c3c6:docs/evidence/2026-10-08-mariadb-pair-real.md:generic-api-key:471
+1902bfc96364af7119942ace1b290d9e56d6c3c6:docs/evidence/2026-10-08-mariadb-pair-real.md:generic-api-key:552
+1902bfc96364af7119942ace1b290d9e56d6c3c6:docs/evidence/2026-10-08-mariadb-pair-real.md:generic-api-key:586
+1902bfc96364af7119942ace1b290d9e56d6c3c6:docs/evidence/2026-10-08-mariadb-pair-real.md:generic-api-key:616
+1902bfc96364af7119942ace1b290d9e56d6c3c6:docs/evidence/2026-10-08-mariadb-pair-real.md:generic-api-key:898
+1902bfc96364af7119942ace1b290d9e56d6c3c6:docs/evidence/2026-10-08-mariadb-pair-real.md:generic-api-key:912
