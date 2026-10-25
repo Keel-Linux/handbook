@@ -37,9 +37,10 @@ Renaming the caller job renames the check and silently detaches it from
 protection, so the job id `tests` is part of the contract.
 
 An appliance repository carries a second caller job, `appliance`, which calls
-`test-appliance.yml` (job id `build-and-boot`), so its check is exactly:
+`test-appliance.yml` (job id `boot-published-layer`), so its check is
+exactly:
 
-    appliance / build-and-boot
+    appliance / boot-published-layer
 
 The package check comes from `lxc-trixie.yml` (Keel-Linux/.github#17), which
 retires `build-deb.yml` and its `package / deb`.
@@ -61,7 +62,7 @@ repository):
 | tklbam-profiles | master | test-shell | 0 | success (placeholder notice) | on |
 | confconsole | master (fast-forwarded to upstream 0f37b48 on 2026-09-26; the fork's tip a2d9f70 was 50 upstream commits behind) | test-python (`package: ifutil`), after a test-shell placeholder at 0 in the baseline pull request | 99 | success (103 tests, ifutil.py 99.21 percent) | on since 2026-09-26 |
 | webmin | master (equal to upstream) | test-shell | 0 | success (placeholder notice; the project code is the Python update tool `buildsrc_lib`, and the first pytest switches the caller to test-python) | on since 2026-09-26 |
-| keel-core | master | test-shell (threshold 100) **plus** test-appliance (`appliance: core`, `parent: ""`) | 100 | both success: `tests / coverage` 2m41s, `appliance / build-and-boot` 39s (run 36272285880, container `keel-core-ci-36272285880-1`, `keel diff` 6 same and 0 drift) | on; **both** checks required since 2026-09-26 |
+| keel-core | master | test-shell (threshold 100) **plus** test-appliance (`appliance: core`, `parent: ""`) | 100 | both success: `tests / coverage` 2m41s, `appliance / boot-published-layer` 39s (run 36272285880, container `keel-core-ci-36272285880-1`, `keel diff` 6 same and 0 drift) | on; **both** checks required since 2026-09-26 |
 | keel-nodebb | main | test-shell **plus** test-appliance (`appliance: nodebb`, `parent: nodejs-nginx`) | 95, the lowest of the three measured shell files (`40nodebb` at 96.97; the other two at 100) | `tests / coverage` success. The boot test run by hand on the runner fails on a real defect of the published layer (buildtasks issue 6), so the appliance check stays advisory | on since 2026-09-26, `tests / coverage` required |
 | .github | main | none (no code under test) | n/a | n/a | on, no required check |
 | keel-linux.github.io | main | none (static site) | n/a | n/a | on, no required check |
@@ -124,8 +125,11 @@ Rules for the number:
    Python: `test-python.yml` with `package: <import name>`. Appliances add a
    second job, `appliance`, calling `test-appliance.yml` with `appliance:`,
    `parent:` and `timeout:`, gated on `if: vars.KEEL_LXC_RUNNER == 'true'`;
-   its check is `appliance / build-and-boot` and it is required only once it
-   has passed once, because it depends on a layer being published.
+   its check is `appliance / boot-published-layer` and it is required from the
+   start: the job fails while the layer is unpublished, rather than passing
+   vacuously. A required check that is renamed on GitHub fails closed: the old
+   name never arrives, so the pull request stays blocked. Rename the rule in
+   the same change.
 2. Push once to the default branch (allowed only before protection exists)
    and confirm the check `tests / coverage` appears on the commit:
    `GET /repos/keel-linux/<repo>/commits/<sha>/check-runs`.
@@ -176,7 +180,7 @@ Rules for the number:
 - **Runner group: public repositories, opened 2026-09-26.** Runner group 1
   (`Default`) had `allows_public_repositories: false` while every repository
   of the organization is public, so GitHub accepted an
-  `appliance / build-and-boot` job and then left it queued with `keel-lxc-1`
+  `appliance / boot-published-layer` job and then left it queued with `keel-lxc-1`
   online and idle. That was the one thing between the gate and its first real
   run. Opened with:
 
@@ -297,7 +301,7 @@ host (docs/build-host.md). What that cost, and how it was settled on
 
 ### What one real run does
 
-`core`, run 36272285880 of keel-core, the first `appliance / build-and-boot`
+`core`, run 36272285880 of keel-core, the first `appliance / boot-published-layer`
 in CI: **39 seconds**, every step green. The probe answered 200, the published
 parent `none` matched the caller, `keel pull` took the layer from the mirror,
 `keel verify` passed, the chain assembled into
@@ -327,7 +331,7 @@ each other in a loop outside a build chroot. `core` and `nodejs-nginx` do not
 carry them, so it is `bt-layer` adding `LAYER_CHILD_OVERLAYS` to a child
 build and not stripping the finished layer: buildtasks issue #6. The gate
 found a real defect on its first run, which is what it is for; until the
-layer is rebuilt, `appliance / build-and-boot` is not a required status on
+layer is rebuilt, `appliance / boot-published-layer` is not a required status on
 keel-nodebb.
 
 ### Without sudo (2026-10-01)

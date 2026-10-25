@@ -252,9 +252,9 @@ Check from a workstation, over IPv6:
 ### Publishing a layer
 
 The appliance gate reads `/srv/mirror/layers/` and nothing else, so a layer
-that is not published here cannot be tested: `appliance / build-and-boot`
-skips with a notice and passes. Publishing a layer is therefore what turns
-that check from a skip into a real run.
+that is not published here cannot be tested: `appliance / boot-published-layer`
+fails while the layer is unpublished. Publishing a layer is what turns that
+check from a failure into a real run.
 
 What a published layer is, all of it under `/srv/mirror/layers/`:
 
