@@ -48,7 +48,7 @@ Evidence keys:
 | E5 | `2026-10-18-postgresql-first-boot-order.md`: inithooks 2.3.6+keel27 |
 | E6 | `2026-10-15-cronapt-transition-release.md`: keel-transition 0.2.3 |
 | E7 | `2026-10-14-keyring-0.3.0-trixie-security.md`: keel-archive-keyring 0.3.0 |
-| E8 | `evidence/2026-10-13-step12-boot-checks.md` in the maintainer checkout. It is not in the handbook. Core and Web boot checks with keel 0.23.13 |
+| E8 | `2026-10-13-step12-boot-checks.md`: Core, Web, MariaDB, PostgreSQL and Redis boot checks with keel 0.23.13 on hw12-br1 CTs 9051-9055 |
 | G | Boot test of image-gate only: run 32 (core) and run 35 (web, lnmp, lnpp, ntfy). This is a pass or fail of the boot. It is not an evidence file |
 | none | No evidence file and no boot test of this package alone |
 
@@ -140,8 +140,8 @@ cannot change what moves.
    sha256 `1642a977`. Build `20261024T044821Z` made core with sha256
    `70bf50c2`. The package lists are the same, the bytes are not. The
    stable build uses one core for all 5 images.
-6. **E8 is not in the handbook.** It is in the untracked `evidence/` folder
-   of the maintainer checkout. A PR must add it before this plan cites it.
+6. ~~**E8 is not in the handbook.**~~ E8 was added to
+   `docs/evidence/2026-10-13-step12-boot-checks.md` on 2026-10-25.
 
 ## 2. Gaps
 
