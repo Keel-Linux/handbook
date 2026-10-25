@@ -348,3 +348,105 @@ publications.
   re-publish the 0.23.52-0.23.55 packages afterwards, and run the
   plan as written. keel-web 0.3.4 must also be removed.
 - (c) A third option that the maintainer prefers.
+
+## 8. Amendment of 2026-10-25: the maintainer chose option (a)
+
+The maintainer chose option (a) on 2026-10-25: ship keel 0.23.55 and
+keel-web 0.3.4, and add the Syncthing packages that keel-web 0.3.4
+depends on. The stable release carries the file replication
+infrastructure of decision 0050. The 5 base images run the Syncthing
+service in the cloud modes, and an application that declares
+`state.replicate` (decision 0068) has its paths replicated at once.
+
+### 8.1 What changes in the promote list (§1.1)
+
+| Package | Was | Becomes |
+| --- | --- | --- |
+| keel | 0.23.49 | 0.23.55 |
+| keel-web | 0.3.3 | 0.3.6 (0.3.4 syncthing overlay, 0.3.5 lintian, 0.3.6 default replicate path 0068; keel-web#23) |
+| keel-overlay-syncthing | not promoted (§1.2) | 0.1.0 |
+| syncthing | not promoted (§1.2) | 2.1.6+keel1 |
+
+The promote count goes from 46 to 48. The new arguments of
+`bin/promote`:
+
+```
+anubis=1.27.0-0+keel3 confconsole=2.2.3+keel15 coreruleset=4.25.1-0keel1
+inithooks=2.3.6+keel27 keel=0.23.55 keel-core=0.1.3
+keel-overlay-anubis=0.1.1 keel-overlay-coraza=0.1.4
+keel-overlay-crowdsec=0.1.0 keel-overlay-etcd=0.4.0
+keel-overlay-installer=0.2.0 keel-overlay-nginx=0.1.0
+keel-overlay-syncthing=0.1.0 keel-overlay-vip=0.2.0
+keel-overlay-wireguard=0.1.0 keel-web=0.3.6
+libcoraza1=1.8.0-0keel1 libnginx-mod-http-coraza=0.21.0-0keel2
+syncthing=2.1.6+keel1
+tkl-dhcpcd-ifupdown-glue=0.1.3+keel1 turnkey-conffile=1.1.2+keel1
+turnkey-netinfo=1.1.1+keel2 turnkey-ssl=3.1.1+keel1
+turnkey-sysinfo=1.1.0+keel2 turnkey-version=1.1.3+keel3
+webmin=2.660.turnkey0 webmin-authentic-theme=2.660.turnkey0
+webmin-custom=2.660.turnkey0 webmin-fail2ban=2.660.turnkey0
+webmin-fdisk=2.660.turnkey0 webmin-filemin=2.660.turnkey0
+webmin-firewall=2.660.turnkey0 webmin-firewall6=2.660.turnkey0
+webmin-logviewer=2.660.turnkey0 webmin-lvm=2.660.turnkey0
+webmin-mount=2.660.turnkey0 webmin-mysql=2.660.turnkey0
+webmin-net=2.660.turnkey0 webmin-passwd=2.660.turnkey0
+webmin-postfix=2.660.turnkey0 webmin-postgresql=2.660.turnkey0
+webmin-raid=2.660.turnkey0 webmin-software=2.660.turnkey0
+webmin-sshd=2.660.turnkey0 webmin-systemd=2.660.turnkey0
+webmin-updown=2.660.turnkey0 webmin-useradmin=2.660.turnkey0
+webmin-xterm=2.660.turnkey0
+```
+
+### 8.2 What changes in §1.2
+
+The line "keel-overlay-syncthing 0.1.0, syncthing 2.1.6+keel1:
+Application images wait for the Syncthing real test" is removed. Those
+packages move to the promote list above.
+
+### 8.3 What §1.3 said that is no longer true
+
+- "keel#221, not merged": keel#221 merged on 2026-10-22 as keel 0.23.52.
+- "keel-web 0.3.4 ... needs keel 0.23.52 (keel#221, not merged)":
+  keel-web 0.3.4 is in `trixie-testing` and keel 0.23.55 satisfies
+  keel (>= 0.15.0). The functional requirement (the file replication
+  code of keel#221) is met by keel 0.23.52 and later.
+- keel-overlay-anubis 0.1.2 (common#63) must still stay out.
+
+### 8.4 Evidence for the new packages
+
+| Fix | Version | Evidence |
+| --- | --- | --- |
+| keel#221: file replication | 0.23.52 | `2026-10-24-syncthing-0050-wordpress-odoo-cross-site.md` (handbook#133) |
+| keel#224: undeclared syncthing | 0.23.53 | `2026-10-25-keel-0.23.54-pair-owner-and-undeclared-syncthing.md` |
+| keel#225: ownership | 0.23.54 | same file |
+| keel#228: boot resume | 0.23.55 | **pending**: the fix is in 0.23.55, tested in code review, not on a real node |
+| keel-web 0.3.6: syncthing + default replicate | 0.3.6 | handbook#133 for 0.3.4 (the 10-24 image). 0.3.5 is a lintian override. 0.3.6 adds one manifest field (keel-web#23, 0068). Needs a build and boot test |
+| keel-overlay-syncthing 0.1.0, syncthing 2.1.6+keel1 | — | handbook#133 |
+
+The §1.4 evidence gaps change:
+
+- Gap 2 ("MariaDB with keel 0.23.49 has no test") becomes: **MariaDB
+  with keel 0.23.55 has no test.** The 10-24 and 10-25 evidence tested
+  WordPress (LNMP, MariaDB) with keel 0.23.52 and 0.23.54. A test with
+  0.23.55 is needed only for keel#228 (the boot-resume fix).
+- **New gap: keel#228 real-node evidence.** The test must reboot a
+  replica and confirm that file replication resumes. BR2 was offline on
+  2026-10-25; a single-site test on BR1 can verify the fix. The full
+  cross-site evidence runs when BR2 is back.
+
+### 8.5 Images must be rebuilt
+
+The images of run 32 (core) and run 35 (web, lnmp, lnpp, ntfy) carry
+keel 0.23.52 and keel-web 0.3.4 from `trixie-testing`. They are testing
+images. The stable build uses `KEEL_APT_TRACK=stable` and reads from
+`trixie` after the promotion. The §1.4 items 3, 4 and 5 still apply:
+the stable images are new bits and section 4 runs on those bits.
+
+### 8.6 Decision 0068
+
+Decision 0068, written on 2026-10-25, documents the application contract
+for replication: what an application manifest declares (`base`,
+`state.replicate`, `state.exclude`) and what the platform does with it
+(database replication, file flip, ownership, boot resume). It adds a
+default replicate path (`/var/www/keel-default`) to Keel Web. An
+application inherits that path and adds its own.
