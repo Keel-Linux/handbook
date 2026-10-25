@@ -316,3 +316,35 @@ The maintainer approved the plan with these answers.
 8. There are no reduced runs. All 5 images get the full matrix of section 4,
    with 2 LXC on BR1, 1 LXC on BR2 and netem. MariaDB and PostgreSQL get full
    runs too.
+
+## 7. Note of 2026-10-25: the trixie-testing freeze is broken
+
+After step 1 was done, publications to `trixie-testing` continued:
+
+| Package | Version in plan (§1.1) | Version in trixie-testing now |
+| --- | --- | --- |
+| keel | 0.23.49 | 0.23.55 |
+| keel-web | 0.3.3 | 0.3.4 |
+
+`bin/promote keel=0.23.49` exits 3 because keel is not at 0.23.49 in
+`trixie-testing`. Section 1.3 says that keel-web 0.3.4 must not be in
+`trixie-testing` before the stable build ends, because it depends on
+keel-overlay-syncthing and needs keel 0.23.52.
+
+The publications after step 1 are the fixes for keel#224, keel#225 and
+keel#228 (file replication, decision 0050). They are needed for the
+application images (WordPress, Odoo) but not for the 5 base images of
+this release.
+
+The `repo-db-before-promote.tgz` backup of step 1 does not cover these
+publications.
+
+**What the maintainer must decide:**
+
+- (a) Ship keel 0.23.55 instead of 0.23.49. The 46 arguments change, the
+  evidence gaps grow (0.23.50 to 0.23.55 have no MariaDB test), and a
+  new backup of the repo database is needed.
+- (b) Restore `trixie-testing` to the state of step 1 (the backup),
+  re-publish the 0.23.52-0.23.55 packages afterwards, and run the
+  plan as written. keel-web 0.3.4 must also be removed.
+- (c) A third option that the maintainer prefers.
