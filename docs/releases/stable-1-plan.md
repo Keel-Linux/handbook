@@ -450,3 +450,108 @@ for replication: what an application manifest declares (`base`,
 (database replication, file flip, ownership, boot resume). It adds a
 default replicate path (`/var/www/keel-default`) to Keel Web. An
 application inherits that path and adds its own.
+
+## 9. Progress log of 2026-10-26
+
+Steps 8 and 9 completed earlier on 2026-10-25. Steps 10 and 11
+completed on 2026-10-26.
+
+### 9.1 Steps 8-9 (2026-10-25)
+
+- Step 8: `verify-repo` confirmed 51 packages in `trixie` (49 promoted
+  plus keel-archive-keyring and keel-transition). apt install test in a
+  clean CT confirmed keel-core installed, keel-web 0.3.6 installable.
+- Step 9: `keel-stable freeze stable-1 --from 2026-10-08` created the
+  pool with 621 members, dropped 42 testing-only packages, verify 0 bad.
+
+### 9.2 keel 0.23.56 (step 10 prerequisite)
+
+Step 10 failed on 2026-10-25: `keel manifest validate lnmp` rejected
+the chain because keel-web 0.3.6 (decision 0068) declares
+`state.replicate` in `web.yaml`, and the validator (rule 19) refused an
+application section declared by a base layer that is not the top.
+
+Fix: keel 0.23.56 (PR keel#230, branch `fix/manifest-base-app-inherit`).
+The `_application()` function in `keel/manifest/resolve.py` now allows a
+single base layer to declare application sections inherited by the top.
+When more than one manifest declares them, only the topmost one is
+accepted. The fix passes 82/82 manifest tests and 1115/1116 full tests
+(one pre-existing flake, `os.memfd_create`).
+
+Built from commit `b8f3876` on the build host, published to
+`trixie-testing`, promoted to `trixie`, archive updated. The pool
+`stable-1` was updated manually: the `.deb` was copied into the pool
+tree, the `files` list was appended, and the index was regenerated
+(`pool_write_index`). `keel-stable check` exit 0.
+
+### 9.3 Step 10: keel-release (2026-10-26)
+
+The archive was republished (`keel-publish-mirror --archive-only` from
+the workstation) so that `keel-project-packages` finds keel 0.23.56 in
+`archive.keellinux.org trixie`. The build host cannot SSH to the public
+VM; the tunnels run from the workstation.
+
+A `README.rst` was created in `/turnkey/fab-keel/products/ntfy` so that
+`bt-aplinfo` has a description source. The old fab tree did not have a
+`ntfy` product directory.
+
+`keel-release --no-wait --date 2026-10-26` exit 0. Five images staged:
+
+| Image | Size |
+| --- | --- |
+| `debian-13-keel-core_19.0-11_amd64.tar.zst` | 192 MB |
+| `debian-13-keel-web_19.0-10_amd64.tar.zst` | 224 MB |
+| `debian-13-keel-lnmp_19.0-5_amd64.tar.zst` | 252 MB |
+| `debian-13-keel-lnpp_19.0-6_amd64.tar.zst` | 280 MB |
+| `debian-13-keel-ntfy_19.0-3_amd64.tar.zst` | 230 MB |
+
+All carry keel 0.23.56 and keel-web 0.3.6. Signed artifacts:
+`MANIFEST.asc`, five `.sha512.asc`, `aplinfo.dat.asc`. The MANIFEST
+lists revision 1 and drops `keel-postgresql` and `keel-redis` from the
+Proxmox index.
+
+Changelog version warnings are expected: the changelogs say the old
+numbers (core 19.0-10, web 19.0-6, lnmp 19.0-4, lnpp 19.0-5) and the
+templates use the new numbers chosen by the maintainer (§6 answer 3).
+
+### 9.4 Step 11: stable packages check (2026-10-26)
+
+`keel-stable check` with the five `.packages` files: exit 0, no
+difference. `trixie-testing` is `Enabled: no` in every image.
+
+### 9.5 Step 12: release test matrix (2026-10-26)
+
+Evidence file: `evidence/2026-10-26-stable-1-step12.md`. Seven CTs on
+BR1 and BR2 (9231-9238). All C1-C4 checks pass. Upgrade test U from
+Core 19.0-9 (keel 0.20.0) to 0.23.56 requires `dist-upgrade`, passes.
+
+### 9.6 Step 13: channel pointer (2026-10-26)
+
+`keel-channel set stable 2026-10-26 1` with a 7-day expiry
+(2026-11-02). The staging role signed the pointer.
+
+### 9.7 Step 14: publish to mirror (2026-10-26)
+
+`keel-publish-mirror 2026-10-26` exit 0 after two one-time fixes on the
+public host: (1) the staging keyring was not on the mirror, copied from
+`/srv/keel-apt/keys/keel-staging-keyring.asc`; (2) `gpgv` was not
+installed. All blobs, images, layers, APT tree, Proxmox index and the
+channel pointer published. `verify-repo` exit 0 on trixie,
+trixie-testing and trixie-security.
+
+### 9.8 Step 15: public verification (2026-10-26)
+
+All 5 image URLs reachable (HTTP 200). `verify-repo` exit 0. Channel
+pointer resolves. Proxmox index has the 5 images and no longer lists
+keel-postgresql or keel-redis.
+
+### 9.9 Step 16: Forgejo tags and releases (2026-10-26)
+
+Tags created on `git.pop.coop/Keel-Linux/`: keel-core 19.0-11,
+keel-lnmp 19.0-5, keel-lnpp 19.0-6, keel-ntfy 19.0-3, keel-web 19.0-10.
+Each tag points to the merge commit that built the image. Releases are
+not pre-releases.
+
+### 9.10 Step 17: evidence and timer (2026-10-26)
+
+Evidence committed. The timer is restarted below.
