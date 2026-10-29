@@ -98,4 +98,4 @@ the two open items below.
 Open architecture items of the same session, not yet decided: the
 successor to HubDNS for nodes behind NAT whose IPv6 prefix changes (likely
 a PowerDNS overlay fed from etcd), and Elasticsearch or OpenSearch.
-| [0071](0071-boot-defaults.md) | Boot defaults: no GRUB wait, an lz4 initrd, no binfmt and parallel host keys: `GRUB_TIMEOUT=0`; `COMPRESS=lz4`; `systemd-binfmt` and its automount masked in Core; `keel-host-keys` runs its independent generators in parallel; no `MODULES=dep` and no `mitigations=off` | decided 2026-10-28 |
+| [0071](0071-boot-defaults.md) | Boot defaults: a hidden GRUB menu with a 1 s wait, an lz4 initrd, no binfmt and parallel host keys: `GRUB_TIMEOUT_STYLE=hidden` and `GRUB_TIMEOUT=1`; `COMPRESS=lz4`; `systemd-binfmt` and its automount masked in Core; `keel-host-keys` runs its independent generators in parallel; no `MODULES=dep` and no `mitigations=off` | decided 2026-10-28 |

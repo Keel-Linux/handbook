@@ -1,4 +1,4 @@
-# 0071: Boot defaults: no GRUB wait, lz4 initrd
+# 0071: Boot defaults: a hidden GRUB menu, lz4 initrd
 
 Date: 2026-10-27
 Status: **decided by the maintainer, 2026-10-28**. Evidence:
@@ -6,9 +6,10 @@ common/evidence/2026-10-27-boot-defaults.md.
 
 ## What was decided
 
-- `common/conf/keel-boot/grub-timeout` sets `GRUB_TIMEOUT=0`. The menu
-  is a recovery tool; hold Shift to see it. The three seconds are paid
-  on every boot for a choice nobody makes.
+- `common/conf/keel-boot/grub-timeout` sets `GRUB_TIMEOUT_STYLE=hidden`
+  and `GRUB_TIMEOUT=1`. The menu is hidden, not removed. On the Proxmox
+  noVNC console, a serial console or EFI, a held Shift at power on is not
+  reliable; Esc opens the menu, and the cost is one second.
 - `common/conf/keel-boot/initramfs-compress` sets `COMPRESS=lz4` and
   rebuilds the initrd. lz4 decompresses several times faster than zstd;
   the initrd is a little larger, which the boot pays back.
@@ -30,10 +31,13 @@ common/evidence/2026-10-27-boot-defaults.md.
 
 The Core image's boot has a three second GRUB wait and a zstd initrd
 (`MODULES=most`). Both are Debian defaults, neither is a Keel choice.
+A hidden menu with a one second wait keeps recovery reachable where a
+held Shift does not work.
 
 ## Consequences
 
-- The installed image boots without a visible menu; recovery needs Shift.
+- The installed image boots without a visible menu; press Esc for
+  recovery. The hidden menu costs one second.
 - The initrd is larger and decompresses faster. `MODULES=most` stays, so
   the image still boots hardware the build host did not have.
 - The binfmt mask is an image policy: a later qemu-user or wine
@@ -55,7 +59,8 @@ The Core image's boot has a three second GRUB wait and a zstd initrd
   Core with the Webmin/Python trims is **4.488 s** (2.095 + 2.393 s):
   keel-host-keys 935 ms, networking 783 ms, dev-vda 477 ms, postfix
   365 ms, turnkey-init-fence 226 ms; 0 failed. The parallel host keys are
-  a distinct win over the apt build's 1.327 s.
+  a distinct win over the apt build's 1.327 s. These figures use
+  `GRUB_TIMEOUT=0`; the hidden menu adds one second.
 
 ## What this amends
 
