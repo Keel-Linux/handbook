@@ -98,3 +98,4 @@ the two open items below.
 Open architecture items of the same session, not yet decided: the
 successor to HubDNS for nodes behind NAT whose IPv6 prefix changes (likely
 a PowerDNS overlay fed from etcd), and Elasticsearch or OpenSearch.
+| [0070](0070-cli-lazy-imports.md) | The keel CLI builds its parser without loading the library: handlers are dotted names resolved after `parse_args`, the parser's constants live in `keel/constants.py`, and `commands`/`vipcli` import their heavy modules on use; package `__init__` files stay eager because a lazy name cannot also be a submodule (`assemble`, `load`, `validate`, `plan`) | decided 2026-10-28 |
