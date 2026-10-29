@@ -42,7 +42,7 @@ held Shift does not work.
   the image still boots hardware the build host did not have.
 - The binfmt mask is an image policy: a later qemu-user or wine
   installation must unmask the two units.
-- `plans-boot.bats` (7 tests), `keel-core/tests/image-conf.bats` (13)
+- `plans-boot.bats` (9 tests), `keel-core/tests/image-conf.bats` (14)
   and `inithooks/tests/test-host-keys.bats` (22) pass. The Core boot
   measured 5.336 s with `keel-host-keys` 1.152 s, networking 898 ms,
   systemd-binfmt 828 ms and postfix 405 ms. After the binfmt mask a boot
