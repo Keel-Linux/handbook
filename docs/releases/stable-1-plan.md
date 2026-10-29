@@ -561,3 +561,29 @@ not pre-releases.
 ### 9.10 Step 17: evidence and timer (2026-10-26)
 
 Evidence committed. The timer is restarted below.
+
+## 10. After stable 1
+
+### 10.1 keel 0.23.61 in the pool `stable-1` (2026-10-29)
+
+keel 0.23.61 has the fix for keel#233: a paired database server binds
+its own overlay address also when the spec declares `listen` without
+it (keel#234). The pool `stable-1` had keel 0.23.56, which does not
+have the fix. The pool was updated the same way as in 9.2: the line of
+keel 0.23.56 in `dists/stable-1/files` was replaced by the line of
+keel 0.23.61 (sha256 `4aa318ba…`, the same file as in `trixie` on the
+public archive), and the index was written again (`pool_write_index
+stable-1`). `keel-pool verify stable-1`: 621 members, 0 bad. The old
+list and Release are kept beside them as `*.before-keel-0.23.61`. The
+dependencies of keel did not change.
+
+The core layer of stable 1 is not built again and keeps keel 0.23.56.
+A layer built on it from this pool upgrades keel to 0.23.61.
+
+### 10.2 postgresql and redis layers, with no index (2026-10-29)
+
+The layers postgresql 19.0-7 and redis 19.0-10 were built on the core of
+stable 1 and published with `keel-release --no-index` and
+`keel-publish-mirror --no-channels` (decision 0072). The Proxmox index
+and the stable pointer did not change. Evidence:
+`evidence/2026-10-29-db-layers-no-index.md`.
