@@ -245,6 +245,12 @@ them as `index_dropped`, and a `--resume` or `--sign-only` of that date
 must give the same ones or it is refused. To change the drops, stage
 another date.
 
+To put a layer on the mirror without a change to the index (decision
+0072), stage it with `keel-release --no-index` and publish it with
+`keel-publish-mirror --no-channels`. The release has no `pve/`, and its
+`MANIFEST` says `index none`. Record the sha256 of the index before and
+after the publication; the two values must be the same.
+
 Check from a workstation, over IPv6:
 
     curl -6 -s https://releases.keellinux.org/pve/aplinfo.dat | grep '^Package: '
