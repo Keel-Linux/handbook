@@ -1,7 +1,8 @@
 # 0071: Boot defaults: a hidden GRUB menu, lz4 initrd
 
 Date: 2026-10-27
-Status: **decided by the maintainer, 2026-10-28**. Evidence:
+Status: **decided by the maintainer, 2026-10-28; confirmed by the
+maintainer in chat, 2026-10-30**. Evidence:
 common/evidence/2026-10-27-boot-defaults.md.
 
 ## What was decided
@@ -13,10 +14,20 @@ common/evidence/2026-10-27-boot-defaults.md.
 - `common/conf/keel-boot/initramfs-compress` sets `COMPRESS=lz4` and
   rebuilds the initrd. lz4 decompresses several times faster than zstd;
   the initrd is a little larger, which the boot pays back.
-- `keel-core/conf.d/main` masks `systemd-binfmt.service` and
-  `proc-sys-fs-binfmt_misc.automount`: the appliance uses no binfmt
-  handler, and the service cost 828 ms in the boot's critical chain.
-  An appliance that later installs qemu-user or wine can unmask them.
+- `keel-core/conf.d/main` masks eight units, each as a symlink to
+  `/dev/null` in `/etc/systemd/system`:
+  - `systemd-binfmt.service` and `proc-sys-fs-binfmt_misc.automount`:
+    the appliance uses no binfmt handler, and the service cost 828 ms
+    in the boot's critical chain.
+  - `dev-hugepages.mount`, `dev-mqueue.mount`, `sys-kernel-debug.mount`
+    and `sys-kernel-tracing.mount`: the Core appliance uses no
+    hugepages, POSIX mqueue, debugfs or tracefs. The four mounts cost
+    113, 112, 94 and 96 ms.
+  - `run-lock.mount` and `tmp.mount`: `/run/lock` stays a directory on
+    the `/run` tmpfs, and `/tmp` is a directory on the root file system,
+    not a tmpfs.
+
+  An appliance that needs one of these units can unmask it.
 - `inithooks/bin/keel-host-keys` runs the three SSH host keys, the TLS
   pair and the snakeoil pair in parallel. They write different files;
   the service was 1066 ms with virtio-rng, against 1327 ms for the apt
@@ -40,8 +51,14 @@ held Shift does not work.
   recovery. The hidden menu costs one second.
 - The initrd is larger and decompresses faster. `MODULES=most` stays, so
   the image still boots hardware the build host did not have.
-- The binfmt mask is an image policy: a later qemu-user or wine
-  installation must unmask the two units.
+- The masks are an image policy: a later qemu-user or wine installation
+  must unmask the two binfmt units. An appliance that needs hugepages,
+  POSIX mqueue, debugfs or tracefs must unmask its mount.
+- `/tmp` is on the root file system, not in memory. Its files survive a
+  reboot until `systemd-tmpfiles` removes them by age, and they use disk
+  space, not RAM.
+- keel-core#37 masked these units before this note was merged. This note
+  records that change.
 - `plans-boot.bats` (9 tests), `keel-core/tests/image-conf.bats` (14)
   and `inithooks/tests/test-host-keys.bats` (22) pass. The Core boot
   measured 5.336 s with `keel-host-keys` 1.152 s, networking 898 ms,

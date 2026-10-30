@@ -1,7 +1,8 @@
 # 0069: Images precompile Python bytecode, with timestamp invalidation
 
 Date: 2026-10-21
-Status: **decided by the maintainer, 2026-10-21**: every appliance image
+Status: **decided by the maintainer, 2026-10-21; confirmed by the
+maintainer in chat, 2026-10-30**: every appliance image
 ships Python bytecode, compiled at build time. It reverses the image
 build's py3clean policy and costs about 18 MiB unpacked. Evidence:
 common/evidence/2026-10-21-bytecode-precompile.md.

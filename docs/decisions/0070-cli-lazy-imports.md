@@ -1,7 +1,8 @@
 # 0070: The keel CLI builds its parser without loading the library
 
 Date: 2026-10-27
-Status: **decided by the maintainer, 2026-10-28**. Evidence:
+Status: **decided by the maintainer, 2026-10-28; confirmed by the
+maintainer in chat, 2026-10-30**. Evidence:
 keel/evidence/2026-10-27-cli-lazy-imports.md.
 
 ## Measured
