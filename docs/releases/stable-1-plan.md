@@ -607,3 +607,23 @@ show the freeze at 2026-10-26 03:49 UTC, not 2026-10-25 as 9.1 says.
 and exits 5 when they are not the same. A later change to the pool goes
 through a pull request on the apt repository (`docs/releases-host.md`,
 "The frozen pool of a stable release is in git").
+
+### 10.4 The mariadb layer, and keel-mariadb withdrawn from trixie (2026-10-30)
+
+keel 0.23.62 and keel-mariadb 0.1.1 went into the pool `stable-1`
+(apt#76), and the mariadb layer 19.0-10 was built on the core of stable 1
+and published with `--no-index` and `--no-channels`. Evidence:
+`evidence/2026-10-30-mariadb-layer.md`.
+
+The CI test `tests / mariadb` then found keel#242: a crashed primary can
+acknowledge a write that the replica never gets. keel-mariadb 0.1.1 was
+withdrawn from `trixie` with `bin/withdraw` (tool in apt#77, withdrawal
+in apt#78). The advisory is
+`docs/advisories/2026-10-30-keel-mariadb-acked-write.md`.
+
+The pool `stable-1` keeps keel-mariadb 0.1.1. The pool is the record of
+what the published layers were built from, and the mariadb layer 19.0-10
+stays on the mirror for the appliance test. A record without the package
+would not tell what that layer holds. No layer is built from the pool
+before the fix, and the fixed version replaces the line in a pull request
+on the apt repository, as in 10.1.
