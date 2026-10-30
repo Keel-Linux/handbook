@@ -255,6 +255,21 @@ Check from a workstation, over IPv6:
 
     curl -6 -s https://releases.keellinux.org/pve/aplinfo.dat | grep '^Package: '
 
+### The frozen pool of a stable release is in git
+
+A stable layer builds from a frozen pool on the build host
+(`/srv/keel-pool/dists/stable-1`). Its member list and its gaps are also
+in the apt repository, under `conf/pools/stable-1/`. Each line names a
+`.deb` by its sha256, and the `.deb` files stay on the build host.
+`keel-pool verify stable-1` compares the pool with that record, and exits
+5 when they are not the same.
+
+To change a frozen pool, change `dists/<id>/files`, run
+`keel-pool index <id>`, and copy `files` and `gaps` to
+`conf/pools/<id>/` in a branch of the apt repository. Then run
+`keel-pool verify <id>` and merge the branch through a pull request. Do
+not build a stable layer from a frozen pool that does not verify.
+
 ### Publishing a layer
 
 The appliance gate reads `/srv/mirror/layers/` and nothing else, so a layer

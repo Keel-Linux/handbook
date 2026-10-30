@@ -587,3 +587,23 @@ stable 1 and published with `keel-release --no-index` and
 `keel-publish-mirror --no-channels` (decision 0072). The Proxmox index
 and the stable pointer did not change. Evidence:
 `evidence/2026-10-29-db-layers-no-index.md`.
+
+### 10.3 The pool `stable-1` in git (2026-10-30)
+
+The member list and the gaps of the pool `stable-1` are now in the apt
+repository, under `conf/pools/stable-1/` (apt#75). The history has two
+commits, and each one is an exact copy of a state on the build host:
+
+| State | Source on the build host | sha256 of `files` |
+| --- | --- | --- |
+| keel 0.23.56 (9.2), 2026-10-26 04:28 | `files.before-keel-0.23.61` | `a873c4be…` |
+| keel 0.23.61 (10.1), 2026-10-29 | `files` | `7884de53…` |
+
+The list that `keel-stable freeze` wrote before the change in 9.2 was
+not kept, so git does not have it. The directory times on the build host
+show the freeze at 2026-10-26 03:49 UTC, not 2026-10-25 as 9.1 says.
+
+`keel-pool verify stable-1` now also compares the pool with this record
+and exits 5 when they are not the same. A later change to the pool goes
+through a pull request on the apt repository (`docs/releases-host.md`,
+"The frozen pool of a stable release is in git").
