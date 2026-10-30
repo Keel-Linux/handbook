@@ -20,7 +20,7 @@ Trees on the host:
 | `/turnkey/fab-keel` | project tree, cloned by the organization's tkldev-setup from `https://github.com/keel-linux` | the tree every project build uses; `products/core` is the checkout of `keel-core` (the directory name must stay `core`, see m0-gate.md) |
 | `/turnkey/buildtasks-keel`, `/turnkey/tklbam-profiles-keel` | project forks of buildtasks and tklbam-profiles | `BT_PATH` and `TKLBAM_PATH` for the project tree |
 | `/root/keel-tkldev-setup` | the organization's tkldev-setup script (keel-linux/tkldev master) | the system copy in `/usr/bin` is upstream's and stays untouched |
-| `/root/src/fab` | clone of `https://github.com/keel-linux/fab.git`, branch `pkg/keel1` | source of the installed fab package, section 2 |
+| `/root/src/fab` | clone of `https://github.com/keel-linux/fab.git` (the mirror of Keel-Linux/fab), branch `master`, kept by `bin/build-package` | source of the fab package, section 4 |
 | `/root/gate2.sh` | one packing run of gate 2 | section 4 |
 
 Environment for a project build:
@@ -41,7 +41,7 @@ that the ISO half of the packing gate depends on).
 
 | Package | Version on the host | Origin |
 | --- | --- | --- |
-| fab | 1.1.1+keel1 | project, built from keel-linux/fab branch `pkg/keel1`, installed from the local .deb and pinned (section 3) |
+| fab | 1.1.1+keel2 | project, built from Keel-Linux/fab `master` by `bin/build-package`, published to trixie-testing, installed from the pool file and pinned (sections 3 and 4) |
 | deck | 2.1.1 | archive.turnkeylinux.org, trixie/main |
 | pool | 1.2.1 | archive.turnkeylinux.org, trixie/main |
 | turnkey-chroot | 1.1.2 | archive.turnkeylinux.org, trixie/main |
@@ -75,9 +75,13 @@ content differs only in `/usr/share/fab/product.mk` (and the version). The
 
 ```
 Package: fab
-Pin: version 1.1.1+keel1*
+Pin: version 1.1.1+keel*
 Pin-Priority: 1001
 ```
+
+The pattern is `1.1.1+keel*`, not one keelN. Until 2026-10-30 it was
+`1.1.1+keel1*` while keel2 was installed, so it matched nothing, and an
+upstream 1.1.2 at 999 would have replaced the fork at the next upgrade.
 
 Priority 1001 wins over the archive's 999 even when the archive publishes a
 higher version, so an upstream 1.1.2 will not be installed by accident; it
@@ -85,36 +89,60 @@ shows up in `apt-cache policy fab` and is picked up by rebuilding
 (section 4) on a rebased branch. Checks:
 
 ```
-dpkg -l fab                       # ii  fab  1.1.1+keel1  all
-apt-cache policy fab              # Installed and Candidate 1.1.1+keel1, pin 1001
+dpkg -l fab                       # ii  fab  1.1.1+keelN  all
+apt-cache policy fab              # Installed and Candidate 1.1.1+keelN, pin 1001
 apt-get -s upgrade | grep fab     # nothing
 grep -n ISOHYBRID_OPTS /usr/share/fab/product.mk
 ```
 
 ## 4. Rebuilding and reinstalling fab when the fork changes
 
-Build dependencies (installed once, `apt-get build-dep -y ./` reads them from
-`debian/control`): debhelper, dh-python, pybuild-plugin-pyproject,
-python3-all, python3-setuptools, python3-debian.
+A change to fab goes through a pull request on Keel-Linux/fab `master` with a
+new `+keelN` entry in `debian/changelog`. Then, on the build host:
 
 ```
-cd /root/src/fab
-git fetch origin
-git checkout pkg/keel1
-git rebase origin/master            # or merge; the branch only carries debian/
-# bump debian/changelog: 1.1.1+keel2, distribution trixie, one line per change,
-# maintainer "Keel Linux maintainers <admin@keellinux.org>"
-apt-get build-dep -y ./
-dpkg-buildpackage -us -uc -b
-apt-get install -y ../fab_1.1.1+keel2_all.deb
-sed -i 's/^Pin: version .*/Pin: version 1.1.1+keel2*/' /etc/apt/preferences.d/keel-fab
+cd /srv/keel-apt/apt && git pull --ff-only
+TERM=dumb bin/build-package fab          # .deb into /srv/keel-apt/incoming
+TERM=dumb bin/publish                    # trixie-testing, commit in this checkout
+# push the commit to a publish/fab-<version> branch, merge its pull request,
+# then bin/keel-publish-mirror --archive-only (apt README, step 3)
+```
+
+Before you install a new fab, read its changelog entry for preconditions,
+and check them on every tree that builds: `/srv/keel-stable1/fab` and
+`/turnkey/fab-keel`. Then:
+
+```
+apt-get install -y /srv/keel-apt/repo/pool/main/f/fab/fab_1.1.1+keelN_all.deb
 dpkg -l fab && apt-cache policy fab | head -4
+TERM=dumb fab chroot / false; echo $?    # 1 from keel4 on; 0 before
 ```
 
-When upstream releases a new fab, rebase onto the tag, set the version to
-`<upstream>+keel1` and update the pin the same way. Once the project APT
-repository exists the pin becomes an origin pin and the local install step
-goes away; the build steps stay.
+### 1.1.1+keel4: fab chroot exits with the status of the command
+
+From keel4, `fab chroot ROOT "command"` exits with the status of the command
+(fab#15). Before, it exited 0, so a failed `fab-chroot` line in a recipe did
+not stop the build. keel4 also makes the initramfs step of `product.mk` run
+only when a tool is installed, because an LXC layer has none.
+
+Precondition: the `common` of each tree that builds must have common#75
+(`mk/turnkey/install-debs`, merge `d9d413d`). Without it, the old step
+`fab-chroot ROOT "dpkg -i *.deb && rm *.deb"` exits 2 when the product has no
+.deb, and every layer build stops. Check:
+
+```
+for t in /srv/keel-stable1/fab /turnkey/fab-keel; do
+    git -C $t/common merge-base --is-ancestor d9d413d HEAD && echo "$t ok" || echo "$t lacks common#75"
+done
+```
+
+On 2026-10-30 both trees lacked it (`84ff6a2` and `35648b5`), so keel4 is in
+trixie-testing and not installed. Install it when the stable-1 tree gets its
+next common (the pool refresh), and move `/turnkey/fab-keel` at the same
+time. A replay of every command-string `fab-chroot` call in the nine
+stable-1 layers with keel4 found no other failing step:
+`which insserv && insserv` fails with no insserv, but only
+`mk/turnkey-desktop.mk` has it, and common#78 fixes it.
 
 ## 5. Packing gate with the project's fab
 
