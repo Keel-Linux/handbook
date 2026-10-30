@@ -99,3 +99,4 @@ the two open items below.
 Open architecture items of the same session, not yet decided: the
 successor to HubDNS for nodes behind NAT whose IPv6 prefix changes (likely
 a PowerDNS overlay fed from etcd), and Elasticsearch or OpenSearch.
+| [0069](0069-images-precompile-python-bytecode.md) | Images precompile Python bytecode with timestamp invalidation: `common/mk/turnkey.mk` compiles after the product deb and before seal-root, source and `.pyc` mtimes clamped to `SOURCE_DATE_EPOCH` so the header matches the layer tar and builds stay byte-identical; default optimization only (nothing runs `python -O`); only when `SOURCE_DATE_EPOCH` is set; about 18 MiB and 1.2 s of build time; amends the image build's py3clean policy | decided 2026-10-21 |
