@@ -76,8 +76,9 @@ Primary, Replica or Witness (the Witness is offered on Core only).
 |---|---|
 | Mode: Cloud simple | Mode: Cloud simple |
 | Role: Primary | Role: Replica (the local database is replaced, it says so) |
-| `keel mesh create`, then `keel mesh invite`: shows one `keel1:` line, which carries the VIP | Join a mesh: paste the line (`keel mesh join -`) |
+| `keel mesh create`, then `keel mesh invite`: shows one `keel2:` line, which carries the VIP | Join a mesh: paste the line (`keel mesh join -`) |
 | Waits for the member (`keel mesh status`) | `keel vip pair` with node 1, then apply |
+| `keel vip promote`: the first claim of the VIP | — |
 | Status: VIP holder, database primary | Status: replica, files follow |
 
 ### Cloud advanced: two data nodes and a witness
@@ -88,8 +89,9 @@ Primary, Replica or Witness (the Witness is offered on Core only).
 | Role: Primary | Role: Replica | Role: Witness |
 | `keel mesh create`, two invites | Join with invite 1 | Join with invite 2: etcd forms with three voters |
 | Waits for `etcd: 3 voter(s)`, then the VIP and the pair | `keel vip pair` with node 1, after etcd has formed, then apply | Status: no data, a vote only |
+| `keel vip promote`, only once etcd has three healthy voters, so the claim has a lease (keel#161) | — | — |
 
-No password is copied between nodes: only the invite lines. The replication
+No password is copied between nodes: only the invite lines. An invite that carries the VIP is a `keel2:` line (keel 0.23.83); the joining node keeps the VIP and `keel mesh status --json` gives it to its screens. Nothing claims the VIP by itself: the primary's screen runs `keel vip promote` once the pair is made. The replication
 credential comes over the members' channel from the pair record.
 
 ## The guide
