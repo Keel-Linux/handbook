@@ -293,3 +293,63 @@ The rule:
   the copy (Keel-Linux/keel#214).
 
 The cost, accepted: a kept copy uses disk space until it is pruned.
+
+## Amendment 2026-11-06: the primary falls back to asynchronous commits after 30 s
+
+Decided by the maintainer, 2026-11-06 (answer "b").
+
+**What 0054 said before.** "Synchronous commit follows 0031, with no
+timeout." While the standby was away, the primary stopped committing.
+There was no fallback to asynchronous commits, and the watch sent an
+alert. The amendments of 2026-10-14 and 2026-10-15 made one exception:
+the new primary commits alone after `--old-primary-gone`, or after the
+lease of the old primary expired.
+
+**What was found.** On an Odoo pair in cloud simple mode (BR1 9360, BR2
+9361, keel 0.23.84), the standby was never seeded. The primary kept
+`synchronous_standby_names = 'FIRST 1 (keel)'`, and no standby streamed
+from it. Every write waited without end. The HTTP workers of Odoo timed
+out after 720 s, and a login waited for more than 30 minutes. The watch
+ran every 30 s and changed nothing. keel 0.23.86 seeds such a standby,
+but any absent standby still stopped every write.
+
+**What changes.** A PostgreSQL primary whose synchronous standby is
+absent falls back to asynchronous commits after a timeout, with an
+alert, the same as a MariaDB primary (0031, and the decision of
+2026-11-01 "fallback with alert"):
+
+- **The timeout is 30 s.** This is the semi-synchronous timeout of the
+  MariaDB pair (`rpl_semi_sync_master_timeout = 30000`). `keel database
+  watch` starts to count when it sees that no standby streams from the
+  primary, or that a commit waited more than 10 s for the standby. The
+  watch runs every 30 s, so the fallback comes between 30 s and 60 s
+  after the first sign. When the standby is cut off but not stopped,
+  add the 10 s of the sign.
+- **The fallback.** The watch empties `synchronous_standby_names` in the
+  pair drop-in and reloads the server. It does not restart the server.
+  The waiting commits finish, and the primary then commits without the
+  standby.
+- **The alert path.** The watch sends the alerts through keel's alerts
+  (0040), the monitor's channels, with the check
+  `database-sync-commit`. The watch sends one alert when the commits
+  begin to wait, one when the primary falls back, and one when the
+  standby acknowledges again. A fallback that lasts sends no more
+  alerts.
+- **The way back.** When a standby streams again, the watch (or
+  `keel database follow`) writes `FIRST 1 (keel)` back and reloads the
+  server, and each commit waits for the standby again.
+- **Not drift.** `keel spec apply` and `keel diff` take the drop-in of
+  the fallback as runtime state, the same as the drop-in of the primary
+  that commits alone. They do not write the line back.
+- **The exception stays.** After `--old-primary-gone`, or after the
+  lease of the old primary expired, the new primary commits alone at
+  once, without the 30 s wait. The watch sends that alert at each run,
+  as before.
+
+The cost, accepted: during a fallback, a commit is on the primary only.
+If the primary is lost before the standby streams again, a failover
+loses the commits that the standby did not receive. MariaDB has the same
+cost (0031). The planned promote is not changed: it drains the standby
+first.
+
+This is implemented in keel 0.23.88 (Keel-Linux/keel#290).
