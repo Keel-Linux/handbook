@@ -18,9 +18,16 @@ A third test by hand ran on the same day, on a second container on BR1
 upgraded a 3.3.0-24 dataset to 3.5.0-6, it stopped the upgrade at three
 points, and it compared two restore methods. It changed the restore,
 the failed mark, the `app_key` steps and the plugin check. Each such
-place has the mark "(third test)". The second test (a new install,
-the plugins, the maintenance mark) was not complete when this text was
-written.
+place has the mark "(third test)".
+
+A second test by hand ran on the same day, on a third container on BR1
+(`evidence/2026-11-10-ojs-3.5.0-6-new-install-plugins-maintenance.md`).
+It made a new install of 3.5.0-6 and ran the PKP checklist in a
+browser. It tested the gallery setting, a plugin as files, a local
+plugin directory, the maintenance mark, the worker and the scheduler,
+and the site with no network. It was complete after the third test. It
+corrected the first-boot facts and it added conditions for nginx, the
+plugins and the worker. Each such place has the mark "(second test)".
 
 ## What was asked
 
@@ -56,16 +63,18 @@ source repository, `pkp/pkp-docs` (marked "docs repo" below).
 | Refused jumps | `upgrade.xml` runs `abort` for a database from `2.0.0.0` to `3.2.9.9`. So 3.5 accepts only 3.3 and 3.4. The guide says "3.2.1-x can be upgraded to any version 3.3 or later". The code refuses 3.2 to 3.5. (third test) The 3.3 path has a pre-flight check. When it refuses, the schema is not changed, but `versions` gets a row `3.3.9.9` with `current = 1`. One such check: `base_url` must agree with the URLs in the usage statistics log | `upgrade.xml`; upgrade guide; third test |
 | Failure | If a migration fails, the installer calls `down()` on the migrations that it ran, in reverse order. It stops at the first `DowngradeNotSupportedException`. No transaction holds the full upgrade. MariaDB commits each DDL statement. (third test) After a `kill -9` or a memory failure, the schema is half-migrated and `versions` shows the old version as current. A second upgrade run on the 3.3 half state failed in 3 of 3 cases | pkp-lib `classes/install/Installer.php` (`executeAction`); third test |
 | `upgrade.php check` | It gets the latest version from pkp.sfu.ca. (first test) With no network it stops with an exception that it does not catch (`ConnectException`, "Could not resolve host"), and the exit code is 255 | pkp-lib `classes/cliTool/UpgradeTool.php`; first test |
-| Maintenance | `isUnderMaintenance()` is true only when `installed` is Off or an upgrade runs in that process. No web code compares the code version with the database version (a search of pkp-lib found none). (third test) 3.5.0-6 code on a 3.3 database gives HTTP 500 on each page. A half-migrated database can give HTTP 200 on the public pages and the login | `PKPApplication.php`, `PKPPageRouter.php`; third test |
+| Maintenance | `isUnderMaintenance()` is true only when `installed` is Off or an upgrade runs in that process. No web code compares the code version with the database version (a search of pkp-lib found none). (third test) 3.5.0-6 code on a 3.3 database gives HTTP 500 on each page. A half-migrated database can give HTTP 200 on the public pages and the login. (second test) An nginx rule that looks for one file gives 503 on each OJS path with no reload | `PKPApplication.php`, `PKPPageRouter.php`; third test; second test |
 | Fixed paths | The base directory is the directory of `index.php`. `config.inc.php`, `cache/` and the default `public/` are under it. Pages load JavaScript from `<base>/lib/pkp/lib/vendor/` | pkp-lib `classes/core/Core.php`, `classes/config/Config.php`, `PKPTemplateManager.php` |
 | `app_key` | The 3.5 migration writes `app_key` into `config.inc.php`. If a key exists, it does nothing. 3.5.0-6 encrypts stored credentials with it (#12074). (third test) When the migration cannot write the file and no key exists, the upgrade continues and ends with code 0. It writes one line to the PHP log. Then each request gives HTTP 500 (`MissingAppKeyException`) | pkp-lib `I9895_AddAppKeyToConfigFile.php`; README-3.5.0; third test |
-| Plugins | The gallery reads `plugins.xml` from pkp.sfu.ca (`plugin_gallery_urls`). It downloads the package, checks its MD5, copies it to `<base>/plugins/<category>/<name>`, and writes its schema and its `versions` row. `lib/pkp/tools/installPluginVersion.php` does the database step from the command line. The guide says: after an upgrade, "Use the Plugin Gallery to restore any custom plugins" | pkp-lib `PluginGalleryGridHandler.php`, `PluginHelper.php`, `PluginGalleryDAO.php`; upgrade guide |
+| Plugins | The gallery reads `plugins.xml` from pkp.sfu.ca (`plugin_gallery_urls`). It downloads the package, checks its MD5, copies it to `<base>/plugins/<category>/<name>`, and writes its schema and its `versions` row. `lib/pkp/tools/installPluginVersion.php` does the database step from the command line. The guide says: after an upgrade, "Use the Plugin Gallery to restore any custom plugins". (second test) For the PLN plugin, the tool gave the same `versions` row and the same tables as the gallery. The tool writes the `versions` row before the plugin migration, catches a failure of that migration, and does not give its result as the exit code | pkp-lib `PluginGalleryGridHandler.php`, `PluginHelper.php`, `PluginGalleryDAO.php`, `tools/installPluginVersion.php`, `classes/plugins/Plugin.php`; upgrade guide; second test |
 | Plugin breaks | 3.5 does not load plugins with `.inc.php` files or with no namespace | 3.5 release notebook |
 | Plugins that 3.5 removed | (third test) 10 plugins that 3.3 bundles have no directory in 3.5.0-6 (`ldap`, `resolver`, `usageStats`, `orcidProfile`, `acron`, `crossref`, `datacite`, `doi`, `counterReport`, `views`). The upgrade passes with their rows. 5 of the rows stay with `current = 1` after it | third test |
 | Network during an upgrade | (third test) The 3.3 to 3.5 upgrade passes with no network (code 0, 12 seconds). With the network it took 52 to 128 seconds, because one migration downloads the ROR registry. Scheduled tasks get the ROR data and the IP database later | third test |
-| Collations | (third test) MariaDB 11.8 gives a table with `CHARSET=utf8mb3` and no collation `utf8mb3_uca1400_ai_ci`. The OJS connection default is `utf8_general_ci`. After the upgrade of the imported dataset, 105 tables have the first and 31 have the second. No error was seen | third test; pkp-lib `classes/core/PKPContainer.php` |
-| Scheduled tasks, 3.5 | `php lib/pkp/tools/scheduler.php run` from cron every minute, with `task_runner = Off`. The Acron plugin is removed | admin guide, deploy-scheduled-tasks (docs repo) |
-| Jobs, 3.4 and 3.5 | One method only: a worker (`php lib/pkp/tools/jobs.php work`), cron (`jobs.php run`) or the built-in runner. `jobs.php restart` stops the worker after the current job | admin guide, deploy-jobs |
+| Collations | (third test) MariaDB 11.8 gives a table with `CHARSET=utf8mb3` and no collation `utf8mb3_uca1400_ai_ci`. The OJS connection default is `utf8_general_ci`. After the upgrade of the imported dataset, 105 tables have the first and 31 have the second. No error was seen. (second test) A new install has no mix: the database default is `utf8mb4_unicode_ci`, and all 132 tables have `utf8mb3_general_ci` | third test; second test; pkp-lib `classes/core/PKPContainer.php` |
+| New install | (second test) `tools/install.php` passes on PHP 8.4.27 and MariaDB 11.8.6: code 0, 132 tables, 76 to 106 seconds with the network. About 45 of the 76 seconds are local work (the schema, and the import of the ROR data). With no network it passes in 12 seconds, and the ROR data and the IP database stay empty. Two monthly scheduled tasks get them | second test |
+| Network at run time | (second test) A running site makes one outgoing call: the version check to pkp.sfu.ca, on 3 administration pages. With no network, each page gives 200. With a DNS server that does not answer, PHP-FPM waits for a reverse DNS query, and some pages take 6 to 13 seconds. The cause in the OJS code was not found. pkp.sfu.ca and `download.db-ip.com` have no AAAA record | second test |
+| Scheduled tasks, 3.5 | `php lib/pkp/tools/scheduler.php run` from cron every minute, with `task_runner = Off`. The Acron plugin is removed. (second test) A systemd timer did this. The scheduler does not process the job queue when `process_jobs_at_task_scheduler` is `Off` | admin guide, deploy-scheduled-tasks (docs repo); second test |
+| Jobs, 3.4 and 3.5 | One method only: a worker (`php lib/pkp/tools/jobs.php work`), cron (`jobs.php run`) or the built-in runner. `jobs.php restart` stops the worker after the current job. (second test) Under systemd with `Restart=on-failure`, the worker completed its job, ended with code 0, and systemd did not start it again. `jobs.php restart` writes its signal as a file in the cache directory | admin guide, deploy-jobs; second test |
 | Signatures, Debian | The tarball has no published checksum and no signature (`.md5`, `.sha256`, `.asc`, `.sig` give 404). The tag `3_5_0-6` is a lightweight tag on an unsigned commit. Debian had `ojs` 2.2.4 (squeeze), removed from unstable in 2012 (bug 662828) | download URLs; GitHub API; tracker.debian.org/pkg/ojs |
 | Other packagings | YunoHost `ojs_ynh` 3.5.0-4 keeps `config.inc.php`, `public` and each plugin that is not on its core list, replaces the rest of the tree, then runs `upgrade.php upgrade` on php8.2. `pkp/docker-ojs` is archived. The `pkp-upgrade` script of `pkp/containers` sets `installed = Off`, runs `upgrade.php upgrade`, and sets `installed = On`. It takes no backup | `ojs_ynh` `scripts/upgrade`; `pkp/containers` `pkp-upgrade` |
 
@@ -83,6 +92,16 @@ it wrote no PHP error and no warning, and 59 deprecation messages.
 stops with the `TypeError` that 3.5.0-6 corrects. Thus the first Keel
 package is 3.5.0.6, and Keel packages no build before it. The PKP
 checklist was not run, and the commissioning is not done.
+
+(second test) A new install of 3.5.0-6 passed, and the PKP checklist
+passed in a browser: the reader pages, a registration, the roles, a
+submission with a PDF up to a published issue, and the unpublish. The
+flow wrote 1 PHP fatal error and 10 warnings. The fatal error is an
+OJS defect: with `require_validation = On` and a journal that has no
+support contact, a registration sends no message and the account stays
+disabled. The template default is `Off`, and Keel keeps it. The
+application page (0077) tells the operator to set the support contact
+before the validation is set to `On`. The commissioning is not done.
 
 (third test) 3.5.0-5 also cannot upgrade a 3.3 database on this PHP:
 the upgrade stops with the same `TypeError`.
@@ -162,6 +181,14 @@ JavaScript from `lib/pkp/lib/vendor/`. It runs no PHP file except
 `index.php`. It refuses `config.inc.php`, `cache/`, `dbscripts/` and
 `tools/`.
 
+(second test) nginx must send `.mjs` files as `text/javascript`. The
+`mime.types` of nginx 1.26 has no `mjs`, so the PDF viewer of OJS
+(`pdf.mjs`) stays empty. The OJS routes carry this rule:
+`location ~ \.mjs$ { types { text/javascript mjs; } }`. The test also
+refused, with 403, the directories `classes`, `registry`, `locale`,
+`jobs` and `docs`, the `.tpl`, `.po`, `.xml` and `.inc.php` files and
+the dot files, and the full flow passed with these rules.
+
 `/etc/ojs/config.inc.php` is not a conffile. A conffile prompt stops an
 unattended run, and OJS writes `app_key` into the file. The first boot
 writes the file from `config.TEMPLATE.inc.php` and the manifest values.
@@ -189,10 +216,28 @@ necessary, not only safe:
 - `base_url` must have a host name. With an IPv6 address in brackets,
   the session cookie gets a domain that curl refuses, and the login
   fails. The behaviour of a browser was not tested.
-- The install took 85 seconds. The test report says that most of this
-  time is the download of two data sets (ROR and the IP database of the
-  usage statistics), so the first boot needs the network. This was not
-  measured separately.
+- (second test) The first boot does not need the network. The first
+  test said that most of the install time is download, and that the
+  first boot needs the network. Both were wrong. With the network, the
+  install took 76 to 106 seconds: about 28 seconds for the download of
+  the ROR data, about 29 seconds for its import, and about 13 seconds
+  for the schema. With no network it took 12 seconds and ended with
+  code 0. Then the ROR data and the IP database of the usage
+  statistics are empty until the monthly tasks of the scheduler get
+  them. With a DNS server that does not answer, the install took 45
+  seconds.
+- (second test) The installer also does not write `allowed_hosts`,
+  `time_zone` and `enable_beacon` into a read-only file. The first
+  boot writes them: `allowed_hosts` with the host name of `base_url`,
+  `time_zone` from the node, and `enable_beacon = Off`. With an empty
+  host in `allowed_hosts`, each request gives HTTP 400. The template
+  has `repository_id = ojs.pkp.sfu.ca`, and the first boot writes the
+  host name there. The beacon is `Off` because it gives data of the
+  journal to PKP, and the operator did not choose that. The operator
+  can set it to `On`.
+- (second test) A new database gets all tables with
+  `utf8mb3_general_ci` (`connection_charset = utf8`), as upstream
+  does. Keel does not change this.
 
 ### 5. Plugins
 
@@ -204,8 +249,32 @@ version on both nodes, and a package upgrade never deletes it. The
 gallery also writes the plugin's schema and `versions` row. So the
 plugin package's `postinst` runs `installPluginVersion.php` on the
 writable node only, in the same way as the core migration. An operator
-who needs a plugin that is not packaged asks for a package. A local
-plugin directory is an open test (see below).
+who needs a plugin that is not packaged asks for a package.
+
+(second test) The results for this section:
+- `plugin_gallery_urls = '[]'` empties the gallery, and the site sends
+  no packet to pkp.sfu.ca for it.
+- The upload form stays in the page. On the read-only tree it installs
+  nothing: no directory and no `versions` row. But the page shows no
+  message, and the PHP log gets some hundreds of warnings. The
+  application page (0077) tells the operator that the form does not
+  work.
+- For the PLN plugin, files that root copies and
+  `installPluginVersion.php` as www-data give the same `versions` row
+  and the same tables as a gallery install on a writable tree.
+- The exit code of `installPluginVersion.php` is not sufficient. From
+  its code, it writes the `versions` row first, and a plugin migration
+  that fails does not change the exit code. So the plugin `postinst`
+  also checks the tables that the plugin package declares. A run with
+  a migration that fails comes before the first plugin package.
+- The plugin tarballs have file modes that a package cannot keep: one
+  unpacks with directories 0700, one with 0777. With 0700 and owner
+  root, OJS does not list the plugin, and it shows no error. The
+  package sets root, 0755 for directories and 0644 for files.
+- A local plugin directory loads: a link in the code tree to a
+  directory under `/var/lib/ojs`, with files that www-data can read.
+  The first package does not have such a directory. A plugin there is
+  on one node only, and no package owns it. A later note can add it.
 
 ### 6. `preinst`
 
@@ -246,13 +315,26 @@ old version stays installed and configured.
 
 On a standby, or before the first boot, `postinst` clears
 `/var/cache/ojs` and exits 0. If the database version equals the code
-version, it does the same. Otherwise, on the writable node, it calls
-`ojs-upgrade`:
+version, it does the same. (second test) On the writable node it stops
+the worker first (step 1) and starts it after, because the signal of
+`jobs.php restart` is a file in that cache. Otherwise, on the writable
+node, it calls `ojs-upgrade`:
 1. Stop `ojs-scheduler.timer`. Run `jobs.php restart`, then stop
-   `ojs-jobs.service`.
-2. Write the maintenance mark and `/var/lib/ojs/upgrade-incomplete`.
+   `ojs-jobs.service`. (second test) After `jobs.php restart`, the
+   worker completes its job and ends with code 0, and
+   `Restart=on-failure` does not start it again. `ojs-upgrade` waits
+   for the unit to become inactive, with a time limit, and then stops
+   the unit. The jobs that wait stay in the queue.
+2. Write the maintenance mark `/var/lib/ojs/maintenance` and
+   `/var/lib/ojs/upgrade-incomplete`.
    nginx answers every OJS path with 503 and a notice. (third test) The
    503 is necessary: a half-migrated database can answer HTTP 200.
+   (second test) nginx looks for the mark file on each request, so no
+   reload is necessary: the pages, the API, a POST and the static files
+   gave 503 with `Retry-After` in about 1 ms, and 200 again when the
+   file was removed. The path `/keel-health` stays out of the rule. The
+   mark does not stop the worker or the timer, which are separate
+   processes. So step 1 is necessary.
 3. Dump the database (`mariadb-dump --single-transaction`). Copy
    `files_dir` and `public` to `/var/backups/ojs/<old version>-<date>/`.
    Copy `/etc/ojs/config.inc.php` too. Record the default character set
@@ -269,7 +351,8 @@ version, it does the same. Otherwise, on the writable node, it calls
    and the timer, remove the two marks, and exit 0. (first test) The reload
    is new. OPcache holds the old code for `revalidate_freq` seconds (30
    in the image). The test did not measure old code after the change,
-   but the setting permits it.
+   but the setting permits it. (second test) The worker starts after
+   the cache clear, not before it.
 
 **If the migration fails**, `ojs-upgrade` keeps the two marks. It
 keeps the jobs and the timer stopped. It sends an alert (0063) and
@@ -366,6 +449,28 @@ Both nodes run the same package version. One database is replicated.
 5. A restore runs on the writable node. The drop of the database and
    the deletion of files replicate. Test 6 checks this.
 
+### 10. The network
+
+(second test) OJS on a Keel node works with no network to the
+internet. The first boot and an upgrade pass without it.
+
+A running site makes one outgoing call: the version check, to
+pkp.sfu.ca on tcp 443, when an administrator opens the administration
+index, the system information or the site settings. With
+`enable_beacon = On`, the call carries the id of the site and its OAI
+address. When the call fails fast, the page comes at the usual speed
+and the PHP log gets one line.
+
+Two limits are known and not solved:
+- pkp.sfu.ca and `download.db-ip.com` have no AAAA record. On an
+  IPv6-only node, the version check and the IP database download
+  cannot pass. No such node was tested.
+- With a DNS server that does not answer, PHP-FPM waits two times 3
+  seconds for a reverse DNS query of the client address. Public pages
+  with journal content took 6 seconds, and the 3 administration pages
+  took 13 seconds. The test did not find the OJS code that asks. A
+  node needs a resolver that answers.
+
 ## Rejected alternatives
 
 - **A writable code tree that the package replaces (YunoHost pattern):**
@@ -394,6 +499,10 @@ with netem (0075).
    (first test) Partly done: 3.5.0-6 came from an upgrade, not from a
    new install, and the checklist was not run. The log is in the
    evidence.
+   (second test) Done by hand, with no package: a new install (code 0),
+   and the checklist in a browser. Two defects: the `.mjs` type
+   (section 4) and the registration with email validation ("The answer
+   for trixie"). The install command wrote 48 deprecation messages.
 2. Upgrade 3.5.0-5 to 3.5.0-6 with the package. Measure the duration.
    Check the 11 build migrations.
    (first test) Done by hand, with no package: code 0 in 1.2 seconds on
@@ -433,9 +542,15 @@ with netem (0075).
      cleanly ("Failed to copy plugin to destination folder"), with no
      directory and no `versions` row. It was called from the command
      line, not through the form. The gallery setting was not tested.
+     (second test) The setting empties the gallery. Through the form,
+     the upload installs nothing, but the page shows no message
+     (section 5).
    - A plugin package with `installPluginVersion.php` gives the same
      schema and `versions` row as a gallery install.
+     (second test) Passed by hand for PLN 4.0.1.0, with no package.
+     Not done: a plugin migration that fails (section 5).
    - A local plugin directory (a link to `/var/lib/ojs`) loads, or not.
+     (second test) It loads, if www-data can read the files.
 6. Pair: upgrade the standby, promote it, and check that the gate keeps
    the maintenance mark. Then complete the upgrade and run the 0075
    passes. Check that the timer and the worker move with a promote.
@@ -456,9 +571,20 @@ Not verified in this note:
 - The package names are proposals.
 - A retry after a pre-flight check that refused, with no restore.
 - A join of text columns across the two collations of an imported
-  database, and the character set that the first boot gives a new
   database.
 - The restore on a pair (test 6).
+- An IPv6-only node (section 10).
+- The OJS code that makes the reverse DNS query (section 10).
+- A plugin migration that fails with `installPluginVersion.php`
+  (section 5). The result is from the code.
+- `enable_beacon = Off`: its effect on the version check call.
+- `systemctl stop` of a worker in the middle of a job, and a cache
+  clear while a worker runs.
+- The two scheduled tasks that get the ROR data and the IP database
+  after a first boot with no network.
+- The full-text index of a PDF. The template has the `pdftotext` line
+  as a comment, and the worker skips each PDF.
+- An account activation with `require_validation = On`.
 
 ## Sources
 
@@ -479,6 +605,8 @@ Not verified in this note:
 - <https://github.com/pkp/ojs/blob/3_4_0-12/.github/workflows/stable-3_4_0.yml>
 - <https://github.com/pkp/ojs/blob/3_3_0-24/docs/README.md>
 - <https://github.com/pkp/pkp-lib/tree/c4c0aa8c5293254ad253544aea230b1b607d5249> (the 3_5_0-6 submodule): `composer.json`, `classes/install/Installer.php`, `classes/cliTool/UpgradeTool.php`, `classes/core/Core.php`, `classes/core/PKPApplication.php`, `classes/config/Config.php`, `classes/plugins/PluginHelper.php`, `classes/plugins/PluginGalleryDAO.php`, `controllers/grid/plugins/PluginGalleryGridHandler.php`, `classes/migration/upgrade/v3_5_0/I9895_AddAppKeyToConfigFile.php`
+- From the tarball `ojs-3.5.0-6.tar.gz` (second test): `lib/pkp/tools/installPluginVersion.php`, `lib/pkp/classes/plugins/Plugin.php`, `config.TEMPLATE.inc.php`
+- <https://github.com/pkp/pkp-docs> at commit `58079b5` (second test): the checklist of step 11 of the upgrade guide
 - <https://github.com/pkp/pkp-lib/issues/13139>, <https://github.com/pkp/pkp-lib/issues/13140>
 - <https://github.com/pkp/docker-ojs> (archived), <https://github.com/pkp/containers>
 - <https://github.com/YunoHost-Apps/ojs_ynh>
