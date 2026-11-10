@@ -53,11 +53,29 @@ The access rules, tested at 18:25 UTC on each of the two servers:
 | The read-only account publishes to `keel-alerts` | HTTP 403 |
 | No account reads `keel-alerts` | HTTP 403 |
 
+### On a phone
+
+Added later on 2026-11-10. The maintainer subscribed to `keel-alerts`
+on `ntfy-br1.pop.coop` in the ntfy app on an Android phone, with the
+read-only account. The maintainer sent a screenshot of the app at
+18:38 UTC (15:38 on the phone). It shows the message of ntfy-br1: the
+time 15:20 on the phone (18:20 UTC), the title "Keel: test message" and
+the text "Test message from ntfy-br1. The topic keel-alerts works. No
+action is necessary." The screenshot is not in this repository.
+
+The screenshot also shows the note "Password saved" of the app, so the
+account was added at about 18:38 UTC, 18 minutes after the message.
+Thus the phone got the message from the cache of the server. This does
+not show a push to a phone that is already subscribed.
+
 ### What this does not show
 
 - No Keel node sent this message. `keel notify` on a node of the
   migration is not configured for these servers yet (0063 step 4).
-- The message was not seen on a phone in this test.
+- The message of ntfy-br2 on a phone: the screenshot shows ntfy-br1
+  only.
+- A message that arrives while the phone is subscribed and its screen
+  is off.
 - ntfy-br3 was not tested.
 
 No configuration of a server was changed.
