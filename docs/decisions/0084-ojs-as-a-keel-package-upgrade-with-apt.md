@@ -6,6 +6,11 @@ the upgrade with apt on 2026-11-10. The maintainer did not decide the
 design below. Nothing in it is built. The tests at the end must pass on
 a real machine before the decision is accepted.
 
+A first test by hand ran on 2026-11-10, on a real container on BR1
+(`evidence/2026-11-10-ojs-3.5-php-8.4-first-test.md`). It corrected
+some facts and it added some conditions. Each such place has the mark
+"(first test)".
+
 ## What was asked
 
 The maintainer wants a Keel appliance for PKP Open Journal Systems (OJS).
@@ -32,14 +37,14 @@ source repository, `pkp/pkp-docs` (marked "docs repo" below).
 | PHP, 3.4 | Composer `platform` is 8.0.2. The CI runs PHP 8.1, 8.2 and 8.3 | pkp-lib at the 3_4_0-12 submodule; `stable-3_4_0.yml` |
 | PHP, 3.3 | "PHP 7.3.x, 7.4.x, 8.0.x, 8.1.x, or 8.2.x" | `docs/README.md` at `3_3_0-24` |
 | Databases, 3.5 | "MySQL 5.7.22+, MariaDB 4.1+ or PostgreSQL 9.5+". The CI runs MariaDB, MySQL and PostgreSQL. The CI tests an upgrade to 3.5 from 3.3 and 3.4 on MySQL and PostgreSQL, but from 3.4 only on MariaDB | `README.md`; `stable-3_5_0.yml` |
-| Debian 13 | php8.4 8.4.24-1~deb13u1, mariadb 1:11.8.6-0+deb13u1, postgresql-17 17.11-0+deb13u1 | sources.debian.org API |
+| Debian 13 | php8.4 8.4.24-1~deb13u1, mariadb 1:11.8.6-0+deb13u1, postgresql-17 17.11-0+deb13u1. (first test) On 2026-11-10 a trixie node installs php8.4 8.4.27-1~deb13u1 | sources.debian.org API; first test |
 | Upgrade steps | Stop the scheduled tasks and the job worker. Block access ("OJS does not support a maintenance mode yet"). Back up the database, `files_dir`, `public`, `config.inc.php`, `plugins` and local changes. Unpack the new package. Copy back the config and `public`. Run `php tools/upgrade.php check`, then `php -d memory_limit=2048M tools/upgrade.php upgrade` | upgrade guide (docs repo) |
 | Duration | "may take from a few minutes up to several hours". If the upgrade runs out of memory "it will fail and you will need to restore from backup" | upgrade guide |
 | Version table | The guide says that a build (`3.3.3-3`) has "No breaking changes or database migrations" | upgrade guide |
-| Builds migrate | The code does not agree with the guide. `upgrade.xml` at `3_5_0-6` has a block `3.5.0.0` to `3.5.0.99` with 11 migrations. A build upgrade inside 3.5 changes the schema | `dbscripts/xml/upgrade.xml` |
+| Builds migrate | The code does not agree with the guide. `upgrade.xml` at `3_5_0-6` has a block `3.5.0.0` to `3.5.0.99` with 11 migrations. A build upgrade inside 3.5 runs them. (first test) The upgrade of 3.5.0-5 to 3.5.0-6 ran the 11 migrations and 3 code steps. They changed data. They did not change the schema of the test database | `dbscripts/xml/upgrade.xml`; first test |
 | Refused jumps | `upgrade.xml` runs `abort` for a database from `2.0.0.0` to `3.2.9.9`. So 3.5 accepts only 3.3 and 3.4. The guide says "3.2.1-x can be upgraded to any version 3.3 or later". The code refuses 3.2 to 3.5 | `upgrade.xml`; upgrade guide |
 | Failure | If a migration fails, the installer calls `down()` on the migrations that it ran, in reverse order. It stops at the first `DowngradeNotSupportedException`. No transaction holds the full upgrade. MariaDB commits each DDL statement | pkp-lib `classes/install/Installer.php` (`executeAction`) |
-| `upgrade.php check` | It gets the latest version from pkp.sfu.ca. With no network it exits with code 7 | pkp-lib `classes/cliTool/UpgradeTool.php` |
+| `upgrade.php check` | It gets the latest version from pkp.sfu.ca. (first test) With no network it stops with an exception that it does not catch (`ConnectException`, "Could not resolve host"), and the exit code is 255 | pkp-lib `classes/cliTool/UpgradeTool.php`; first test |
 | Maintenance | `isUnderMaintenance()` is true only when `installed` is Off or an upgrade runs in that process. No web code compares the code version with the database version (a search of pkp-lib found none) | `PKPApplication.php`, `PKPPageRouter.php` |
 | Fixed paths | The base directory is the directory of `index.php`. `config.inc.php`, `cache/` and the default `public/` are under it. Pages load JavaScript from `<base>/lib/pkp/lib/vendor/` | pkp-lib `classes/core/Core.php`, `classes/config/Config.php`, `PKPTemplateManager.php` |
 | `app_key` | The 3.5 migration writes `app_key` into `config.inc.php`. If a key exists, it does nothing. 3.5.0-6 encrypts stored credentials with it (#12074) | pkp-lib `I9895_AddAppKeyToConfigFile.php`; README-3.5.0 |
@@ -54,7 +59,18 @@ source repository, `pkp/pkp-docs` (marked "docs repo" below).
 3.3 lists PHP up to 8.2 only. 3.4 is STS and ends in Q2 2027. 3.5 states
 no upper limit and fixes PHP 8.4 bugs, but no PKP line lists PHP 8.4 as
 tested. Keel's commissioning (0075) must prove 3.5 on PHP 8.4 and
-MariaDB 11.8. If it fails, the options are:
+MariaDB 11.8.
+
+(first test) 3.5.0-6 was installed by an upgrade from 3.5.0-5 on PHP
+8.4.27 and MariaDB 11.8.6. In one flow (a journal, a registration, a
+submission with a file, the public pages and the administration pages)
+it wrote no PHP error and no warning, and 59 deprecation messages.
+3.5.0-5 does not show its public theme on this PHP: the theme plugin
+stops with the `TypeError` that 3.5.0-6 corrects. Thus the first Keel
+package is 3.5.0.6, and Keel packages no build before it. The PKP
+checklist was not run, and the commissioning is not done.
+
+If the commissioning fails, the options are:
 1. Wait for a PKP fix and send the defect to pkp-lib.
 2. Carry a Keel patch on the package.
 3. Use PHP 8.2 from a third-party archive. This option is not
@@ -81,6 +97,11 @@ MariaDB 11.8. If it fails, the options are:
 
 `keel-ojs` is an application layer on LNMP (0059), with MariaDB. LNPP
 has no PHP. The first line is 3.5 LTS. 3.3 and 3.4 are not packaged.
+
+(first test) LNMP does not have all the PHP modules that OJS needs. The
+package depends on these Debian packages: `php8.4-bcmath`, `php8.4-curl`,
+`php8.4-gd`, `php8.4-intl`, `php8.4-mbstring`, `php8.4-xml` and
+`php8.4-zip`.
 
 ### 2. The source and the build
 
@@ -131,6 +152,25 @@ It is root:www-data 0640. `app_key`, `salt` and `api_key_secret` are
 manifest secrets with `shared: true`, so both nodes of a pair decrypt
 the same rows. The first boot writes `app_key`, so the migration does
 nothing to the file.
+
+(first test) The first boot runs `tools/install.php` as www-data, with
+the file already in place and read-only for www-data. This is
+necessary, not only safe:
+- The installer makes a new `app_key` each time. With a file that it
+  can write, it replaces the key of the manifest. It also writes an
+  empty `allowed_hosts` and an empty `time_zone`.
+- With a read-only file, the installer changes nothing in it and the
+  key stays. But `installed` stays `Off`. The first boot, as root, sets
+  `installed = On` after the installer ends with code 0.
+- The installer needs `files_dir`, `public` and `cache` writable, and
+  no other path.
+- `base_url` must have a host name. With an IPv6 address in brackets,
+  the session cookie gets a domain that curl refuses, and the login
+  fails. The behaviour of a browser was not tested.
+- The install took 85 seconds. The test report says that most of this
+  time is the download of two data sets (ROR and the IP database of the
+  usage statistics), so the first boot needs the network. This was not
+  measured separately.
 
 ### 5. Plugins
 
@@ -187,8 +227,11 @@ version, it does the same. Otherwise, on the writable node, it calls
    Copy `/etc/ojs/config.inc.php` too.
 4. Run `php -d memory_limit=2048M tools/upgrade.php upgrade` as www-data.
    Write the log to `/var/log/ojs/`.
-5. On success, clear the cache, start the jobs service and the timer,
-   remove the mark, and exit 0.
+5. On success, clear the cache, reload PHP-FPM, start the jobs service
+   and the timer, remove the mark, and exit 0. (first test) The reload
+   is new. OPcache holds the old code for `revalidate_freq` seconds (30
+   in the image). The test did not measure old code after the change,
+   but the setting permits it.
 
 **If the migration fails**, `ojs-upgrade` keeps the maintenance mark and
 writes `/var/lib/ojs/upgrade-failed`. It keeps the jobs and the timer stopped.
@@ -216,8 +259,10 @@ package.
 
 ### 8. Unattended upgrades
 
-All OJS builds migrate the schema (see "Facts checked"). So no OJS
-upgrade is code-only, and none goes to Keel trixie-security. cron-apt
+Each OJS build upgrade runs the migrations of its line (see "Facts
+checked"). In the first test they changed data only, but a different
+build can change the schema. So no OJS upgrade is code-only, and none
+goes to Keel trixie-security. cron-apt
 does not take OJS. In `simple` mode, the operator runs `apt upgrade`. In
 a pair, the operator upgrades one node at a time (0073 item 6). A line
 change (3.5 to 3.7) is always a deliberate act. 3.5 removed old plugin
@@ -276,8 +321,14 @@ Each test makes an evidence file (0053). Use 2 LXC on BR1 and 1 on BR2,
 with netem (0075).
 1. Install 3.5.0-6 on PHP 8.4 and MariaDB 11.8. Run the PKP checklist
    (upgrade guide step 11) and check the PHP-FPM log for deprecations.
+   (first test) Partly done: 3.5.0-6 came from an upgrade, not from a
+   new install, and the checklist was not run. The log is in the
+   evidence.
 2. Upgrade 3.5.0-5 to 3.5.0-6 with the package. Measure the duration.
    Check the 11 build migrations.
+   (first test) Done by hand, with no package: code 0 in 1.2 seconds on
+   a database with one journal and one submission. The 11 migrations
+   ran. The duration on a large journal is not known.
 3. Upgrade a 3.3.0-24 dataset to 3.5 on MariaDB 11.8. PKP CI does not
    test this path.
 4. Stop the migration (kill the process, or set a low `memory_limit`).
@@ -286,10 +337,19 @@ with netem (0075).
 5. Paths and plugins:
    - Run `upgrade.php` as www-data with a read-only `config.inc.php`
      that has `app_key`. No step writes the file.
+     (first test) Passed for 3.5.0-5 to 3.5.0-6: the file has the same
+     sha256, the process opened it one time and read-only, and no file
+     of the code tree changed. The migration that writes `app_key` is
+     in the block of 3.1 to 3.4, so only test 3 can show its behaviour.
    - The links for `config.inc.php`, `cache` and `public` work with
      PHP-FPM, OPcache and Smarty.
+     (first test) Passed.
    - `plugin_gallery_urls = '[]'` empties the gallery. The upload of a
      plugin fails cleanly on a read-only tree.
+     (first test) The install function of the upload form refuses
+     cleanly ("Failed to copy plugin to destination folder"), with no
+     directory and no `versions` row. It was called from the command
+     line, not through the form. The gallery setting was not tested.
    - A plugin package with `installPluginVersion.php` gives the same
      schema and `versions` row as a gallery install.
    - A local plugin directory (a link to `/var/lib/ojs`) loads, or not.
@@ -298,6 +358,8 @@ with netem (0075).
    passes. Check that the timer and the worker move with a promote.
 7. Measure the dump and the file copy for a journal of about 10 GB.
    Check the disk rule of `preinst`.
+   (first test) A new installation with one submission already gives a
+   dump of 31 MB and a file copy of 122 MB.
 8. Run a line change with a test package `ojs-3.6` (from `main`) and
    check that `preinst` runs on `install`.
 
