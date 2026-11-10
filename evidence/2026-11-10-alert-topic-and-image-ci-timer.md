@@ -65,17 +65,25 @@ action is necessary." The screenshot is not in this repository.
 
 The screenshot also shows the note "Password saved" of the app, so the
 account was added at about 18:38 UTC, 18 minutes after the message.
-Thus the phone got the message from the cache of the server. This does
-not show a push to a phone that is already subscribed.
+Thus the phone got the message from the cache of the server.
+
+Then a second message was sent while the phone was subscribed, by the
+same method as the first, with the title "Keel: test message 2":
+
+| Server | Publish | Message id | Time (UTC) |
+|---|---|---|---|
+| ntfy-br1 | HTTP 200 | `njbiAj3XxYc3` | 2026-11-10 18:45:11 |
+| ntfy-br2 | HTTP 200 | `p6Jg7TrERb3c` | 2026-11-10 18:45:13 |
+
+The maintainer said in chat that the notification of ntfy-br1 came on
+the phone with the app not open. There is no screenshot of it.
 
 ### What this does not show
 
 - No Keel node sent this message. `keel notify` on a node of the
   migration is not configured for these servers yet (0063 step 4).
-- The message of ntfy-br2 on a phone: the screenshot shows ntfy-br1
-  only.
-- A message that arrives while the phone is subscribed and its screen
-  is off.
+- The message of ntfy-br2 on a phone: the screenshot and the answer of
+  the maintainer are about ntfy-br1 only.
 - ntfy-br3 was not tested.
 
 No configuration of a server was changed.
