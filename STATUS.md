@@ -3651,3 +3651,27 @@ mariadb and redis cannot be pulled from the mirror until the next release
 holds them.
 
 The evidence is `evidence/2026-11-10-release-2026-11-10.md`.
+
+## 2026-11-10: release 2026-11-11 of the stable channel
+
+Release 2026-11-11 revision 1 is signed and published. The name 2026-11-11
+is the identifier of the release directory. The publication was on
+2026-11-10 UTC. The release adds 3 applications, each as a container
+template and as an ISO image: MariaDB 19.0-12, Redis 19.0-13 and ntfy
+19.0-6, with keel 0.23.96.
+
+- Each image passed the commissioning test of decision 0075 on BR1 and on
+  BR2: 20 runs, 20 PASS.
+- The channel `stable` is at `release 2026-11-11/1`. It names 11 layers,
+  so `keel pull` of ntfy, mariadb and redis works again.
+- Each of the 3 repositories has a release with the template, the ISO and
+  their signed checksum files.
+- Each new application has a page at `https://keellinux.org/apps/NAME/`
+  (decision 0077).
+
+The release tool is still not cumulative. The 6 layer sets of release
+2026-11-10 that this release does not build were copied by hand into the
+release directory. The first signed Proxmox index had a wrong `Infopage`
+and was never published.
+
+The evidence is `evidence/2026-11-10-release-2026-11-11.md`.
