@@ -101,3 +101,37 @@ three servers, and still reaches it with any two of them stopped.
 - The message cache is per server. A phone that was offline sees, on each
   server, the messages that server kept.
 - Three more small containers to update, one per site.
+
+## Amendment of 2026-11-10: the alert topic of the Keel project
+
+Decided by the coordinator under the maintainer's delegation
+(2026-11-10), before step 4 of "How it is carried out" starts. Evidence:
+`evidence/2026-11-10-alert-topic-and-image-ci-timer.md`.
+
+1. **The alert topic of the Keel project is `keel-alerts`.** Its prefix
+   is `keel-`, so it is in the Keel tenant (section 4). Each node of the
+   migration sends its alerts to this topic on each server. The notice
+   of an upgrade that waits (0085) goes to the same topic, because it
+   uses the channels that the node already has.
+2. **One topic for all nodes, not one topic for each node.** A message
+   of `keel notify` gives the name of the node. A person subscribes one
+   time on each server, and a new node needs no change on a phone. A
+   second topic is added only when a group of people must get only a
+   part of the alerts.
+3. **The accounts.** The account `publisher` can write and cannot read.
+   A node sends with a token of this account, from a secret of its
+   instance description. Each person who reads has an account that can
+   read `keel-*` and cannot write. The first such account is that of
+   the maintainer.
+4. **A message stays 12 hours on a server** (`cache-duration` of the
+   image). A phone that was offline for a longer time does not get the
+   message. This is accepted for alerts. It is a reason for the 7-day
+   reminder of 0085.
+5. **The Android app needs no change on the servers.** It holds its own
+   connection to each server. The iOS app needs `upstream-base-url` on
+   each server to deliver immediately. That setting is not on, and it is
+   not decided here.
+
+State on 2026-11-10: ntfy-br1 and ntfy-br2 take and deliver a message on
+`keel-alerts`. ntfy-br3 does not answer. No node of the migration sends
+alerts yet, thus step 4 is open.
