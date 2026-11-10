@@ -25,7 +25,7 @@ from.
   member, goes to Keel trixie only. The operator upgrades one node at a
   time, the VIP holder last (0073 item 6).
 - Runtimes and applications move through the Keel channel (0083). Note
-  0084 proposes that no OJS upgrade is unattended, because each OJS build
+  0084 says that no OJS upgrade is unattended, because each OJS build
   migrates the database.
 - No node tells a person that such an upgrade is available. Note 0073
   says that it "does not turn on mail or any external alert". The
@@ -134,7 +134,7 @@ is accepted, as in 0063: no message is lost.
   alert" stays true for the security index check. This note adds one
   external notice, for a different event. Item 6 of 0073 gets this
   addition: the node tells the operator that the upgrade waits.
-- **0084 (proposed).** Section 8 of that note says that the operator
+- **0084.** Section 8 of that note says that the operator
   runs `apt upgrade` for OJS. With this note, the operator gets a message
   first, and the OJS packages carry `Keel-Upgrade-Note`.
 - **0063.** Not changed. Step 4 of 0063 (the production nodes send to
