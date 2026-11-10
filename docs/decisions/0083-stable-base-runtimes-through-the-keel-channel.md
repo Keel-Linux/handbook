@@ -2,10 +2,12 @@
 
 Date: 2026-11-10
 Status: **decided by the maintainer, 2026-11-10** ("sim", the answer to
-the three points of the decision below). The maintainer's reason:
-"security is a daily practice, a habit; the process is more important
-than the destination". The package name and the open points are not
-decided.
+the three points of the decision below: the base, the channel and the
+Node.js package). The maintainer's reason: "security is a daily
+practice, a habit; the process is more important than the destination".
+The coordinator decided two details under the maintainer's delegation:
+the first line is 24, and the build pins the release keys by
+fingerprint. The package name and the open points are not decided.
 
 ## What was asked
 
@@ -27,10 +29,11 @@ Node.js is the first example. The facts were checked on 2026-11-10.
 | Latest releases | v24.22.2 (2026-10-27), v26.13.0 (2026-10-28) | <https://nodejs.org/dist/index.json> |
 | Upstream signature | each download directory has `SHASUMS256.txt.asc`, the SHA-256 sums with the releaser's PGP signature. The keyring is in `nodejs/release-keys`. The check is `gpgv` on the file, then `shasum --check` | <https://github.com/nodejs/node#verifying-binaries> |
 | Applications | NodeBB 4.16.7 needs `node >=22` | <https://raw.githubusercontent.com/NodeBB/NodeBB/v4.16.7/install/package.json> |
-| Applications | Ghost 6.72.0 accepts `^22.23.1 \|\| ^24.20.0` (0064). Mastodon 4.7 needs `node >= 22`, and its `.nvmrc` is 24 (0065) | the sources in 0064 and 0065 |
+| Applications | Ghost 6.72.0 accepts `^22.23.1 \|\| ^24.20.0` | <https://raw.githubusercontent.com/TryGhost/Ghost/v6.72.0/ghost/package.json> |
+| Applications | Mastodon 4.7.3 needs `node >=22` in `package.json` and `streaming/package.json`. Its `.nvmrc` is `24.19` | <https://raw.githubusercontent.com/mastodon/mastodon/v4.7.3/package.json>, <https://raw.githubusercontent.com/mastodon/mastodon/v4.7.3/streaming/package.json>, <https://raw.githubusercontent.com/mastodon/mastodon/v4.7.3/.nvmrc> |
 | TurnKey | common's `conf/nodejs` clones `tj/n` at its head and runs `n lts`. So the Node.js version is the LTS of the day of the build, with no pin | <https://raw.githubusercontent.com/turnkeylinux/common/master/conf/nodejs> |
 
-Debian describes the security of testing so:
+Debian describes the security of testing as follows:
 
 - "security updates for testing are not managed by the security team"
   (<https://www.debian.org/devel/testing>).
@@ -110,8 +113,8 @@ Debian describes the security of testing so:
    Node.js itself.
 3. NodeBB (0082) is the first user. Ghost (0064) and Mastodon (0065)
    use the same package when they are built.
-4. Common's `conf/nodejs` (the `n lts` install) is not used by Keel
-   layers.
+4. Keel layers do not use common's `conf/nodejs`. Keel's copy runs `n`
+   with `NODE_VER`, or with the latest LTS when `NODE_VER` is not set.
 
 ## Rejected alternatives
 
@@ -144,8 +147,8 @@ note.
    each Node.js security release and start the package build, with a
    time limit like the 7 days of 0073.
 5. **How a security release reaches an installed machine.** cron-apt
-   reads only `security.sources` (0073). A Node.js fix must so go to
-   Keel trixie-security, or the operator runs the upgrade. 0073 keeps
+   reads only `security.sources` (0073). So a Node.js fix must go to
+   Keel trixie-security, or the operator must run the upgrade. 0073 keeps
    packages that restart a paired service out of trixie-security. So the
    package design must say if an update restarts the application.
 
