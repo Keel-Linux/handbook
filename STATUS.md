@@ -3630,3 +3630,24 @@ maintainer's answers.
 
 Both are on tracker#1's maintainer list, which now holds everything
 waiting on the maintainer.
+
+## 2026-11-10: release 2026-11-10 of the stable channel
+
+Release 2026-11-10 is signed and published. It holds 8 applications, each
+as a container template and as an ISO image: Core 19.0-13, Web 19.0-13,
+LNMP 19.0-6, LNPP 19.0-9, PostgreSQL 19.0-9, Laravel 19.0-7, WordPress
+19.0-21 and Odoo 19.0-18, with keel 0.23.96.
+
+- Each image passed the commissioning test of decision 0075 on BR1 and on
+  BR2: 64 runs, 64 PASS.
+- The channel `stable` is at `release 2026-11-10 rev 1`.
+- Each repository has a release with the template, the ISO and their
+  signed checksum files.
+- Each application has a page at `https://keellinux.org/apps/NAME/`
+  (decision 0077).
+
+One finding is open. The release is not cumulative: the layers ntfy,
+mariadb and redis cannot be pulled from the mirror until the next release
+holds them.
+
+The evidence is `evidence/2026-11-10-release-2026-11-10.md`.
