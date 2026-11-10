@@ -77,7 +77,7 @@ Decided by the maintainer, 2026-11-10 ("sim tudo", question a).
 **The exception.** keel-ntfy does not follow items 1, 6 and 7. Port 80
 never serves ntfy, also on the loopback and with the self-signed
 certificate. Every request on port 80 gets a 301 to the same URL on
-HTTPS, with two exceptions that stay on port 80:
+HTTPS, except on two paths that stay on port 80:
 
 - `/.well-known/acme-challenge/`, which keel-web serves for ACME HTTP-01
   (keel-ntfy 19.0-6).
@@ -86,13 +86,11 @@ HTTPS, with two exceptions that stay on port 80:
 
 **The reason.** The clients of ntfy are the phone application and keel,
 not browsers (0063). Access is closed by default, so a publish or a
-subscription sends a credential: a password or a token. So an answer in
-clear text must not exist, also before a certificate authority's
-certificate. The reason of
-item 1, to see the application before the name points to the machine,
-does not apply: a client does not show a page. keel-ntfy 19.0-2 closed
-port 80 for this reason, because the API was open in clear text on the
-external address.
+subscription sends a credential: a password or a token. An answer in
+clear text must not exist, also with the self-signed certificate.
+keel-ntfy 19.0-2 closed port 80 for this reason: the API was open in
+clear text on the external address. Item 1 shows the application before
+the name points to the machine, but a client shows no page.
 
 **The contract.** The commissioning contract of keel-ntfy (0075) checks
 that `http://127.0.0.1/v1/health` answers 301 and that
