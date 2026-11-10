@@ -1,9 +1,10 @@
-# 0082: NodeBB on the LNPP stack, on PostgreSQL, with a pinned Node.js 24
+# 0082: NodeBB on the LNPP stack, on PostgreSQL, with Node.js 24 from the Keel Node.js package
 
 Date: 2026-11-10
-Status: **proposed, 2026-11-10.** Nothing in it is built. The maintainer
-answered open point 1 on 2026-11-10 with decision 0083. Open points 2
-and 3 need a maintainer answer before the build.
+Status: **decided by the maintainer, 2026-11-10.** The maintainer
+answered the three open points on 2026-11-10: point 1 with "sim" (option
+D, decision 0083), points 2 and 3 with "sim tudo". Nothing in it is
+built.
 
 ## What was asked
 
@@ -69,7 +70,7 @@ is not used again.
 
 | Option | Facts | Result |
 | --- | --- | --- |
-| A. Node.js 24 from the nodejs.org tarball, pinned by sha256 (0012) under `/opt/node` | the line that NodeBB tests. Supported to 2028-04-30. Ghost accepts `^24.20` (0064). No apt update: a Node.js security release is an image rebuild (0073) | rejected: apt can update an installed machine, but it cannot update a file in an image. The fallback if the package of D is late |
+| A. Node.js 24 from the nodejs.org tarball, pinned by sha256 (0012) under `/opt/node` | the line that NodeBB tests. Supported to 2028-04-30. Ghost accepts `^24.20` (0064). No apt update: a Node.js security release is an image rebuild (0073) | rejected: apt can update an installed machine, but it cannot update a file in an image. It is not a fallback: the layer waits for the package of D |
 | B. Debian's Node.js 20 | NodeBB stays at 4.10.3, six minor releases behind. Upstream ended Node.js 20 on 2026-04-30 | rejected: an old NodeBB on a line with no upstream support |
 | C. A Keel archive package of forky's 24 (the 0074 pattern) | apt updates, but a V8 build and new build dependencies on trixie | rejected: the official binary of D gives the same line with no V8 build |
 | D. A Keel package of the official Node.js 24 binary from nodejs.org (0083) | the build checks `SHASUMS256.txt.asc` against the pinned release keys and the pinned sha256. Updates come by apt through `trixie-testing`, then stable. One line for all Keel applications | **chosen** |
@@ -148,10 +149,10 @@ so a private category does not show. The data is on Redis in the
 `forum` container on the build host. `docs/infra-recovery.md` says no
 backup of it exists.
 
-**Recommendation: create the forum again on the new appliance and copy
-no data.** The categories and settings are entered again by hand. The
-converter is archived and is not tested on NodeBB 4.x. If the maintainer
-wants the data, a converter test on a copy is a separate step.
+**Decision: create the forum again on the new appliance and copy no
+data.** The maintainer decided this on 2026-11-10 ("sim tudo"). The
+categories and settings are entered again by hand. The converter is
+archived and is not tested on NodeBB 4.x, and nobody tests it.
 
 ### 7. The order of work
 
@@ -181,8 +182,8 @@ version. That work belongs to 0083, not to this note.
 7. Commissioning of 0075 on BR1 and BR2: lxc-interactive, lxc-preseed,
    vm-iso, `cloud_simple`, `cloud_advanced`, with screenshots and the
    evidence file.
-8. If section 6 is accepted: the new forum, then the archive of
-   `keel-nodejs-nginx`.
+8. The new forum with no data copy (section 6). Then the archive of
+   `keel-nodejs-nginx`, after NodeBB passed step 7.
 
 **Not in this note:** several NodeBB processes (0081), a Redis pair,
 the Ghost layer (0064), ActivityPub, the public proxy, a forum backup.
@@ -199,9 +200,10 @@ the Ghost layer (0064), ActivityPub, the public proxy, a forum backup.
 
 1. **Answered on 2026-11-10.** The maintainer decided the Keel Node.js
    package (option D) in 0083. Options A, B and C are rejected.
-2. **Create the forum again with no data copy?** Yes also confirms that
-   no private content must be kept.
-3. **Archive `keel-nodejs-nginx` after step 7?** Yes or no.
+2. **Answered on 2026-11-10 ("sim tudo").** The forum is created again
+   with no data copy. No private content of the old forum is kept.
+3. **Answered on 2026-11-10 ("sim tudo").** `keel-nodejs-nginx` is
+   archived after NodeBB passes the commissioning of step 7.
 
 ## Not verified
 
