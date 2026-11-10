@@ -170,6 +170,7 @@ nftables.
 | `/home/runner/actions-runner/.credentials`, `.runner` | the runner registration | No, but it needs the maintainer: a registration token requires `admin:org`, and the runner must be re-registered (ci-cd.md section 6). |
 | `/srv/archive`, `/srv/mirror`, `/srv/releases` | what the world fetches | No. Republished from the build host by `bin/keel-publish-mirror`; the signatures come from the signing subkey, not from here. |
 | `/srv/site` | the institutional site | No. A checkout of keel-linux/keel-linux.github.io, pulled every 15 minutes. |
+| `/srv/apps` | the page of each application | No. A checkout of the `pages` branch of each `keel-NAME` repository, pulled every 15 minutes. |
 
 So the VM holds nothing that cannot be recreated, and that is the point of
 the split: the public machine is disposable.

@@ -409,6 +409,44 @@ RandomizedDelaySec=1min
 WantedBy=timers.target
 UNIT
 
+# ---------------------------------------------------------------- application pages
+# Decision 0077: the page of each application is the `pages` branch of its
+# repository, a checkout under /srv/apps/NAME, served at /apps/NAME/. Add an
+# application to APPS when its `pages` branch is there.
+log "application pages"
+APPS="core web lnmp lnpp postgresql laravel wordpress odoo"
+install -d -m 0755 -o site -g site /srv/apps
+for a in $APPS; do
+	if [ ! -d /srv/apps/$a/.git ]; then
+		sudo -u site git clone -q --branch pages --single-branch \
+			https://git.pop.coop/Keel-Linux/keel-$a.git /srv/apps/$a
+	fi
+done
+cat > /etc/systemd/system/keel-apps-pull.service << 'UNIT'
+[Unit]
+Description=Update the application page checkouts in /srv/apps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=site
+Group=site
+ExecStart=/bin/sh -c 'rc=0; for d in /srv/apps/*/; do /usr/bin/git -C "$d" pull -q --ff-only || rc=1; done; exit $rc'
+UNIT
+cat > /etc/systemd/system/keel-apps-pull.timer << 'UNIT'
+[Unit]
+Description=Pull the application pages every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+RandomizedDelaySec=1min
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 # ---------------------------------------------------------------- forum placeholder
 cat > /srv/forum/index.html << 'HTML'
 <!DOCTYPE html>
@@ -607,6 +645,16 @@ server {
 	location ~ /\. {
 		deny all;
 	}
+	# The page of each application (decision 0077): the `pages` branch of
+	# its repository, a checkout under /srv/apps/NAME.
+	location = /apps { return 302 /appliances.html; }
+	location = /apps/ { return 302 /appliances.html; }
+	location ^~ /apps/ {
+		root /srv;
+		location ~ /\. { deny all; }
+		location ~ ^(/apps/[a-z0-9-]+)$ { return 301 $1/; }
+		try_files $uri $uri/ =404;
+	}
 	location / {
 		try_files $uri $uri/ $uri.html =404;
 	}
@@ -705,5 +753,5 @@ nginx -t 2>&1 | tail -1; nginx -t >/dev/null 2>&1
 systemctl enable --now nginx >/dev/null 2>&1
 systemctl reload nginx
 systemctl daemon-reload
-systemctl enable --now keel-site-pull.timer dehydrated.timer >/dev/null 2>&1
-log "units: $(systemctl is-active nginx nftables keel-site-pull.timer dehydrated.timer | tr '\n' ' ')"
+systemctl enable --now keel-site-pull.timer keel-apps-pull.timer dehydrated.timer >/dev/null 2>&1
+log "units: $(systemctl is-active nginx nftables keel-site-pull.timer keel-apps-pull.timer dehydrated.timer | tr '\n' ' ')"

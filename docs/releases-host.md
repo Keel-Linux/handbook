@@ -65,6 +65,15 @@ owned by the unprivileged user `site`; `keel-site-pull.timer` runs
 15 minutes, so the VM and GitHub Pages serve the same content within that
 window. A push to `main` of the site repository is the deployment for both.
 
+The page of each application (decision 0077) is at `/apps/NAME/` of the apex.
+It is the `pages` branch of the repository `keel-NAME` on git.pop.coop, a
+checkout at `/srv/apps/NAME` that the user `site` owns.
+`keel-apps-pull.timer` runs `git pull --ff-only` in each checkout 2 minutes
+after boot and every 15 minutes. A push to the `pages` branch is the
+deployment of that page. `/apps/` goes to `appliances.html`, and nginx
+refuses each path that starts with a dot, so the `.git` directory of a
+checkout is not served.
+
 ## 3. nginx layout
 
 | File | Purpose |
@@ -185,6 +194,7 @@ beside them and never removes or rewrites them.
 | `/srv/releases/pve/` | the `pve/` files of the last release `MANIFEST`: `aplinfo.dat`, `aplinfo.dat.gz` and exactly one of `aplinfo.dat.asc` (signed) or `aplinfo.dat.UNSIGNED` (not signed), the index holding one record per appliance published, whatever release published it (below). Also the host's own `README.txt`, a copy of `/srv/releases/README.txt` that `keel-provision` writes and publication never touches | the same |
 | `/srv/releases/meta/<date>/` | the release `MANIFEST` and its signature or `UNSIGNED` note | the same |
 | `/srv/site/` | git checkout | `keel-site-pull.timer` |
+| `/srv/apps/NAME/` | git checkout of the `pages` branch of `keel-NAME` | `keel-apps-pull.timer` |
 
 Nothing unsigned other than the staging content is served, and the header
 says so. `/usr/local/sbin/keel-sync-layers` is superseded and now exits 3
@@ -472,6 +482,7 @@ the root helper of that time; nothing else on the VM was touched.
 | `nftables.service` | firewall |
 | `dehydrated.timer` -> `dehydrated.service` | daily renewal check |
 | `keel-site-pull.timer` -> `keel-site-pull.service` | site checkout, every 15 minutes, user `site` |
+| `keel-apps-pull.timer` -> `keel-apps-pull.service` | application page checkouts, every 15 minutes, user `site` |
 | `actions-runner.service` | GitHub Actions runner; drop-in `keel-hardening.conf` (reset before every start, job hooks) |
 | `user@1001.service` | the runner's user manager, kept by linger; its delegated scopes hold the CI containers |
 | `lxc.service`, `lxc-net.service`, `lxc-monitord.service` | LXC for the runner |
