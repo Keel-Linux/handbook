@@ -1,8 +1,9 @@
 # 0082: NodeBB on the LNPP stack, on PostgreSQL, with a pinned Node.js 24
 
 Date: 2026-11-10
-Status: **proposed, 2026-11-10.** Nothing in it is built. The three open
-points need a maintainer answer before the build.
+Status: **proposed, 2026-11-10.** Nothing in it is built. The maintainer
+answered open point 1 on 2026-11-10 with decision 0083. Open points 2
+and 3 need a maintainer answer before the build.
 
 ## What was asked
 
@@ -56,25 +57,28 @@ database, the modes, the live forum and the order of work.
 | C. A new stack, Web plus PostgreSQL plus Node.js | a fourth stack for one application. Ghost (0064) is on MariaDB | rejected for now |
 | D. NodeBB on `lnpp`, Node.js in the application layer | the pair and its contract exist. The layer removes the socket-activated check page of `lnpp`, as Odoo does | **chosen** |
 
-If a second image needs the same Node.js, the install moves to common's
-`mk/turnkey/nodejs.mk` (0036), which today runs `n` unpinned.
+Node.js is not in the layer. The layer installs the Keel Node.js package
+of 0083, and a second image that needs Node.js installs the same package.
+Common's `conf/nodejs`, which runs `n lts` with no pin, is not used.
 
 **The old layer.** `keel-nodejs-nginx` gets no new build. After step 7,
 its repository is archived with a README line to this note, and the name
 is not used again.
 
-### 2. Node.js: version 24, from nodejs.org, pinned by sha256
+### 2. Node.js: version 24, from the Keel Node.js package of 0083
 
-| Option | Facts |
-| --- | --- |
-| A. Node.js 24 from the nodejs.org tarball, pinned by sha256 (0012) under `/opt/node` | the line that NodeBB tests. Supported to 2028-04-30. Ghost accepts `^24.20` (0064). No apt update: a Node.js security release is an image rebuild (0073) |
-| B. Debian's Node.js 20 | NodeBB stays at 4.10.3, six minor releases behind. Upstream ended Node.js 20 on 2026-04-30 |
-| C. A Keel archive package of forky's 24 (the 0074 pattern) | apt updates, but a V8 build and new build dependencies on trixie. More power than one application needs |
+| Option | Facts | Result |
+| --- | --- | --- |
+| A. Node.js 24 from the nodejs.org tarball, pinned by sha256 (0012) under `/opt/node` | the line that NodeBB tests. Supported to 2028-04-30. Ghost accepts `^24.20` (0064). No apt update: a Node.js security release is an image rebuild (0073) | rejected: apt can update an installed machine, but it cannot update a file in an image. The fallback if the package of D is late |
+| B. Debian's Node.js 20 | NodeBB stays at 4.10.3, six minor releases behind. Upstream ended Node.js 20 on 2026-04-30 | rejected: an old NodeBB on a line with no upstream support |
+| C. A Keel archive package of forky's 24 (the 0074 pattern) | apt updates, but a V8 build and new build dependencies on trixie | rejected: the official binary of D gives the same line with no V8 build |
+| D. A Keel package of the official Node.js 24 binary from nodejs.org (0083) | the build checks `SHASUMS256.txt.asc` against the pinned release keys and the pinned sha256. Updates come by apt through `trixie-testing`, then stable. One line for all Keel applications | **chosen** |
 
-**Recommendation: A.** `docs/forum.md` says "all from the archive", so
-the maintainer decides. 0064 makes the same choice for Ghost with 22.
-If both are built, they use 24. NodeBB ships no lock file, so the layer
-commits a reviewed `package-lock.json` and runs `npm ci` (0012).
+**Decision: D**, by the maintainer on 2026-11-10 in 0083. The package
+name is a proposal (`keel-nodejs`), and 0083 lists its open points. Ghost
+(0064) and Mastodon (0065) use the same package and the same line.
+NodeBB ships no lock file, so the layer commits a reviewed
+`package-lock.json` and runs `npm ci` (0012).
 
 ### 3. The database: PostgreSQL in every mode, no Redis
 
@@ -153,10 +157,15 @@ wants the data, a converter test on a copy is a separate step.
 
 Each step is one PR and has its own test.
 
+Before step 1, the Keel Node.js package of 0083 is built from its own
+source repository and published to `trixie-testing`. Test: the build
+checks the signature and the sha256, and `node -v` shows the pinned
+version. That work belongs to 0083, not to this note.
+
 1. `keel-nodebb`: base `lnpp`. Drop Redis, the own nginx site and the
-   build-time apt block. Node.js 24 by sha256, NodeBB 4.16.7 by sha256,
-   the lock file, `npm ci`. Test: the layer builds, `node -v` and the
-   image check.
+   build-time apt block. The `plan` installs the Keel Node.js package.
+   NodeBB 4.16.7 by sha256, the lock file, `npm ci`. Test: the layer
+   builds, `node -v` and the image check.
 2. The manifest `nodebb.yaml`: `base: lnpp`, `state.replicate`, the two
    shared secrets, no process. Test: `tests/manifest.bats` and `keel
    validate`.
@@ -166,7 +175,9 @@ Each step is one PR and has its own test.
    `tests/nginx.bats`, `nginx -t`.
 5. `tests/commission.yaml`: secrets root, db, app. Checks: a row and an
    upload replicate, NodeBB on the primary only, a login across a promote.
-6. `Keel-Linux/apt`: `conf/image-ci` watches `keel-nodebb` (0061).
+6. `Keel-Linux/apt`: `conf/image-ci` watches `keel-nodebb` (0061). The
+   image of the testing track takes the Node.js package from
+   `trixie-testing`.
 7. Commissioning of 0075 on BR1 and BR2: lxc-interactive, lxc-preseed,
    vm-iso, `cloud_simple`, `cloud_advanced`, with screenshots and the
    evidence file.
@@ -174,18 +185,20 @@ Each step is one PR and has its own test.
    `keel-nodejs-nginx`.
 
 **Not in this note:** several NodeBB processes (0081), a Redis pair,
-Ghost's runtime (0064), ActivityPub, the public proxy, a forum backup.
+the Ghost layer (0064), ActivityPub, the public proxy, a forum backup.
 
 ## Consequences
 
 - `lnpp` has two applications. A change to the stack is tested on both.
-- A Node.js security release is an image rebuild within the 0073 limits.
+- A Node.js security release is a new build of the Keel Node.js package,
+  which apt installs on a machine through the Keel channel (0083). An
+  image rebuild is not necessary for it.
 - A plugin that is not in the image cannot be installed from the admin.
 
 ## Open points for the maintainer
 
-1. **Node.js 24 from nodejs.org, pinned (A), or Debian's 20 with NodeBB
-   at 4.10.3 (B)?** The coordinator proposes A.
+1. **Answered on 2026-11-10.** The maintainer decided the Keel Node.js
+   package (option D) in 0083. Options A, B and C are rejected.
 2. **Create the forum again with no data copy?** Yes also confirms that
    no private content must be kept.
 3. **Archive `keel-nodejs-nginx` after step 7?** Yes or no.
@@ -199,7 +212,7 @@ converter on NodeBB 4.x.
 ## What this amends
 
 - **0036**: the "Keel Node" image is not made. NodeBB is on `lnpp`.
-- **`docs/forum.md`**: the database is PostgreSQL, and Node.js is not
-  from the archive if open point 1 is A.
+- **`docs/forum.md`**: the database is PostgreSQL. Node.js comes from
+  the Keel archive (0083), not from the Debian archive.
 
-It applies 0047, 0049, 0050, 0054, 0059, 0068, 0075 and 0079.
+It applies 0047, 0049, 0050, 0054, 0059, 0068, 0075, 0079 and 0083.
