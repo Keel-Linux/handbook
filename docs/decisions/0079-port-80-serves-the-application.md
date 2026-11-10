@@ -69,3 +69,32 @@ waited on `http://127.0.0.1/` and failed on BR1 and BR2.
 - Sites that keel renders from `web.sites` (0042) do not change.
 - A real browser on `http://<address>/` of a cloud node through Anubis is
   still to be proven in a commissioning run: CI uses stand-ins.
+
+## Amendment 2026-11-10: keel-ntfy keeps the redirect on port 80
+
+Decided by the maintainer, 2026-11-10 ("sim tudo", question a).
+
+**The exception.** keel-ntfy does not follow items 1, 6 and 7. Port 80
+never serves ntfy, also on the loopback and with the self-signed
+certificate. Every request on port 80 gets a 301 to the same URL on
+HTTPS, except on two paths that stay on port 80:
+
+- `/.well-known/acme-challenge/`, which keel-web serves for ACME HTTP-01
+  (keel-ntfy 19.0-6).
+- `/keel-health`, which answers 204 on port 80 and on port 443 for the
+  monitor.
+
+**The reason.** The clients of ntfy are the phone application and keel,
+not browsers (0063). Access is closed by default, so a publish or a
+subscription sends a credential: a password or a token. An answer in
+clear text must not exist, also with the self-signed certificate.
+keel-ntfy 19.0-2 closed port 80 for this reason: the API was open in
+clear text on the external address. Item 1 shows the application before
+the name points to the machine, but a client shows no page.
+
+**The contract.** The commissioning contract of keel-ntfy (0075) checks
+that `http://127.0.0.1/v1/health` answers 301 and that
+`https://127.0.0.1/v1/health` answers 200, in place of item 7. It
+checks `/keel-health` 204 on port 80 and on port 443.
+
+Every other application on Keel Web follows 0079 with no change.
