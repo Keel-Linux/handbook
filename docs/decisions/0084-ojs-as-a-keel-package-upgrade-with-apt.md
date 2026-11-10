@@ -221,9 +221,19 @@ upgrade is code-only, and none goes to Keel trixie-security. cron-apt
 does not take OJS. In `simple` mode, the operator runs `apt upgrade`. In
 a pair, the operator upgrades one node at a time (0073 item 6). A line
 change (3.5 to 3.7) is always a deliberate act. 3.5 removed old plugin
-formats, and the next line can do the same. A later note can allow a
-build upgrade inside a line on a timer in `simple` mode, after 2 build
-upgrades pass the tests below.
+formats, and the next line can do the same.
+
+The operator does not look for a new build. The node sends a message
+through ntfy when an OJS upgrade waits
+([0085](0085-a-node-tells-the-administrator-when-an-upgrade-waits.md)).
+The OJS packages carry the field `Keel-Upgrade-Note` of that note, which
+tells the operator that the upgrade migrates the database and that the
+site is in maintenance during the migration. A new line is a new package
+name, so apt does not show it as an upgrade, and the node sends no
+message for it. The application page (0077) announces a new line.
+
+A later note can allow a build upgrade inside a line on a timer in
+`simple` mode, after 2 build upgrades pass the tests below.
 
 ### 9. The pair
 
