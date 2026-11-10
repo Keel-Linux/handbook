@@ -1,10 +1,12 @@
 # 0084: OJS 3.5 LTS as a Keel package, and an upgrade with apt
 
 Date: 2026-11-10
-Status: **proposed.** The maintainer asked for the application and for
-the upgrade with apt on 2026-11-10. The maintainer did not decide the
-design below. Nothing in it is built. The tests at the end must pass on
-a real machine before the decision is accepted.
+Status: **accepted by the maintainer, 2026-11-10** ("sim aceito", after
+the results of the first test), as the direction for OJS. The
+maintainer asked for the application and for the upgrade with apt on
+the same day. Nothing in it is built. The tests at the end must pass on
+a real machine before a package or an image is released (0075). A test
+that fails changes this note before the build continues.
 
 A first test by hand ran on 2026-11-10, on a real container on BR1
 (`evidence/2026-11-10-ojs-3.5-php-8.4-first-test.md`). It corrected
@@ -91,7 +93,7 @@ If the commissioning fails, the options are:
    each time. They refuse a jump before a file changes, and they leave a
    dump and a file copy that match the old package.
 
-## Proposed
+## Decision
 
 ### 1. Stack and line
 
@@ -315,7 +317,7 @@ Both nodes run the same package version. One database is replicated.
   security source on the base.
 - **The PKP container image:** no container runtime in Keel.
 
-## Not decided / tests before acceptance
+## Tests before the release
 
 Each test makes an evidence file (0053). Use 2 LXC on BR1 and 1 on BR2,
 with netem (0075).
