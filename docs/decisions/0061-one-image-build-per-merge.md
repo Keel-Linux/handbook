@@ -255,3 +255,49 @@ first runs on the build host (evidence
    `--match-source` compares commits, not paths. This costs build time,
    not correctness. It is not changed now.
 
+
+## Amendment of 2026-11-10: the timer is off until the gate agrees with 0075
+
+Decided by the coordinator under the maintainer's delegation
+(2026-11-10). Evidence:
+`evidence/2026-11-10-alert-topic-and-image-ci-timer.md`.
+
+1. **`keel-image-ci.timer` is off on the build host, and it stays off.**
+   It was stopped on 2026-11-09 at 02:03 UTC. On 2026-11-10 at 18:19
+   UTC its unit link was removed, so that a restart of the build host
+   does not start it.
+2. **Why.** This flow promotes a build after a boot test on the runner.
+   It signs the promoted copy with the main key and the images key, and
+   its `MANIFEST` says `channel testing`. Decision 0075, which is later
+   than this note, says that no image is released, to testing also,
+   before the commissioning test passes on BR1 and on BR2. A promoted
+   build is not on a public server. But it has the signatures of a
+   release, and a person can copy it from
+   `/srv/keel-ci/testing/latest-<appliance>` and think that it is a
+   tested release. The two decisions must not disagree.
+3. **The flow also did not work well.** The runs from 2026-11-06 23:55
+   UTC to 2026-11-09 opened issues 50 to 59 of `Keel-Linux/image-gate`,
+   for a build or a boot test that failed. All are open. The last two
+   runs, on 2026-11-09, built no appliance. The last promoted build is
+   `20261107T003855Z`.
+4. **The timer comes back when these two conditions are true:**
+   - the cause of those failures is found and corrected;
+   - the result of the flow cannot be read as a release. Either the
+     flow runs the commissioning test of 0075 before it promotes, or it
+     stops at "built and boot tested" and does not sign with the main
+     key and the images key. `Keel-Linux/apt` gets an issue for this
+     choice.
+5. **What is lost in the interval.** No check boots the layer that a
+   merge makes. The commissioning test of each release finds such a
+   defect later, at the release. This is accepted for a short time, and
+   not as the permanent state.
+6. **The builds that are in `/srv/keel-ci/testing/` now are not
+   releases.** No person gives them to a tester. A tester gets the
+   signed images of the stable channel.
+
+To turn the timer on again, on the build host:
+
+```
+systemctl link /srv/keel-apt/apt/systemd/keel-image-ci.timer
+systemctl enable --now keel-image-ci.timer
+```
