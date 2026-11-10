@@ -59,7 +59,7 @@ database, the modes, the live forum and the order of work.
 
 Node.js is not in the layer. The layer installs the Keel Node.js package
 of 0083, and a second image that needs Node.js installs the same package.
-Common's `conf/nodejs`, which runs `n lts` with no pin, is not used.
+Common's `conf/nodejs`, which installs Node.js with `n`, is not used.
 
 **The old layer.** `keel-nodejs-nginx` gets no new build. After step 7,
 its repository is archived with a README line to this note, and the name
