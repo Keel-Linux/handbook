@@ -4,7 +4,8 @@ Date: 2026-11-10
 Status: **accepted by the maintainer, 2026-11-10** ("sim aceito", after
 the results of the first test), as the direction for OJS. The
 maintainer asked for the application and for the upgrade with apt on
-the same day. Nothing in it is built. The tests at the end must pass on
+the same day. A first prototype of the packages exists in
+`Keel-Linux/ojs`. Nothing is released. The tests at the end must pass on
 a real machine before a package or an image is released (0075). A test
 that fails changes this note before the build continues.
 
@@ -28,6 +29,12 @@ plugin directory, the maintenance mark, the worker and the scheduler,
 and the site with no network. It was complete after the third test. It
 corrected the first-boot facts and it added conditions for nginx, the
 plugins and the worker. Each such place has the mark "(second test)".
+
+A package test ran on 2026-11-11, on two containers on BR1
+(`evidence/2026-11-11-ojs-package-real-node.md`). It tested the first
+prototype of the packages `ojs-3.5` and `ojs-common`. It corrected the
+source, the version, the preinst, the failure path and the restore.
+Each such place has the mark "(package test)".
 
 ## What was asked
 
@@ -141,20 +148,33 @@ package depends on these Debian packages: `php8.4-bcmath`, `php8.4-curl`,
 
 ### 2. The source and the build
 
-A source repository `Keel-Linux/ojs-deb`, in the pattern of
-`vaultwarden-deb` (0074). The build downloads
-`ojs-3.5.0-6.tar.gz` from pkp.sfu.ca. The source pins its sha256 (0012).
+The source repository is `Keel-Linux/ojs`. (package test) It has the
+name of the package, as the repository `anubis` has. Its layout is the
+one of keel-web: a directory `packages/NAME/debian/` for each package,
+and bats tests with kcov coverage. The image repository is `keel-ojs`,
+a later repository. The build downloads `ojs-3.5.0-6.tar.gz` from
+pkp.sfu.ca. The source pins its sha256 (0012).
+
 PKP signs nothing, so the build also compares the tarball with the git
 tag `3_5_0-6` and its submodule commits. The tarball adds `vendor/` and
 the built JavaScript, and the build lists that difference in the build log.
+(package test) The prototype does not do this comparison yet. It checks
+the pinned sha256 only.
 
 ### 3. Package names and versions
 
 | Package | Content |
 | --- | --- |
-| `ojs-3.5` | The code of one line. Version `3.5.0.6-1` (the PKP `-6` becomes `.6`, because `-` starts the Debian revision) |
-| `ojs-3.5-plugin-NAME` | One gallery plugin, from its `plugins.xml` release, checked by sha256 that the source pins |
-| `ojs-common` | The paths, the system user setup, the systemd units, the nginx routes and the `ojs-upgrade` script |
+| `ojs-3.5` | The code of one line. Version `3.5.0.6+keel1` (the PKP `-6` becomes `.6`, because `-` starts the Debian revision) |
+| `ojs-3.5-plugin-NAME` | One gallery plugin, from its `plugins.xml` release, checked by sha256 that the source pins. Not in the prototype |
+| `ojs-common` | The paths, the systemd units, the nginx routes and the notice page, the scripts that the maintainer scripts of `ojs-3.5` call (`ojs-preinst`, `ojs-postinst`), the first boot (`ojs-firstboot`) and the `ojs-upgrade` script |
+
+(package test) The prototype has two binary packages, `ojs-3.5` and
+`ojs-common` (version 0.1.0), from two native sources in
+`Keel-Linux/ojs`. The version is `3.5.0.6+keel1`, not `3.5.0.6-1`: the
+build tool of the Keel archive refuses a rebuild of an upstream with no
+`+keelN` suffix. The maintainer scripts of `ojs-3.5` are thin calls to
+the scripts of `ojs-common`, which is a `Pre-Depends`.
 
 `ojs-3.5` and a future `ojs-3.7` both provide `ojs-code` and conflict
 with each other. `apt upgrade` moves only inside a line, because it never
@@ -201,6 +221,12 @@ nothing to the file.
 key does not stop the upgrade, and the exit code does not show the
 defect (see "Facts checked"). So `ojs-upgrade` checks the key two
 times (section 7).
+
+(package test) The image runs etckeeper. It commits
+`/etc/ojs/config.inc.php` and `/etc/ojs/app_key` into `/etc/.git`
+before and after each apt run. `/etc/.git` is root 0700, but its
+history keeps each old secret after a change. This is open. The
+appliance layer `keel-ojs` decides it.
 
 (first test) The first boot runs `tools/install.php` as www-data, with
 the file already in place and read-only for www-data. This is
@@ -278,11 +304,35 @@ who needs a plugin that is not packaged asks for a package.
 
 ### 6. `preinst`
 
-`preinst` changes nothing. It runs on `upgrade`. It also runs on
-`install` when a database or `/etc/ojs/config.inc.php` exists, because a
-line change installs a new package name. If one check fails, it exits 1.
-On an upgrade, dpkg then runs the old `postinst abort-upgrade`, and the
-old version stays installed and configured.
+`preinst` runs on `upgrade`. It also runs on `install` when
+`/etc/ojs/config.inc.php` exists, because a line change installs a new
+package name. (package test) Without the config, the database name is
+not known, so a database alone does not start the checks. If one check
+fails, it exits 1. On an upgrade of a configured package, dpkg then
+calls the old `postinst abort-upgrade`, and the old version stays
+installed and configured.
+
+(package test) The preinst has these effects:
+- Before the checks, it removes a token `/run/ojs/unpack` of an earlier
+  run. A maintenance mark `state=unpack` of an earlier run becomes
+  `state=unpack-interrupted`. It does this also when a check refuses
+  (section 7, "The unpack").
+- When the checks pass on an installed node, it closes the site before
+  dpkg unpacks the new code. On the writable node it stops the timer
+  and the worker first. In the test, a power loss during the unpack
+  with no such close left a mixed code tree that answered HTTP 200,
+  with the worker active.
+- After a power loss during the unpack, the old package is half
+  installed, and dpkg calls no `postinst` of it. If a check then
+  refuses and the mark says `state=unpack-interrupted`, the preinst
+  sends the alert itself.
+
+(package test) In the prototype, check 5 is "the database answers"
+only. The pair state belongs to the appliance layer `keel-ojs`. The
+list of check 6 for an import is in `postinst`, before the migration,
+because the new code is not unpacked at preinst time. Check 4 runs only
+on the writable node with a database that is older than the code,
+because only then a backup follows.
 0. **Incomplete mark.** Refuse while `/var/lib/ojs/upgrade-incomplete`
    exists. dpkg records the version of a failed migration as installed
    (section 7), so without this check the next build runs `upgrade.php`
@@ -354,27 +404,110 @@ node, it calls `ojs-upgrade`:
    but the setting permits it. (second test) The worker starts after
    the cache clear, not before it.
 
+(package test) On an upgrade, the preinst already closed the site, and
+on the writable node it stopped the timer and the worker (section 6).
+Step 2 then writes an empty maintenance mark, which is the mark of a
+migration. Step 3 also copies the kept file of the old package into the
+backup, if the node has it. On a standby, before the first boot, and
+with a database at the code version, `postinst` opens a site that the
+preinst closed. In the test, the migration of 3.5.0.5 to 3.5.0.6
+took less than 1 second. The site gave 503 for about 21 seconds, from
+the preinst to the end of the configure.
+
 **If the migration fails**, `ojs-upgrade` keeps the two marks. It
-keeps the jobs and the timer stopped. It sends an alert (0063) and
-exits 0. (third test) `ojs-upgrade` writes the incomplete mark before
-the dump and removes it only after a success. Thus a `kill -9` or a
-power loss, where `ojs-upgrade` cannot write anything, leaves the same
-state as a failure that it sees. It does not exit non-zero, for
-these reasons:
+keeps the jobs and the timer stopped. It sends an alert and exits 0.
+(third test) `ojs-upgrade` writes the incomplete mark before the dump
+and removes it only after a success. Thus a `kill -9` or a power loss,
+where `ojs-upgrade` cannot write anything, leaves the same state as a
+failure that it sees. It does not exit non-zero, for these reasons:
 - A non-zero `postinst` leaves the package half-configured.
 - Then each later apt run calls `postinst` again. That runs
   `upgrade.php` again on a half-migrated schema.
 - It also blocks the daily security run of cron-apt (0073) on that node.
+
+(package test) Until the Keel alert (0063) is on the nodes, the alert
+is three things: a message on stderr, a `logger -p daemon.crit -t
+ojs-upgrade` line, and a call of each executable in `/etc/ojs/alert.d`
+with the text. The text names the two versions, the cause, the log, the
+backup and the two commands. The cause is the exit code of
+`upgrade.php`, a core row that is not the code version, or an empty
+`app_key`. In the test, `upgrade.php` gave code 2 for an SQL lock
+timeout and code 137 after `kill -9`.
+
+(package test) After a power loss during the migration, dpkg shows the
+package as half configured (`iF`). The worker and the scheduler do not
+start at the boot, because their units have
+`ConditionPathExists=!/var/lib/ojs/maintenance`. Each apt command
+returns 100 until `dpkg --configure -a` runs. That configure finds the
+incomplete mark. It runs no migration, sends the alert and exits 0.
+Then the operator runs `--retry` or `--restore`.
 
 The operator then runs one of two commands:
 - `ojs-upgrade --retry`. It does the restore below, then it runs the
   upgrade again. Use it after a fix, for example more memory or a
   corrected `base_url`. (third test) It does not continue on the half
   state: a second run on a 3.3 half state failed in 3 of 3 cases.
+  (package test) A correction in the database after the failure is
+  lost. If the backup has no `complete` stamp, the migration did not
+  start: then `--retry` makes a new backup and does not restore.
 - `ojs-upgrade --restore`. It does the restore below. Then it installs
-  the old `.deb` from the pool (0016) with `--allow-downgrades`. The
-  database comes first, or the old `preinst` refuses a database that is
-  newer than its code.
+  the old package with `apt-get --allow-downgrades`. The database comes
+  first, or the old `preinst` refuses a database that is newer than its
+  code. (package test) The old `preinst` also refuses while the
+  incomplete mark exists. So `--restore` removes the mark before
+  `apt-get`. If `apt-get` fails, it writes the mark again and sends the
+  alert.
+
+(package test) The Keel repository index holds one version of each
+package. After the repository moves, apt cannot get the old version
+from it. Thus each configure copies the file of its package from the
+apt archive to `/var/lib/ojs/packages`, and only the file of the
+running package stays there. Each backup gets a copy of the kept file
+of the old package, which is 77 MB. `--restore` installs the file from the
+backup, else the kept file, else `PACKAGE=VERSION` from the repository.
+In the test, the repository had only the new version, and `--restore`
+installed the old package from the backup in 22 seconds. An install
+with `dpkg -i` leaves no file in the apt archive, so then no copy is
+kept.
+
+**The unpack** (package test). dpkg unpacks the new code between the
+preinst and the configure. The prototype uses two marks for this time:
+- The maintenance mark `/var/lib/ojs/maintenance`. nginx answers 503
+  while it exists, and the worker and the scheduler do not start. An
+  empty mark is the mark of a migration, a retry or a restore. The
+  preinst writes `state=unpack`, and `workers=stopped` when it stopped
+  the worker and the timer.
+- The token `/run/ojs/unpack`. The preinst writes it after the mark. It
+  says that the mark is of the preinst of this dpkg run. The next
+  preinst and each configure remove it. A boot removes it too, because
+  `/run` is a tmpfs.
+
+A configure that passes removes a mark of the preinst. Then it starts
+the worker and the timer, if the preinst stopped them and they are
+enabled. An empty mark stays until a migration, `--retry` or `--restore`
+passes.
+
+If the new preinst refuses or the unpack fails, dpkg puts the old files
+back. Then it calls the old `postinst abort-upgrade`, or `abort-remove`
+after a line change that it takes back. With `state=unpack` and the
+token, the old `postinst` empties the cache, reloads PHP-FPM and opens
+the site. In the test, a cut package file gave 503 for 4 seconds, and
+the old version stayed configured. With no token, or with
+`state=unpack-interrupted`, the code tree is not known to be whole. Then
+the site stays closed, and an alert names `apt-get install --reinstall`.
+
+After a power loss during the unpack, the site stays closed after the
+boot, and dpkg shows the package as half installed (`iHR`). To end the
+upgrade:
+1. Run `dpkg --configure -a`. It configures the other packages, and the
+   OJS code package stays half installed.
+2. Run `apt-get install --reinstall ojs-3.5`. dpkg unpacks the new code
+   again, and its configure runs the migration.
+
+When the unpack of the OJS code package fails, other packages of the
+same apt run can stay unpacked and not configured. In the test, these
+were keel-web and an nginx module. `apt-get upgrade` also configures
+such packages, nginx included, while the site is in maintenance.
 
 **The restore** (third test):
 1. Drop the database. Create it again with the recorded character set
@@ -383,6 +516,11 @@ The operator then runs one of two commands:
    file that is not in the copy.
 3. Copy the config back.
 4. Empty `/var/cache/ojs` and make its directories again.
+   (package test) The web user removes the files (`runuser` and `find
+   -delete`, from `/`) and makes the directories. Root sets only the
+   owner and the mode of `/var/cache/ojs`. The web user can put a link
+   in its own directory, and a `chown` as root follows a link. OJS
+   makes `/var/cache/ojs/opcache` again by itself.
 
 A dump that is loaded into the half-migrated database is not a restore.
 In the test, 27 new tables and 5 new files stayed, and the next upgrade
@@ -394,16 +532,30 @@ next upgrade passed.
 Keel package. After `--restore`, the node has the old data and the 3.5
 code, and it stays in maintenance. The operator corrects the cause and
 runs `--retry`, or keeps the old machine. A retry after a pre-flight
-check that refused, with no restore, was not tested.
+check that refused, with no restore, was not tested. (package test) In
+this case `--restore` exits 0, and the incomplete mark stays with
+`phase=restored`. This is from the code. It was not tested.
+
+**Exit codes** (package test), from the code:
+
+| Script | 0 | 1 | 2 |
+| --- | --- | --- | --- |
+| `ojs-preinst` | The checks pass | Refused. dpkg does not unpack the new code | Usage |
+| `ojs-postinst configure` | Done. Also after a failed migration, and with an incomplete mark | Nothing ran: the database does not answer, the database is newer than the code, or another `ojs-upgrade` holds the lock. dpkg runs the configure again on the next apt run. If the site is closed, an alert says so, except for the lock | Usage |
+| `ojs-postinst abort-upgrade`, `abort-remove` | Always | Not used | Usage |
+| `ojs-upgrade --retry`, `--restore` | Done. Also `--restore` of an import from outside Keel, with the mark and the maintenance kept | Failed or refused. The marks stay | Usage |
 
 A monit check fails while the incomplete mark exists and no
-`ojs-upgrade` runs.
+`ojs-upgrade` runs. (package test) This check belongs to the appliance
+layer `keel-ojs`, and it is not built. Until then, a boot that finds a
+mark sends no alert, and `/keel-health` stays 204.
 
 **What apt can roll back.** apt can install the old code again, if the
-old `.deb` is in the pool. apt cannot roll back the database or
-`files_dir`. Old code does not run on a newer schema. So a rollback is
-always all three parts together: the database, the files and the old
-package.
+file of the old package is on the node (in the backup or in
+`/var/lib/ojs/packages`) or in the repository. apt cannot roll back the
+database or `files_dir`. Old code does not run on a newer schema. So a
+rollback is always all three parts together: the database, the files
+and the old package.
 
 ### 8. Unattended upgrades
 
@@ -416,6 +568,12 @@ runs `apt upgrade`. In a pair, the operator upgrades one node at a time
 (0073 item 6). A line
 change (3.5 to 3.7) is always a deliberate act. 3.5 removed old plugin
 formats, and the next line can do the same.
+
+(package test) `apt upgrade` upgrades each package that waits, in one
+run. In the test, nginx and keel-web were configured in the same run,
+while the OJS site was in maintenance. The site is closed from the
+preinst of the OJS code package to the end of its configure, not for
+the full apt run.
 
 The operator does not look for a new build. The node sends a message
 through ntfy when an OJS upgrade waits
@@ -508,6 +666,11 @@ with netem (0075).
    (first test) Done by hand, with no package: code 0 in 1.2 seconds on
    a database with one journal and one submission. The 11 migrations
    ran. The duration on a large journal is not known.
+   (package test) Done with the package, from `3.5.0.5+keel1` (test
+   material, never published) to `3.5.0.6+keel1`. `apt-get upgrade`
+   gave code 0 in 32 seconds, with 9 other packages in the same run.
+   The 11 migrations ran in less than 1 second. The site gave 503 for
+   about 21 seconds. The duration on a large journal is not known.
 3. Upgrade a 3.3.0-24 dataset to 3.5 on MariaDB 11.8. PKP CI does not
    test this path.
    (third test) Done by hand, with no package: code 0 in 52 to 128
@@ -522,6 +685,15 @@ with netem (0075).
    `kill -9` and `memory_limit=32M`). The restore of section 7 gives the
    identical state. The restore that this note had before the test does
    not. The package must repeat this test with `ojs-upgrade`.
+   (package test) Done with `ojs-upgrade` on 3.5.0.5 to 3.5.0.6: a
+   failed migration (a lock timeout) with `--retry` and with
+   `--restore`, a `kill -9` of `upgrade.php` with `--retry`, and a power
+   loss during the migration with `--retry`. Each one passed. The test
+   compared the core version, the count of tables, the code release,
+   the marks, the units and the HTTP answers, not the full content.
+   Also passed: a power loss during the unpack, a failed unpack, and a
+   refused preinst after a power loss (with the alert of `27916c3`). Not done with the package: a low
+   `memory_limit`, and a 3.3 import.
 5. Paths and plugins:
    - Run `upgrade.php` as www-data with a read-only `config.inc.php`
      that has `app_key`. No step writes the file.
@@ -560,6 +732,8 @@ with netem (0075).
    dump of 31 MB and a file copy of 122 MB.
 8. Run a line change with a test package `ojs-3.6` (from `main`) and
    check that `preinst` runs on `install`.
+   (package test) Also check `abort-remove`: the new line refuses or
+   fails, and the old package opens the site again.
 
 Not verified in this note:
 - The Debian WNPP search (refused) and the reason of bug 662828 (a
@@ -585,6 +759,11 @@ Not verified in this note:
 - The full-text index of a PDF. The template has the `pdftotext` line
   as a comment, and the worker skips each PDF.
 - An account activation with `require_validation = On`.
+- (package test) The package with a 3.3 import, the Anubis front, plugin
+  packages, a standby node, the PKP checklist on a node that the package
+  installed, and a refusal of the disk check.
+- (package test) The exclusion of the OJS secrets from etckeeper
+  (section 4).
 
 ## Sources
 
