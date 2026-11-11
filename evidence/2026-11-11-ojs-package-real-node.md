@@ -58,7 +58,7 @@ publishes it (note 0084, "The answer for trixie").
 | `ojs-3.5_3.5.0.5+keel1_all.deb` | `f6c3246523fca3c6ba71651ff92a4447901beb4681bcb5cee09a83d2ade29316` | `1d75cf1` | run 2 |
 | `ojs-3.5_3.5.0.6+keel1_all.deb` | `729bca3dbc5b38d73fc8d310c97f5debb66f11c591fd131bd51a5ddd2d627b48` | `1d75cf1` | run 2 |
 | `ojs-3.5_3.5.0.6+keel1_all.deb`, cut to 41943040 bytes | `247bcf27cc954b07347f0d4b2c24bdba7b7ae1c00eef486f2a98370af030d9ad` | (a copy of the file above) | run 2, test 44 |
-| `ojs-common_0.1.0_all.deb` | `74701c5a4dd48c7a3059b7c85e90da922ce2ac3c9a4083327517ff8c0158da14` | `1d75cf1` | run 2, tests 10 and 20 |
+| `ojs-common_0.1.0_all.deb` | `74701c5a4dd48c7a3059b7c85e90da922ce2ac3c9a4083327517ff8c0158da14` | `1d75cf1` | run 2, tests 10 to 24 |
 | `ojs-common_0.1.0_all.deb` | `e1a54753acad5d03793395eaf88f22e2588d3f01089e7fdcf4a0115579c34cf9` | `9e9a5a7` | run 2, tests 25 to 45, snapshot `q1` |
 | `ojs-common_0.1.0_all.deb` | `95809b41e8c9df9b4e35b79f35e6febbbc46a1b30a7d41b2210a782dc62a63ed` | `27916c3` | run 2, test 46 |
 
@@ -101,7 +101,7 @@ one time each second. The 503 durations below count those polls.
 | Install 3.5.0.5 from local files | run 1, `10-install-3.5.0.5.log` | apt code 0 in 36 s |
 | Install 3.5.0.5 from the repository | run 2, `10-install-3.5.0.5.log` | apt code 0 in 38 s. The dpkg trigger reloaded nginx: the same main process, new worker processes. `/` gave 503 before the first boot, `/keel-health` 204. The file of the package was kept in `/var/lib/ojs/packages` |
 | First boot | run 1, `20-firstboot.log`, `21-state-after-firstboot.log` | Code 0 in 110 s. 132 tables, core version 3.5.0.5, `utf8mb4_unicode_ci`. The config is read-only for www-data. `/config.inc.php`, `/tools/upgrade.php`, `/.git/config` gave 403. `pdf.mjs` came as `text/javascript` |
-| First boot | run 2, `20-firstboot.log` | Code 0 in 111 s, with the message "cannot empty /var/cache/ojs as www-data". This is defect 1 |
+| First boot | run 2, `20-firstboot.log` | Code 0 in 111 s, with the message "cannot empty /var/cache/ojs as www-data". `9e9a5a7` fixes this |
 | Reboot after the first boot | run 1, `23-after-reboot.log` | The worker and the timer are active, `/` gives 200 |
 | Upgrade 3.5.0.5 to 3.5.0.6 | run 1, `30-upgrade-3.5.0.6.log`, `31-state-after-upgrade.log`, `32-after-upgrade-checks.log` | apt code 0 in 26 s. 503 for 4 s (this build closed the site in the postinst). The page generator says 3.5.0.6. Backup 152 MB with its `complete` stamp |
 | Upgrade with `apt-get upgrade` | run 2, `30-upgrade-3.5.0.6.log` | 10 packages in one run, `ojs-3.5`, nginx and keel-web included. apt code 0 in 32 s. 503 for about 21 s, from the preinst to the end of the configure. The migration took less than 1 s. Backup 226 MB: it holds the 77 MB file of the old package |
@@ -112,8 +112,8 @@ one time each second. The 503 durations below count those polls.
 | Power loss during the migration | run 2, `42-power-loss-migration.log` | After the boot: `ojs-3.5` 3.5.0.6+keel1 `iF`. The maintenance mark and the incomplete mark exist. The worker did not start (the unit condition). `/` gives 503. apt code 100. `dpkg --configure -a`: the postinst runs no migration and sends the alert, the package becomes `ii`. `--retry`: code 0 in 14 s |
 | Power loss during the unpack, run 1 | run 1, `42-power-loss.log` | After the boot: `iHR`, no maintenance mark, `/` gives 200, the worker active. The tree was mixed: `version.xml` says 3.5.0.5, and the 3.5.0.6 migration `I13283` exists. After `dpkg --configure -a` (the package stayed `iHR`), `apt-get install` of the 3.5.0.6 file repaired the tree and migrated: code 0 in 23 s. This finding is the cause of `5dcb9c8` |
 | Power loss during the unpack, run 2 | run 2, `43-power-loss-unpack.log` | Before the stop: the mark `state=unpack` `workers=stopped` and the token. After the boot: `iHR`, the same mark, no token, `/` gives 503, the worker did not start, apt code 100. `dpkg --configure -a` configured nginx, and `ojs-3.5` stayed `iHR`. `apt-get install --reinstall ojs-3.5`: the preinst said "an earlier unpack or configure ... did not end", then the configure migrated. Code 0 in 27 s, the site open |
-| Failed unpack (a cut file) | run 2, `44-failed-unpack.log` | dpkg-deb stopped with "unexpected end of file". dpkg called the old postinst with `abort-upgrade`. The token was there, so the site opened: "the upgrade was aborted and dpkg put the old code back; the site is open". 503 for 4 s. apt code 100. `ojs-3.5` stays 3.5.0.5+keel1 `ii`. No alert, as the prototype says. keel-web and libnginx-mod-stream of the same apt run stay unpacked and not configured |
-| Refused preinst after a power loss during the unpack | run 2, `45-refused-after-power.log` | The database was stopped. The preinst refused (check 5), apt code 100, `ojs-3.5` `iH`, the mark `state=unpack-interrupted`, `/` gives 503. No alert left the node. This is defect 2. With the database up, the reinstall passed |
+| Failed unpack (a cut file) | run 2, `44-failed-unpack.log` | dpkg-deb stopped with "unexpected end of file". dpkg called the old postinst with `abort-upgrade` (the `-D2` output: `ojs-3.5.postinst ( abort-upgrade 3.5.0.6+keel1 )`). The token was there, so the site opened: "the upgrade was aborted and dpkg put the old code back; the site is open". 503 for 4 s. apt code 100. `ojs-3.5` stays 3.5.0.5+keel1 `ii`. No alert, as the prototype says. keel-web and libnginx-mod-stream of the same apt run stay unpacked and not configured |
+| Refused preinst after a power loss during the unpack | run 2, `45-refused-after-power.log` | The database was stopped. The preinst refused (check 5), apt code 100, `ojs-3.5` `iH`, the mark `state=unpack-interrupted`, `/` gives 503. No alert left the node: after the refusal, the dpkg debug output (`-D2`) shows no call of the `ojs-3.5` postinst. `27916c3` fixes this. With the database up, the reinstall passed |
 | The same, with the fix | run 2, `46-refused-after-power-alert.log` | The preinst sent the alert: "the install of the OJS code 3.5.0.6 was refused after an unpack that did not end. The site stays in maintenance ...". The hook got it. With the database up, the reinstall passed, the site open |
 | The worker and the scheduler after the upgrade | run 1, `43-scheduler-worker-3.5.0.6.log` | The timer started the scheduler each minute, and it ended with code 0. The worker started at 15:36:47. 0 jobs, 0 failed jobs |
 
@@ -194,8 +194,8 @@ Each fix adds bats tests to the repository.
 
 ## State after the test
 
-CT 9367 (snapshot `p1`) and CT 9368 (snapshot `q1`) stay on BR1. Their
-config files hold test passwords and keys. Remove them after this file
+At the end of the logs, CT 9367 (snapshot `p1`) and CT 9368 (snapshot
+`q1`) were on BR1. Their config files hold test passwords and keys. Remove them after this file
 is merged. The command logs are with the coordinator
 (`repos/ojs-hand-tests/pkg1/` and `pkg2/`). This file holds the lines
 that the note uses. The coordinator compared each line of this file

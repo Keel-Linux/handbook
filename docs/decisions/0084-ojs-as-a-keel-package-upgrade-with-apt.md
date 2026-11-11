@@ -501,7 +501,7 @@ boot, and dpkg shows the package as half installed (`iHR`). To end the
 upgrade:
 1. Run `dpkg --configure -a`. It configures the other packages, and the
    OJS code package stays half installed.
-2. Run `apt-get install --reinstall ojs-3.5`. The new code is unpacked
+2. Run `apt-get install --reinstall ojs-3.5`. dpkg unpacks the new code
    again, and its configure runs the migration.
 
 When the unpack of the OJS code package fails, other packages of the
@@ -692,7 +692,7 @@ with netem (0075).
    compared the core version, the count of tables, the code release,
    the marks, the units and the HTTP answers, not the full content.
    Also passed: a power loss during the unpack, a failed unpack, and a
-   refused preinst after a power loss. Not done with the package: a low
+   refused preinst after a power loss (with the alert of `27916c3`). Not done with the package: a low
    `memory_limit`, and a 3.3 import.
 5. Paths and plugins:
    - Run `upgrade.php` as www-data with a read-only `config.inc.php`
