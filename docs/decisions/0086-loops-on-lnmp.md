@@ -1,9 +1,11 @@
 # 0086: Loops, the federated short-video application, on LNMP
 
 Date: 2026-11-11
-Status: **proposed, 2026-11-11**, for the maintainer. Nothing in it is
-built or released. One test by hand ran on a real container on BR1
-(`evidence/2026-11-11-loops-beta-15-hand-test.md`). A local prototype of
+Status: **proposed, 2026-11-11**, for the maintainer. On 2026-11-12 the
+maintainer decided the seven open points of the note and the six
+questions of the first pair test (section "Decided by the maintainer,
+2026-11-12"). Nothing in it is built or released. One test by hand ran
+on a real container on BR1 (`evidence/2026-11-11-loops-beta-15-hand-test.md`). A local prototype of
 the layer exists, with no remote. Its first boot hook and its gate ran on
 the same container (evidence, item 13) and found 3 defects, which are fixed.
 No image was built. The section "Open points" lists what the maintainer
@@ -294,22 +296,9 @@ Two parts of the contract cannot pass yet:
 
 ## Open points
 
-1. Upstream is a beta with no stable release. May Keel release
-   `keel-loops` on a beta, after it passes 0075? (yes/no)
-2. Upstream supports MySQL only. Do we use MariaDB of the LNMP stack, with
-   the commissioning as the proof? (yes/no)
-3. How does a new Loops reach a node? (a) a new image only, until upstream
-   has a stable release; (b) a Keel package with an upgrade by apt, as
-   OJS in 0084.
-4. Does the replica show a notice page and serve no Loops page, as
-   above? (yes/no)
-5. May the first release run Redis alone on each node, so that a
-   failover loses the queue and the web sessions, until keel has the
-   Redis follow of 0065? (yes/no)
-6. Upstream accepts no AI-generated issues or patches. Do defects that
-   Keel finds go to upstream only through the maintainer? (yes/no)
-7. May the main session create `Keel-Linux/keel-loops` on git.pop.coop
-   from the local prototype? (yes/no)
+The maintainer answered all seven points on 2026-11-12 (section "Decided
+by the maintainer, 2026-11-12", part "The open points of 2026-11-11").
+No point of this list is open.
 
 ## Amendment 2026-11-12: the first pair test
 
@@ -354,3 +343,54 @@ the changes.
 7. **Section 10, mail.** With `MAIL_MAILER=log` Loops refuses every
    registration with 403 ("Mail service not configured"). An instance has
    no new user until the administrator sets a mailer.
+
+## Decided by the maintainer, 2026-11-12
+
+### The open points of 2026-11-11
+
+The maintainer agreed to these answers on 2026-11-12 ("concordo
+contigo"):
+
+1. **The beta.** `keel-loops` ships in the testing channel only, marked
+   "upstream beta". It does not go to the stable channel before upstream
+   has a stable release. It still must pass 0075 first.
+2. **The database.** Loops uses the MariaDB of the LNMP stack, with the
+   commissioning of 0075 as the proof.
+3. **A new Loops.** A new version comes by a new image only (option a),
+   not by a Keel package.
+4. **The replica.** The replica shows a notice page and serves no Loops
+   page.
+5. **Redis.** Redis runs alone on each node until keel has the Redis
+   follow of 0065. A failover loses the queue and the web sessions.
+6. **Upstream.** Defects that Keel finds go to upstream only through the
+   maintainer, in his words.
+7. **The repository.** `Keel-Linux/keel-loops` is created on git.pop.coop.
+   This is done.
+
+### The questions of the first pair test
+
+The report of the first pair test asked the maintainer six questions. They
+were not in the list "Open points". The maintainer answered yes to all six
+on 2026-11-12:
+
+1. **CrowdSec and the mesh.** The IPv6 prefix of the mesh goes in the
+   whitelist of CrowdSec in every cloud mode. In the test CrowdSec banned
+   the address of the witness on the mesh, and etcd had 2 healthy voters
+   of 3 (evidence, section 7). This is a change of keel:
+   Keel-Linux/keel#303.
+2. **The lost videos.** When the gate opens the site, Loops dispatches
+   the unprocessed videos again. A switch loses the queue, and a video
+   stays in the state "processing" (evidence, section 5).
+   Keel-Linux/keel-loops#2 uses the upstream command
+   `videos:retry-failed` for this.
+3. **Anubis.** `/api/` and `/oauth/` stay behind Anubis until real client
+   applications are tested.
+4. **The `.stfolder` race.** keel fixes it: the first `keel spec apply` of
+   a new replicated path ends with code 16 when Syncthing made `.stfolder`
+   as a directory first (evidence, section 1). Keel-Linux/keel#277 has the
+   evidence of the pair test.
+5. **Registration.** Registration stays closed until the administrator
+   sets a mailer. Keel-Linux/keel-loops#2 closes it at the first install.
+6. **The cost of a switch.** For the testing channel, a switch logs out the
+   web sessions and loses the queue. This is accepted, and the README of
+   `keel-loops` says it.
