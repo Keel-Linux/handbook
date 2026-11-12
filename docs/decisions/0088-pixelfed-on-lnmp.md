@@ -155,7 +155,7 @@ The hook `firstboot.d/45pixelfed`:
 4. It writes `.env` (0600) and the two key files (0600) from the rows.
    `.env` has the MariaDB socket, the Redis of the node, the session store
    (section 6), `ACTIVITY_PUB` and the `AP_*` values from `federation`,
-   and no `TRUST_PROXIES`.
+   and no `TRUST_PROXIES` and no `SESSION_DOMAIN`.
 5. On a writable server: `migrate`, `import:cities` when `places` is
    empty, `instance:actor`, the rows `app.name`,
    `federation.activitypub.enabled` and `pixelfed.open_registration` of
@@ -168,7 +168,16 @@ As in 0086, the first boot of a cloud replica runs before keel pairs it.
 The gate corrects this: before the node serves, it writes `.env` and the
 key files again from the rows.
 
-### 4. nginx
+### 4. nginx and the name of the site
+
+The web routes of Pixelfed answer only on `APP_DOMAIN`, the name of
+`url` (`Route::domain` in `routes/web.php`). A request by an IP address or
+by another name does not reach them; this is from the source, not tested.
+Thus a node with no `url` answers only on the name that `hostname -f`
+gives, and the 0079 check of `http://127.0.0.1/` must send that name as
+`Host`. The services text of confconsole names the address of `url`, not
+the IP address. `.env` has no `SESSION_DOMAIN` (upstream's null).
+
 
 The route `/etc/nginx/keel-default.d/60-keel-pixelfed.conf`: only
 `public/index.php` runs, `/storage/` is static files, the body limit is
@@ -191,7 +200,10 @@ address event (`ip monitor address`).
 
 - **It opens:** it writes the APP_KEY and the Passport key files from the
   rows, caches the configuration, empties the Redis of the node
-  (`FLUSHALL`), starts Horizon and the scheduler, and writes the mark.
+  (`FLUSHALL`) when keel's role file exists, starts Horizon and the
+  scheduler, and writes the mark. A standalone node has no other writer,
+  so the gate does not empty its Redis: a restart of MariaDB would
+  otherwise log every browser user out and lose the queue.
 - **It closes:** it removes the mark first, then stops the two units.
 - **No change:** nothing.
 
@@ -201,7 +213,8 @@ three role-file cases, and the timer within 7 s.
 ### 6. Redis and the sessions
 
 Redis 8 of Debian runs alone on each node, on the loopback, with no RDB
-file and no AOF. The gate empties it when the node becomes the writer.
+file and no AOF. On a pair the gate empties it when the node becomes the
+writer.
 The prototype keeps the sessions in Redis: with the database store, every
 page writes `sessions` (hand test 6), and on a pair each write waits for
 the replica (0087: a PUT of 1 KiB took 2.4 s at 250 ms). The cost: after a
@@ -262,8 +275,10 @@ reached in the test.
 
 The contract checks: the questions of the chain and the Pixelfed password;
 the administrator (a hash check in Laravel); `/` 200, `/keel-health` 204,
-`/api/v1/instance` 200; nodeinfo 200 with `"activitypub"` only when
-federation is on; `nginx`, `php8.4-fpm`, `mariadb`, `redis-server`,
+`/api/v1/instance` 200, each with `Host` set to the name of `url`;
+federation off: `/users/NAME` with an ActivityPub `Accept` header 302 and
+`/users/NAME/outbox` 404 (nodeinfo lists `activitypub` in both states, so
+it is no signal); `nginx`, `php8.4-fpm`, `mariadb`, `redis-server`,
 `keel-pixelfed-gate.timer`, `keel-pixelfed-gate-watch`,
 `pixelfed-horizon`, `pixelfed-scheduler` active; no `.git`, no Composer
 and no `keel_check` database in the image. In the cloud modes: the same
@@ -298,6 +313,9 @@ it is in the process list while the command runs.
 4. The `GROUP BY` path of issue #6082 on MariaDB was not exercised.
 5. A token is refused when the user id is equal to the client id (hand
    test 13). Seen with a personal access client only.
+6. The binding of the web routes to `APP_DOMAIN` (section 4) is from the
+   source. The front file was never read by nginx: the `nginx -t` of the
+   build includes `keel-default.d` only.
 
 ## Tests before the release
 
