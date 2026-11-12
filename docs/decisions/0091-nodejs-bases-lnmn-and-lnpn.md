@@ -97,16 +97,22 @@ keel-web).
 
 ### 1. The parent of each base
 
-No published layer gives nginx, a database and the cloud modes without a
-second language. `web` has no database. `mariadb` and `postgresql` have no
-nginx. `lnmp` carries PHP-FPM. `lnpp` carries Python, but Python is in Core.
+The answer is not the same for the two engines:
+
+- **PostgreSQL: `lnpp` gives it.** `lnpp` has nginx, PostgreSQL, the pair
+  and the cloud modes, and no PHP. Its Python is in Core already. What
+  `lnpp` adds and the Node.js base does not use is `gunicorn` and
+  `python3-psycopg`, 761 kB of disk, and a check page that the base
+  removes.
+- **MariaDB: no layer gives it.** `web` has no database, `mariadb` has no
+  nginx, and `lnmp` carries PHP-FPM, which runs and which Monit watches.
 
 | Option | What changes | Images to build and to commission (0075 on BR1 and BR2) | Other cost |
 | --- | --- | --- | --- |
 | A. New parents `web` plus MariaDB and `web` plus PostgreSQL, under the PHP stacks, the Python stack and the Node.js stacks | the chain of `lnmp` and `lnpp`, and of every layer on them | 9: the 2 parents, `lnmp`, `lnpp`, wordpress, laravel, odoo, and the 2 Node.js bases. The 5 layers in work (nextcloud, pixelfed, loops, ojs, nodebb) test again on the new chain | The manifests are files of the image, so an installed node keeps its old chain. Two chains exist in the field |
-| B. **The Node.js bases on `lnmp` and `lnpp`** | nothing that exists | 2 | On LNMN: PHP-FPM runs, 20.6 MB at idle, 23.9 MB of disk, Debian security updates of PHP, a Monit process. No route reaches PHP. On LNPN: 761 kB of disk, nothing runs |
+| B. **The Node.js bases on `lnmp` and `lnpp`** | nothing that exists | 2 | On LNMN: PHP-FPM runs, 20.6 MB at idle, 23.9 MB of disk, Debian security updates of PHP, a Monit process. No route reaches PHP: the only `fastcgi_pass` lines left are comments of Debian's `sites-available/default`, which is not enabled (evidence, result 1). On LNPN: 761 kB of disk, nothing runs |
 | C. The Node.js bases on `web`, each with a copy of the database half | nothing that exists | 2 | A third copy of the MariaDB half and of the PostgreSQL half (the files of "Facts checked"). A fix of one copy must go to three |
-| D. One overlay package for each engine first (0059, point 3), then C with no copy | the database layers and the stacks use the packages | 9, as A, and 2 packages | the largest work before the first Node.js base |
+| D. One overlay package for each engine first (0059, point 3), then C with no copy | the database layers and the stacks use the packages | 9: mariadb, postgresql, `lnmp`, `lnpp`, wordpress, laravel, odoo, and the 2 Node.js bases. Also 2 new packages | the largest work before the first Node.js base |
 
 **Recommendation: B.** It changes nothing that is published and needs 2
 commissionings. The cost of PHP on LNMN is measured and small, and the
@@ -138,7 +144,7 @@ name of `tests/application-names`.
 | Code | `/srv/app`, read-only for the service (`ProtectSystem=strict`). `keel-app-install` makes it `app:app` and runs `npm ci --omit=dev` from the committed `package-lock.json` (0083). Dependencies with no lock file are refused | `overlay/usr/lib/keel-app/keel-app-install` |
 | Service | `keel-app.service`: `User=app`, `WorkingDirectory=/srv/app`, `HOST=127.0.0.1`, `PORT=3000`, `NODE_ENV=production`, then `EnvironmentFile=/etc/keel-app/database.env` and `-/etc/keel-app/app.env`, `ExecStart=keel-app-run` (node runs the file `KEEL_APP_MAIN`, default `server.js`), `Restart=on-failure`, `ReadWritePaths=/var/lib/keel-app`. No `[Install]`: the gate starts it. Not a process of the manifest, for the Monit reason of 0082 | `overlay/usr/lib/systemd/system/keel-app.service`, `overlay/usr/lib/keel-app/keel-app-run` |
 | Restart on a new runtime | `keel-runtime-restart.path` watches `/usr/lib/keel-nodejs/bin/node` and runs `systemctl try-restart keel-runtime.target`. A unit joins with `PartOf=keel-runtime.target`. A unit that does not run stays stopped (evidence, result 6) | `keel-runtime.target`, `keel-runtime-restart.path`, `keel-runtime-restart.service` |
-| Route | `keel-default.d/60-keel-app.conf`: `location ~ ^/`, because keel-web owns `location /`. `proxy_pass http://127.0.0.1:3000`, HTTP/1.1, `Upgrade` and `Connection` on every path, read timeout 3600 s. Server-sent events pass when the application sends `X-Accel-Buffering: no`. The application adds its own lines in `/etc/nginx/keel-app.d/*.conf` (the body limit is there, 16 MB) | `overlay/etc/nginx/keel-default.d/60-keel-app.conf`, `conf.d/keel-app.conf`, `keel-app.d/10-keel-app-body.conf` |
+| Route | `keel-default.d/60-keel-app.conf`: `location ~ ^/`, because keel-web owns `location /`. `proxy_pass http://127.0.0.1:3000`, HTTP/1.1, `Upgrade` and `Connection` on every path, read timeout 3600 s. Server-sent events pass when the application sends `X-Accel-Buffering: no`. The application adds its own lines in `/etc/nginx/keel-app.d/*.conf` (the body limit is there, 16 MB). In the cloud modes the front site of keel-web reads a request first, with a limit of 1 MB: `keel-front.d/60-keel-app-body.conf` gives it the same 16 MB. Anubis challenges every path in the cloud modes. A path that a client with no browser uses (an API, a webhook) passes Anubis only with a location of the application in `keel-front.d`, as Nextcloud does (0087, section 7) | `overlay/etc/nginx/keel-default.d/60-keel-app.conf`, `conf.d/keel-app.conf`, `keel-app.d/10-keel-app-body.conf`, `keel-front.d/60-keel-app-body.conf` |
 | Gate | `keel-app-gate` every 5 s and at each address event. The application declares `KEEL_APP_SERVE` in `app.env`: `writer` (the default) or `all`. `writer`: the node serves when the first boot is done, the main file is there, the role file is absent or says `role=primary`, its VIP is on the node, and the database takes writes (`read_only = 0`; `pg_is_in_recovery()` false and read-write). `all`: every ready node serves, and the application must accept a read-only database. "Open": start the service, wait until port 3000 accepts, then write `/run/keel-app/open`. "Closed": remove the mark, then stop the service. nginx answers 503 with a notice while the mark is absent. `keel-app-gate --state` prints why | `overlay/usr/lib/keel-app/keel-app-gate`, `lib/keel-app.sh` |
 | Replicated files | the base declares `state.replicate: [/var/lib/keel-app/files]`, given to the application as `KEEL_APP_FILES`. The application makes subdirectories there. A layer on the base, or a manifest of the user with `base: lnmn` (evidence, result 10), adds paths. The spec cannot | `overlay/usr/share/keel/appliances/lnmn.yaml`, `lnpn.yaml` |
 | Database | the first boot makes the database `app` and the account `app` on the node that takes writes, with socket authentication (`unix_socket`, `peer`) and rights on `app` only, so `read_only` stops it. A replica gets them from the primary. `/etc/keel-app/database.env` (0640, `root:app`) gives `KEEL_DB_ENGINE`, `KEEL_DB_NAME`, `KEEL_DB_USER`, `KEEL_DB_SOCKET`, `DATABASE_URL`, and for PostgreSQL `PGHOST`, `PGUSER`, `PGDATABASE`. It holds no secret | `overlay/usr/lib/inithooks/firstboot.d/42keel-app` |
@@ -162,10 +168,13 @@ That is all for an application that reads `HOST`, `PORT`, `DATABASE_URL`
 (or `PG*`) and `KEEL_APP_FILES`. Other settings go in
 `/etc/keel-app/app.env`.
 
-The first boot asks what the parent asks: the root password and the
-password of the database administrator (`DB_PASS`), and the items of
-TurnKey (the hub key, the security alerts, the security updates). The base
-adds no question, because the account of the application has no password.
+The first boot asks what the parent asks. The base adds no question,
+because the account of the application has no password. The list of the
+parent comes from the preseed of the hand test and the names of the hooks:
+the root password, the password of the database administrator
+(`DB_PASS`), and the items of TurnKey (the hub key, the security alerts,
+the security updates). keel-init did not run in the test, so the screens
+are not checked.
 Until keel-init has run, the init fence of TurnKey redirects outside ports
 80 and 443 to its own page (evidence, result 5).
 
@@ -206,7 +215,11 @@ used again. This note does not change that.
 - A pair, the VIP, the role file, Syncthing on the replicated directory, a
   promote and a failover.
 - The cloud modes: Coraza and Anubis with a websocket, server-sent events
-  and an upload.
+  and an upload, and the body limit of `keel-front.d`.
+- Monit on `php-fpm` in a cloud mode.
+- That the account `app` replicates to the replica of a pair. It is in the
+  `mysql` database (MariaDB) or the cluster catalogue (PostgreSQL), which a
+  pair replicates (0059, point 3), so it is expected.
 - An image built from the prototypes, its first boot with keel-init, and
   the commissioning of 0075.
 - The next Node.js line, a native npm module, an upgrade of the code of the
@@ -225,7 +238,12 @@ used again. This note does not change that.
 4. The proto map of the route copies NodeBB's. keel-web 0.4.4 gives
    `$keel_web_https` (0087, section 7). The route can use it when 0.4.4 is
    in the stable suite.
-5. On `lnpp`, the gunicorn of the check page runs from the first boot to
+5. The gate closes the site when the database does not answer, as the gate
+   of 0087 does. So each restart of MariaDB or PostgreSQL, for example by a
+   security update, also stops and starts the application. `serve.py` of
+   NodeBB does the opposite: with no answer it changes nothing. The base
+   follows 0087, the choice that fails closed.
+6. On `lnpp`, the gunicorn of the check page runs from the first boot to
    the next reboot (62 MB RSS, evidence, result 1). That is a fact of
    `lnpp`, not of this note.
 

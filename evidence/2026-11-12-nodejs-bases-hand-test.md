@@ -57,7 +57,7 @@ user step copied is in `12-user-steps.log`.
 
 ## Results
 
-### 1. The cost of the language that the base does not use (`03-baseline.log`, `04-php-fpm-process.log`, `20-memory-idle.log`)
+### 1. The cost of the language that the base does not use (`03-baseline.log`, `04-php-fpm-process.log`, `20-memory-idle.log`, `24-php-routes.log`)
 
 | Item | CT 9402 on `lnmp` | CT 9403 on `lnpp` |
 |---|---|---|
@@ -65,6 +65,12 @@ user step copied is in `12-user-steps.log`.
 | Unused process at idle | `php8.4-fpm.service`: 3 processes, RSS 35.9 MB in sum, cgroup 20.6 MB | none after the layer removes the check page |
 | Watched by Monit | yes: `keel manifest show lnmp --resolved` lists `php-fpm` (`php8.4-fpm.service`, from `lnmp`) as a process. A child manifest only adds (`keel/manifest/resolve.py`) | no process of `lnpp` but PostgreSQL |
 | Security updates waiting in the stable image | 6 `php8.4-*` packages (8.4.26 to 8.4.27-1~deb13u1) | none for Python |
+
+On the stopped CT 9402 (`pct mount`), the nginx files have no
+`fastcgi_pass` that is not a comment. The only two are comments in Debian's
+`sites-available/default`, which is not enabled. The enabled site is
+`keel-default`, and `keel-default.d` holds the route of the base only
+(`24-php-routes.log`). So no route of the node reaches PHP-FPM.
 
 On `lnpp`, the check page of the stack ran after the first boot: gunicorn,
 3 processes, RSS 62 MB in sum, started at 07:22:02, the time of the first
@@ -245,7 +251,10 @@ replicated path (`keel/spec/`). Syncthing did not run: no pair existed.
 - A pair (0049, 0054), the VIP, the role file, Syncthing on
   `/var/lib/keel-app/files`, a promote and a failover.
 - The cloud modes: Coraza and Anubis in the path of a websocket, of the
-  server-sent events and of an upload.
+  server-sent events and of an upload. The file
+  `keel-front.d/60-keel-app-body.conf` came after the test and did not run
+  on a node.
+- keel-init: the preseed answered the first boot, and no screen ran.
 - An image built from the prototypes, its first boot, keel-init with
   questions, and the commissioning of 0075.
 - A change to the next Node.js line.
