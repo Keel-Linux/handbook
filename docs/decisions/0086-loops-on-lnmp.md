@@ -310,3 +310,47 @@ Two parts of the contract cannot pass yet:
    Keel finds go to upstream only through the maintainer? (yes/no)
 7. May the main session create `Keel-Linux/keel-loops` on git.pop.coop
    from the local prototype? (yes/no)
+
+## Amendment 2026-11-12: the first pair test
+
+The first pair test (`evidence/2026-11-12-loops-pair-test.md`) ran the
+prototype on an LNMP pair in cloud advanced across BR1 and BR2. It
+changes these statements of the note. Keel-Linux/keel-loops#1 carries
+the changes.
+
+1. **Section 6, the gate.** The gate of the note asked `read_only` only,
+   kept its state when MariaDB did not answer, and showed the notice with
+   status 200. At a promote the old writer served for 2.1 s with a
+   read-only database. The gate now follows 0087 section 4: it opens the
+   site only when the first boot has ended, `read_only` is 0, the role
+   file says `role=primary` and the VIP is on the node. It runs at each
+   change of an address and every 2 s. It closes the site before it stops
+   the workers. In 4 switches the two gates were never open at the same
+   time.
+2. **Section 6, the notice.** A node that does not serve answers 503 with
+   the notice and `Retry-After: 30`, the media too. The site is closed
+   unless the gate writes its mark.
+3. **Section 6, Redis.** On a pair node the gate empties the local Redis
+   before the node serves. A standalone node keeps its Redis: it opens
+   again at each boot (not tested on a machine). On a pair, a promote, a
+   failover and a restart of the gate lose the web sessions and the
+   queue. The API tokens stay. A video in transcode at the switch stays in
+   the state "processing".
+4. **Section 3, the replica.** A replica that lags can hold an old
+   `app_key` row, so a read-only server takes the declared shared secret
+   first.
+5. **Section 7, the front.** It was not tested; now it is. The front
+   needs its own body limit of 64 MiB. These paths pass Anubis:
+   `/.well-known/webfinger`, `/.well-known/nodeinfo`,
+   `/.well-known/host-meta`, `/nodeinfo/`, `/ap/` and `/storage/`. `/api/`,
+   `/oauth/` and `/up` keep Anubis: the agents of the mobile applications
+   passed it. `/embed` was not tested. The Coraza limit on the upload path is not
+   needed: keel-overlay-coraza 0.1.5 took a video of 40 MB. Rule 920420
+   refused each ActivityPub POST, so a plugin of the rule set removes it on
+   the inbox paths. `TRUST_PROXIES` was not set and not tested.
+6. **Section 8, size.** On a 4 GiB node the writer used 1390 MiB at idle
+   and 1980 MiB at most during the transcode of a 58 s video. The replica
+   used 551 MiB.
+7. **Section 10, mail.** With `MAIL_MAILER=log` Loops refuses every
+   registration with 403 ("Mail service not configured"). An instance has
+   no new user until the administrator sets a mailer.
