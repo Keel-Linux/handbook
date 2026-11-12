@@ -162,3 +162,26 @@ note.
   recommendation (amended in handbook#164).
 
 It applies 0012, 0016, 0073, 0074 and 0075.
+
+## Amendment 2026-11-12: open points 1, 2 and 5
+
+Decided by the maintainer on 2026-11-12, after the first real-node test
+(`evidence/2026-11-11-keel-nodejs-nodebb-real-node-test.md`).
+
+1. **Open point 1, the name:** one binary package for each line,
+   `keel-nodejs-24` for line 24. The source package and the repository
+   are `keel-nodejs` (Keel-Linux/keel-nodejs). The reason: with one name,
+   `apt upgrade` could move a machine to the next line, and the native
+   modules of an application are built for the ABI of one line
+   (`cbor-extract` of NodeBB ships an ABI 137 file, which is Node.js 24).
+   Every line provides `keel-nodejs` and conflicts with `keel-nodejs`, so
+   two lines are never installed together.
+2. **Open point 2, the place:** `/usr/lib/keel-nodejs` with links in
+   `/usr/bin`. Because two lines never coexist, every line keeps these
+   paths.
+3. **Open point 5, a restart:** the package has no maintainer script and
+   restarts nothing. The application layer restarts its own service. The
+   NodeBB layer does it with a path unit on the binary (0082, amendment).
+
+Open points 3 and 4 stay open. The version of the package is the Node.js
+version plus `+keelN`, for example `24.22.3+keel1`.
