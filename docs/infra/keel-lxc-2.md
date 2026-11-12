@@ -45,6 +45,7 @@ instance I is user `runnerI`, uid 1100+I, service `actions-runner@I`:
 | Part | What |
 | --- | --- |
 | Packages | `lxc lxc-templates lxcfs uidmap dnsmasq-base nftables apparmor apparmor-utils iproute2 kcov bats shellcheck python3-yaml zstd git curl wget gnupg ca-certificates libicu76 file rsync unattended-upgrades`; lxc 1:6.0.4-4+deb13u4, apparmor 4.1.0 |
+| Added by hand | `fakeroot` 1.37.1.1-1, on 2026-11-12. The `keel-host` jobs cannot install a package, and `tests/image-check.bats` of keel-nodebb needs fakeroot: it runs the image check on a scratch tree whose files have other owners. Without it, `test-shell.yml` stopped with "the runner host does not have these packages: fakeroot" (keel-nodebb#23, task 18768) |
 | Updates | unattended-upgrades on (`APT::Periodic::Unattended-Upgrade "1"`), as the image shipped it |
 | `lxcbr0` | `/etc/default/lxc-net`: IPv4 NAT on 10.0.3.0/24 and the same ULA prefix as keel-lxc-1, `fc42:5009:ba4b:5ab0::/64`, `ra-only`, masqueraded; DHCPv4 leases of 10 minutes (`LXC_DHCP_RANGE`), not dnsmasq's hour, so containers long gone do not hold the 253 addresses |
 | lxcfs | enabled and started (it was enabled but not running after the first boot); a host service in `system.slice`, outside the runners' limits |
