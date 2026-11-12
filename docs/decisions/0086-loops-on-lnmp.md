@@ -28,7 +28,7 @@ Checked on 2026-11-11 in the upstream repository at tag `v1.0.0-beta.15`
 | --- | --- | --- |
 | Licence | AGPL-3.0 | `LICENSE`; GitHub API |
 | Releases | 17 releases from `v1.0.0-alpha.1` (2025-09-04) to `v1.0.0-beta.15` (2026-10-23). There is no stable release. GitHub marks none as a pre-release | `git tag`; GitHub API `releases` |
-| Production | The text of each beta release says "Some rough edges (it's an beta!)" and "Active development and frequent updates". No upstream text says that the software is ready for production. No upstream text gives a support period | release notes of beta.12 to beta.15 |
+| Production | The notes of beta.12 to beta.15 say "Some rough edges (it's an beta!)" and "Active development and frequent updates". No upstream text says that the software is ready for production. No upstream text gives a support period | release notes of beta.12 to beta.15 |
 | Security | beta.15 is a "Security Release". It updates the PHP of the Docker image for 2 CVEs and says "Please update your local packages for non-docker instances. ASAP!" | release notes of beta.15 |
 | Signatures | The tags are lightweight tags. GitHub shows the commit of beta.15 as verified. The releases have no files and no checksums | GitHub API `git/ref`, `commits`, `releases` |
 | Upgrade method | `git pull origin main`, `composer install --no-dev`, `npm ci && npm run build`, `php artisan migrate`, caches, `horizon:terminate`. The method names `main`, not a tag | `INSTALLATION.md`, "Updates" |
@@ -115,7 +115,8 @@ The hook `firstboot.d/45loops` does these steps:
    ids contain it, and they cannot change after the first federation. If
    `url` is not set and `federation` is false, the hook uses
    `https://` and the name of the machine, and says so. If `url` is not
-   set and `federation` is true, the hook stops.
+   set and `federation` is true, the hook stops. A later run with a new
+   `url` replaces the old address in the built files.
 2. On a writable server: it makes the database `loops` and the socket
    account `www-data` (no password, as keel-laravel), and it keeps the
    APP_KEY, the Passport key pair and the ActivityPub key pair as rows of
