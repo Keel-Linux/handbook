@@ -2,8 +2,8 @@
 
 Date: 2026-11-11 and 2026-11-12
 
-This file is the evidence for the first real-node test of the Keel
-Node.js package of note 0083 and of the NodeBB layer of note 0082. It is
+This file is the evidence for the first real-node test of two parts: the
+Keel Node.js package of note 0083 and the NodeBB layer of note 0082. It is
 a test of a local prototype on one node. Nothing was published: no apt
 repository changed, no image was built, and no release was made. It is
 not a commissioning test (0075).
@@ -14,10 +14,10 @@ not a commissioning test (0075).
    and come off with apt?
 2. Does the build fail closed when the signature or the sha256 is not
    correct?
-3. What does an upgrade of the package do to a running NodeBB?
+3. What does an upgrade of the package do to NodeBB while it runs?
 4. Does NodeBB 4.16.7 run on the PostgreSQL 17 of lnpp in the layout of
-   0082, section 4: code owned by root, and NodeBB writes only its own
-   paths?
+   0082, section 4? In that layout root owns the code, and NodeBB writes
+   only its own paths.
 5. Do the first boot hook and `serve.py` of the layer work on a real node?
 
 ## The machine
@@ -38,14 +38,16 @@ not a commissioning test (0075).
 | Name and version | `keel-nodejs` `24.22.3+keel1`, `amd64`. The test build `24.22.2+keel1` is test material only and is never published |
 | Content | the official `node-v24.22.3-linux-x64.tar.xz` in `/usr/lib/keel-nodejs`; links `/usr/bin/node`, `npm`, `npx`; npm 11.19.1; no Corepack |
 | Signature | `SHASUMS256.txt.asc` of 24.22.2 and 24.22.3 is signed by `5BE8A3F6C8A5C01D106C0AD820B1A390B168D356`, a key of `keys.list` of `nodejs/release-keys` at `481637f` |
-| Tests | 48 bats tests, no network. Coverage of `debian/upstream`: 98.41 percent (124 of 126 lines), kcov. shellcheck: no finding. lintian: no tag, with overrides that give a reason each |
+| Tests | 48 bats tests, no network. Coverage of `debian/upstream`: 98.41 percent (124 of 126 lines), kcov. shellcheck: no message. lintian: no tag, with overrides that give a reason each |
 | `.deb` sha256 | 24.22.3+keel1 `2aa8941e…5d81`; 24.22.2+keel1 `8c8773cf…25cc` |
 
-The tests show that the build stops on each of these: a key that is not
-pinned, a key file that holds another key, a changed sum in the signed
-text, a sum line outside the signed block, a pin that is not the signed
-sum, a tarball with another content, an expired key, a revoked key, and
-a Debian version that is not the pin plus `+keelN`.
+The tests show that the build stops on each of these:
+
+- a key that is not pinned, or a key file that holds another key;
+- a changed sum in the signed text, or a sum line outside the signed block;
+- a pin that is not the signed sum, or a tarball with another content;
+- an expired key or a revoked key;
+- a Debian version that is not the pin plus `+keelN`.
 
 ## Results
 
@@ -61,16 +63,17 @@ no password, no token and no key.
 | First start through `serve.py` | pass: HTTP 200 8 s after the start; `serve.py`, `loader.js`, `app.js` run as `nodebb` | `41-first-start.log` |
 | Forum pages through nginx | pass: https and http (port 80, decision 0079) 200, title "Home | NodeBB", `/keel-health` 204, 4 default categories | `41-first-start.log`, `42-pages.log` |
 | Admin login and a new topic through nginx | pass: login 200, topic created, a guest reads it | `47-forum-write.log` |
-| Upgrade to 24.22.3+keel1 with `apt-get install --only-upgrade` while NodeBB runs | pass: the package upgrades, NodeBB answers 200 during and after it | `50-upgrade-24.22.3.log` |
+| Upgrade to 24.22.3+keel1 with `apt-get install --only-upgrade` while NodeBB runs | pass: the package upgrades, and NodeBB answers 200 three times after it. No request was made during the upgrade | `50-upgrade-24.22.3.log` |
 | Restart of the unit after the upgrade | pass: `/proc/PID/exe` is the 24.22.3 binary (sha256 `a7ec1b37…`), a new topic passes | `51-restart.log` |
-| `kill -9` of the worker `app.js` | pass: the loader starts a new worker, 200 after 4 s | `51-restart.log` |
-| `kill -9` of `loader.js` | fail, then pass after the fix: the worker stayed and kept port 4567. Fixed in keel-nodebb `15151cc`: 200 after 2 s, no orphan, no EADDRINUSE | `51-restart.log`, `52-loader-kill.log` |
-| Restart and stop of PostgreSQL | NodeBB itself ends; `serve.py` starts it again: 200 7 s after a restart, about 1 s after the start that follows a 20 s stop | `51-restart.log` |
-| Removal of `keel-nodejs` while NodeBB runs | pass: no file of the package stays; the running NodeBB answers until it restarts | `60-remove.log` |
+| `kill -9` of the worker `app.js` | pass: the loader starts a new worker; 200 about 5 s after the kill (a sleep of 1 s, then 4 s) | `51-restart.log` |
+| `kill -9` of `loader.js` | fail, then pass after the fix: the worker stayed and kept port 4567. Fixed in keel-nodebb `15151cc`: no orphan 3 s after the kill, 200 at most 13 s after it (sleeps of 3 s and 8 s, then 2 s; `serve.py` waits 5 s before a restart), no EADDRINUSE | `51-restart.log`, `52-loader-kill.log` |
+| Restart and stop of PostgreSQL, with `serve.py` before `15151cc` | NodeBB itself ends; `serve.py` starts it again: 200 about 10 s after the restart (a sleep of 3 s, then 7 s), and about 6 s after the start that follows a 20 s stop (a sleep of 5 s, then 1 s) | `51-restart.log` |
+| Removal of `keel-nodejs` while NodeBB runs | pass: no file of the package stays; NodeBB answers until it restarts | `60-remove.log` |
 | Restart with no Node.js | `serve.py` stays active and tries again every 5 s (exit 127); nginx 502 | `60-remove.log` |
-| Reinstall | pass: NodeBB serves again after 8 s with no action by hand | `60-remove.log` |
+| Reinstall | pass: NodeBB serves again 8 s after the end of the install, with no action by hand | `60-remove.log` |
 | Contract proofs of `tests/commission.yaml` | pass: the app proof logs in through nginx and refuses a wrong secret (403); the role `nodebb` logs in over TCP; the `seeded` query reads the admin | `70-contract-proofs.log` |
 | Final overlay of keel-nodebb `70bc813` and a second run of `45nodebb` | pass: the secret and the 3 topics stay; a new topic passes | `80-final-overlay.log` |
+| `conf.d/zz-check` of `70bc813` on the tree of the CT | the owner rules find no defect in the real `npm ci` tree. It reports `config.json`, the ready mark and the uploads, which are first boot state of this CT, and `.dockerignore`, which the build `dcb7776` of this tree did not remove yet | `85-zz-check-on-ct.log` |
 
 ## Facts found
 
@@ -89,16 +92,17 @@ no password, no token and no key.
 5. **The native modules of NodeBB are tied to the Node.js line.**
    `cbor-extract` ships `node.abi137.glibc.node`. ABI 137 is Node.js 24.
    An apt upgrade that moves to another line can break such a module.
-6. **The writable list of 0082, section 4, is not complete.**
-   `nodebb-plugin-emoji` removes and writes `build/emoji` in its own
-   directory under `node_modules` at the first start of a node. The layer
+6. **The writable list of 0082, section 4, is not complete.** At the
+   first start of a node, `nodebb-plugin-emoji` removes and writes
+   `build/emoji`. That directory is in its own directory under
+   `node_modules`. The layer
    gives `nodebb` that directory and allows it in the unit.
 7. **`./nodebb setup` copies the favicon into `uploads/system` and makes
    no directory for it.** The hook makes it.
 8. **The GitHub tarball of NodeBB gives modes 0664 and 0775** when tar
    runs as root. The layer removes the group write bit.
 9. **NodeBB takes its setup answers from `NODEBB_ADMIN_*` variables**, and
-   the other answers from an existing `config.json`. So no password goes
+   the other answers from a `config.json` that is already there. So no password goes
    on a command line.
 10. **NodeBB 4.16.7 runs on PostgreSQL 17.11.** 0082 had this as "not
     verified". The upstream CI tests PostgreSQL 18.
@@ -113,10 +117,14 @@ no password, no token and no key.
 - The first emoji fix (`38d6853`) replaced `build/` of the plugin with a
   link and so removed its code. `a7c93aa` and `5ac313a` replaced it.
 - The CT ran the check page of lnpp, so `userdel keel-check` failed. A
-  chroot has no running process. `keel_check` stays in the database of
+  chroot has no process that runs. `keel_check` stays in the database of
   the CT from its own first boot of lnpp.
 - `bc` is not in the image, so the duration of the apt upgrade is not
   measured.
+- The times of the wait loops count from the start of each loop. The
+  table adds the sleeps of the command before the loop.
+- `42-pages.log` held the session cookie of a guest. Its value is now
+  `<hidden>`, with a note in the log.
 
 ## Not tested
 
