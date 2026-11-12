@@ -142,9 +142,70 @@ alone does not keep its password out of the log; it only limits what the
 password opens. Log level 3 stays. The session password of CT 9380 was
 changed after the run.
 
+## The fix as a package: keel-overlay-coraza 0.1.5 (logs 20 to 28)
+
+Keel-Linux/common#83 adds two rules to `keel-rules.conf`: rule 10014 (no
+body inspection when there is no Content-Type) and rule 10015 (more than
+256 KiB of text parts in a multipart body: 413, files not counted). The
+package was built with `dpkg-buildpackage` as the CI of the repository
+does (sha256 `46f83049f2b3f611977d7438d2605555b42be813f3b5f8354914de2d78113744`,
+lintian clean) and installed with `dpkg -i` on 9381 and 9382 in place of
+the test plugin. The installed rules file is the one of the package, and
+the WAF probe still answers 403. The witness 9383 has no nginx.
+
+**The other body paths with 0.1.5 before rule 10015** (log 21):
+
+| Case | Result |
+|---|---|
+| a multipart body with a text part (not a file) of 10 MiB | **no answer in 60 s**; two workers busy for minutes (2 min 1 s and 1 min 17 s of CPU), about 165 MB each |
+| the same, chunked | no answer in 60 s |
+| a multipart text part of 200 KB | 302 after 10.9 s |
+
+Multipart is left out of rules 10012 and 10013 so that files pass, and
+its text parts were read up to 128 MiB. The directive
+`SecRequestBodyNoFilesLimit 262144` was accepted by `nginx -t` and changed
+nothing (log 22). Rule 10015 is the fix (logs 24, 25): the limit is
+checked in phase 2, before the rules of the Core Rule Set, on
+`ARGS_COMBINED_SIZE`, so many small text parts count together.
+
+**All cases with the final 0.1.5** (log 27; through the VIP, the
+Nextcloud plugin in place):
+
+| Case | Status | Time |
+|---|---|---|
+| no Content-Type, 10 MiB | 403 | 0.15 s |
+| no Content-Type, 100 MiB | 403 | 1.33 s |
+| form, 120 KB | 302 | 4.0 s |
+| JSON, 120 KB | 302 | 3.7 s |
+| multipart, a file of 32 MiB | 302 | 1.1 s |
+| WordPress-like upload: 3 text fields and a file of 32 MiB | 302 | 1.3 s |
+| multipart, 3 small text fields | 302 | 0.04 s |
+| multipart, a text part of 10 MiB | 413 | 0.26 s |
+| multipart, 5 text parts of 200 KB | 413 | 0.04 s |
+| Content-Type present and empty, 10 MiB | 403 | 0.14 s |
+| type in upper case (form), 10 MiB | 413 | 0.16 s |
+| type with spaces (`application/json ; charset=utf-8`), 10 MiB | 413 | 0.14 s |
+| type with a leading space (form), 10 MiB | 413 | 0.15 s |
+| chunked, no Content-Length, no type, 10 MiB | 403 | 0.12 s |
+| chunked, form, 10 MiB | 413 | 0.14 s |
+| chunked, multipart text part of 10 MiB | 413 | 0.24 s |
+| Nextcloud DAV PUT 100 MiB, no type | 201 (204 on overwrite) | 2.4 to 2.9 s |
+| Nextcloud DAV PUT 100 MiB, `application/octet-stream` | 201 | 1.8 s |
+
+**Memory** (log 28): over the untyped 10 MiB and 100 MiB bodies, the
+multipart text part of 10 MiB (plain and chunked), the DAV PUT of
+100 MiB and the WordPress-like upload, the biggest nginx worker peaked at
+110 MB, and the free memory of the container did not go below 3.4 GB.
+Before the fix the first of these requests grew one worker to 1.29 GB
+and the PUT to 2.48 GB.
+
+The trio has no WordPress route; the WordPress-like case is the form of
+a media upload sent to the Nextcloud site. A form or JSON body under the
+256 KiB limit still costs the rule set some seconds (120 KB: 4 s), as
+with 0.1.4; that is not a new gap.
+
 ## Not tested here
 
-A real desktop or mobile client, multipart uploads of other applications
-(WordPress media) with large files, the fix inside keel-overlay-coraza
-itself (only as a plugin), and the change of keel-web as a package (only
-as a file on 9381).
+A real desktop or mobile client, a real WordPress or Odoo site behind
+0.1.5, the CI run of the new tests of Keel-Linux/common#83, and the change
+of keel-web as a package (only as a file on 9381).
