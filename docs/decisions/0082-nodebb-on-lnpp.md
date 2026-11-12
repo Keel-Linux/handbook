@@ -229,11 +229,17 @@ and `evidence/2026-11-12-keel-nodejs-24-restart-and-session-secret.md`.
 1. **The Node.js package of the layer is `keel-nodejs-24`.** Each line is
    its own package (0083, amendment). The plan names the line. A change
    of line is a change of the plan and a new commissioning.
-2. **A path unit of the layer restarts NodeBB.** The package has no
+2. **An apt pin keeps the line.** The lines conflict, so an apt install
+   of another line removed line 24 and stopped NodeBB.
+   `/etc/apt/preferences.d/keel-nodebb-nodejs` keeps `keel-nodejs-24` at
+   priority 500 and gives every other line priority -1. An operator who
+   changes the line edits this file on purpose (the README of
+   keel-nodebb). The maintainer decided the pin on 2026-11-12.
+3. **A path unit of the layer restarts NodeBB.** The package has no
    maintainer script, so NodeBB keeps the old binary after an upgrade.
    `nodebb-nodejs.path` watches `/usr/lib/keel-nodejs/bin/node` and runs
    `systemctl try-restart nodebb.service`.
-3. **The session secret is in the database, not in the manifest.**
+4. **The session secret is in the database, not in the manifest.**
    Section 4, "Secrets", said that NodeBB's `secret` is a manifest secret
    with `shared: true`. The layer keeps it in the one-row table
    `keel_nodebb_secret` of the database `nodebb`, as WordPress keeps its
@@ -243,11 +249,11 @@ and `evidence/2026-11-12-keel-nodejs-24-restart-and-session-secret.md`.
    replica changes it. `serve.py` gives it to NodeBB in the environment.
    So the secret replicates with the session rows. That a login survives
    a promote is not tested until a pair test runs.
-4. **Known gap of keel:** keel has no general path that gives one
+5. **Known gap of keel:** keel has no general path that gives one
    generated value to both nodes of a pair. `shared: true` of a manifest
    is only validated. This note does not need it, and nobody works on it
    now.
-5. **The writable list of section 4 gets one path:**
+6. **The writable list of section 4 gets one path:**
    `node_modules/nodebb-plugin-emoji/build`, and `build/emoji` in it.
    The plugin writes its data there at the first start of a node.
-6. **NodeBB 4.16.7 runs on PostgreSQL 17.11** ("Not verified" above).
+7. **NodeBB 4.16.7 runs on PostgreSQL 17.11** ("Not verified" above).

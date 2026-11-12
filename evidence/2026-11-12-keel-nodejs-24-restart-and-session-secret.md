@@ -26,7 +26,7 @@ PostgreSQL 17.11 of keel-lnpp 19.0-9, with 4 topics from the first test.
 | Part | Commit |
 |---|---|
 | keel-nodejs, package `keel-nodejs-24` | `0522ad3` (Keel-Linux/keel-nodejs#1) |
-| keel-nodebb, layer | `ef609a8` on the node; `403d5a7` and `aa628d7` change the documents and the boot test only (Keel-Linux/keel-nodebb#23) |
+| keel-nodebb, layer | `ef609a8` on the node; `403d5a7` and `aa628d7` change the documents and the boot test only; `e48c70b` adds the apt pin (Keel-Linux/keel-nodebb#23) |
 
 | `.deb` | sha256 |
 |---|---|
@@ -56,6 +56,10 @@ first 12 hex digits of its sha256.
 | `dpkg -i` of `keel-nodejs-26` while line 24 is installed | pass: dpkg refuses, "conflicting packages - not installing keel-nodejs-26" | `110-lines-and-restart.log` |
 | `apt-get install keel-nodejs-26` | apt removes line 24 with no question; NodeBB stops, and `serve.py` tries again every 5 s (exit 127) | `110-lines-and-restart.log` |
 | `apt-get install keel-nodejs-24` again | pass: apt removes line 26; NodeBB serves with a new process 6 s after apt ends | `110-lines-and-restart.log` |
+| The apt pin of `e48c70b`, `/etc/apt/preferences.d/keel-nodebb-nodejs`, then `apt-get install keel-nodejs-26` | pass: apt refuses, "Package 'keel-nodejs-26' has no installation candidate", exit 100; line 24 stays | `130-apt-pin.log` |
+| An upgrade inside line 24 with the pin (24.22.2+keel1 put back by `dpkg -i`, then apt) | pass: apt installs 24.22.3+keel1; the path unit restarts NodeBB; a new process 10 s after apt ends; a new topic passes | `130-apt-pin.log` |
+| The change of line of the README, simulated: line 26 in the first record of the pin | pass: `apt-get install -s keel-nodejs-26` gives `Remv keel-nodejs-24`, `Inst keel-nodejs-26`; the file of the commit is back after it (same sha256) | `130-apt-pin.log` |
+| Two forms of the pin | a regex record alone also refused line 24 itself; a first record for `keel-nodejs-24` and a second for all names keeps line 24 and refuses the others | `120-apt-pin-probe.log` |
 | CI of keel-nodebb#23 at `403d5a7` | `tests`, `python`, `commission` and `package` pass on the runners; `appliance` fails because `https://mirror.keellinux.org/layers/nodebb.manifest` answers 404 (task 18810) | Forgejo tasks 18808 to 18814 |
 
 ## Facts found
@@ -76,10 +80,11 @@ first 12 hex digits of its sha256.
    the new file and renames it over `/usr/lib/keel-nodejs/bin/node`.
    `PathChanged=` starts the restart unit at the removal and at the
    install.
-5. **apt removes the package of the other line with no question.** An
-   operator who installs `keel-nodejs-26` stops NodeBB. The layer names
-   its line in its plan, so only a deliberate act of an operator does
-   this.
+5. **Without a pin, apt removes the package of the other line with no
+   question.** An operator who installs `keel-nodejs-26` stops NodeBB.
+   The maintainer answered on 2026-11-12 that the layer pins its line.
+   With the pin, apt refuses the other line. `dpkg -i` does not read the
+   pin.
 6. The CI check `appliance` cannot pass before a nodebb layer is
    published. Its parent check was never reached: the mirror has no
    nodebb layer at all.
