@@ -1,21 +1,27 @@
 # 0087: Nextcloud: Redis on each node, only the writer serves, the shared values come from the pair
 
 Date: 2026-11-12
-Status: **proposed**, with one part decided. The maintainer answered
-"(a)" on 2026-11-12 to the Redis question: one Redis on each node, with
-the gate (sections 3 and 4). The rest is not decided. The note amends
+Status: **proposed** until the image passes the commissioning of 0075.
+The maintainer decided its choices on 2026-11-12: "(a)" for Redis (one
+Redis on each node, with the gate, sections 3 and 4), and the answers to
+the five questions of the first draft (sections 3 and 7, "Decided
+2026-11-12"). The note amends
 0062 where two tests on real machines showed something different.
 Nothing in it is released. The prototype is a local repository,
 `keel-nextcloud`, with no image.
 
-Two tests by hand are the basis of this note:
+Three tests by hand are the basis of this note:
 
 - the first test, one container on BR1
   (`evidence/2026-11-11-nextcloud-35-first-test.md`), marked "(first
   test)";
 - the second test, an LNMP pair in cloud advanced across BR1 and BR2
   with a Core witness (`evidence/2026-11-12-nextcloud-35-cloud-advanced-pair.md`),
-  marked "(second test)".
+  marked "(second test)";
+- the third test, on the same pair: the cause of the nginx memory under
+  Coraza, and the scheme behind Anubis
+  (`evidence/2026-11-12-nextcloud-35-third-test-coraza-scheme.md`),
+  marked "(third test)".
 
 ## What was asked
 
@@ -176,8 +182,10 @@ through a symbolic link: Nextcloud refuses it (second test).
   or flush (first test). **The Redis password must not reach
   `nextcloud.log`:** the log level is 3, at which Nextcloud does not
   write the warning that holds `session.save_path` (first test), and the
-  password in `session.save_path` is the one of the session user. The
-  cost of level 3: Nextcloud logs no warning.
+  password in `session.save_path` is the one of the session user. At
+  level 2 the session user alone does not keep its password out of the
+  log (third test). The cost of level 3: Nextcloud logs no warning.
+  Decided 2026-11-12 (maintainer: yes).
 
 ### 4. Only the writer serves (amends 0062 section 5)
 
@@ -234,32 +242,50 @@ directory has arrived (second test).
 - After a major, the background jobs need 2 to 3 runs (162 s for 34 to
   35 in the first test). No major upgrade is unattended.
 
-### 7. The front of keel-web in the cloud modes
+### 7. The front of keel-web in the cloud modes (decided 2026-11-12)
 
 - **What the WAF does with a DAV body.** A plugin of the rule set
   (`keel-nextcloud-before.conf`, ids 10111 and 10112) allows the DAV
-  methods on the DAV paths only, and does not read the body of a DAV
-  PUT (`ctl:requestBodyAccess=Off`). The global body limit of Coraza
-  (128 MiB) stays. With body inspection, Coraza refused a binary upload
-  of 10 MiB (rule 920420), so Nextcloud cannot work with it. With the
-  plugin, a PUT of 100 MiB grew one nginx worker from 66 to 87 MB, and
-  four GETs of 100 MiB added nothing (second test).
-- **A release blocker candidate.** Before the plugin, one nginx worker
-  grew to 3.5 GB while Coraza handled a PUT and a GET of 100 MiB, the
-  container (4096 MiB) ran out of memory, and keel moved the VIP. The
-  exact cause is not isolated, and it is a defect of the WAF layer, not
-  of Nextcloud; more memory for the container is not a fix. Before a
-  release: find the cause in keel-overlay-coraza, and test large DAV
-  uploads and downloads (1 GB, several at the same time) through the
-  front with the memory of every worker logged.
-- A file of `keel-front.d` sends the paths of the sync clients
-  (`remote.php`, `public.php`, `status.php`, the OCS API, Login Flow v2)
-  from the front to the app socket with no Anubis. Coraza still reads
-  them, and Nextcloud asks for a login on each. A browser keeps the
-  challenge everywhere else (0062 section 6, confirmed: the sync clients
-  must pass Anubis).
-- The scheme behind Anubis is open: Nextcloud makes `http://` links on a
-  request to port 443, because the app server is plain HTTP on a socket.
+  methods on the DAV paths only. For a DAV PUT it does not read the body
+  (`ctl:requestBodyAccess=Off`) and removes rules 920340 (no
+  Content-Type) and 920420 (a type outside the policy, such as
+  `application/octet-stream`). The global body limit of Coraza (128 MiB)
+  stays. With the plugin, a PUT of 100 MiB grew one nginx worker from 66
+  to 87 MB, and four GETs of 100 MiB added nothing (second test); a PUT
+  of 100 MiB with `application/octet-stream` passes (third test). The
+  maintainer said yes on 2026-11-12.
+- **The sync clients pass Anubis.** A file of `keel-front.d` sends the
+  paths of the sync clients (`remote.php`, `public.php`, `status.php`, the
+  OCS API, Login Flow v2) from the front to the app socket with no
+  Anubis. Coraza still reads them, and Nextcloud asks for a login on each.
+  A browser keeps the challenge everywhere else (0062 section 6,
+  confirmed). The maintainer said yes on 2026-11-12.
+- **The scheme behind Anubis: option B.** keel-web passes the scheme
+  (Keel-Linux/keel-web#35, keel-web 0.4.4): a conffile
+  `/etc/nginx/conf.d/keel-web-scheme.conf` gives `$keel_web_https`, which
+  is `on` for a request on the app socket whose front was HTTPS, and
+  `$https` everywhere else. The route of Nextcloud sets
+  `fastcgi_param HTTPS $keel_web_https if_not_empty;`. A request to port
+  443 gets `https://` links, port 80 keeps `http://` links (0079), and a
+  forged `X-Forwarded-Proto` of a client changes nothing (third test).
+  No `overwriteprotocol`. The maintainer chose B on 2026-11-12.
+- **The nginx memory under Coraza: found, a release blocker until
+  fixed.** Rule 10013 of keel-overlay-coraza turns body inspection off
+  for a Content-Type outside the parsed list, and rule 10012 limits form,
+  JSON and XML bodies to 256 KiB. A request with **no** Content-Type
+  matches neither, so its body is read by the Core Rule Set up to the
+  global limit of 128 MiB. A POST of 10 MiB to `/` with no type and no
+  login made one worker grow to 1.29 GB and work for minutes; a PUT of
+  100 MiB, to 2.48 GB (third test). Every site of keel-web in the cloud
+  modes is exposed, whatever the application. It is a defect of
+  keel-overlay-coraza, not of Nextcloud, and more memory is not a fix. The
+  fix tested as a plugin: no body inspection when there is no
+  Content-Type, the treatment that rule 10013 gives an unknown type. Then
+  10 MiB and 100 MiB bodies get 403 in 0.13 s and 1.0 s, no worker passes
+  93 MB, and a DAV PUT of Nextcloud still passes. Before a release of any
+  application in the cloud modes: that fix in keel-overlay-coraza, and a
+  test of large DAV uploads and downloads (1 GB, several at the same time)
+  with the memory of each worker logged.
 
 ### 8. Replicated paths and checks
 
@@ -272,20 +298,23 @@ directory has arrived (second test).
 
 ## How it is carried out
 
-1. The prototype `keel-nextcloud` (local, no remote): the layer files,
+1. The prototype `keel-nextcloud`: the layer files,
    the hook, the gate, the timers, the manifest, the rule-set plugin, the
-   front file, 87 bats tests, line coverage 95 to 100 % per file, a
+   front file, the dialog of keel-init, 99 bats tests, line coverage 95 to
+   100 % per file, a CI workflow, a
    contract draft that `keel-commission --check` accepts.
-2. A Forgejo repository `Keel-Linux/keel-nextcloud`, after the
-   maintainer's yes.
+2. The Forgejo repository `Keel-Linux/keel-nextcloud` (created on
+   2026-11-12, the maintainer's yes); the tree for a first build is
+   Keel-Linux/keel-nextcloud#1.
 3. The image, built on the build host, then the commissioning of 0075 on
    BR1 and BR2 in all three modes.
 
 ## Open points
 
-1. The scheme behind Anubis (section 7).
-2. The first boot has no dialog for keel-init yet, so an interactive
-   first boot cannot ask the password of the administrator.
+1. The scheme behind Anubis: the route line waits for keel-web 0.4.4
+   (Keel-Linux/keel-web#35 and Keel-Linux/keel-nextcloud#2).
+2. The dialog of keel-init asks the administrator password
+   (Keel-Linux/keel-nextcloud#1); it ran in bats only, not on a machine.
 3. The official rule-set plugin of Nextcloud
    (`coreruleset/nextcloud-rule-exclusions-plugin`) against the two rules
    of the prototype.
@@ -301,8 +330,8 @@ directory has arrived (second test).
    test). That is for keel.
 8. A Nextcloud package moved by apt (the method of 0084) instead of a
    tarball in the layer.
-9. The defect of nginx memory under Coraza (section 7), a release
-   blocker candidate.
+9. The defect of nginx memory under Coraza (section 7): the cause is
+   found; the fix in keel-overlay-coraza blocks a release.
 
 ## Tests before the release
 
@@ -319,18 +348,9 @@ directory has arrived (second test).
 
 ## Questions for the maintainer
 
-1. The sync clients go past Anubis on their paths, with Coraza still on
-   them (section 7). Yes or no?
-2. The scheme behind Anubis: (A) `overwriteprotocol = https` in the
-   cloud modes, which also sends port 80 to HTTPS; (B) keel-web passes
-   the scheme to the app server; (C) leave it open until the image.
-   Which letter?
-3. Log level 3, so the session password never reaches the log, and no
-   warning is logged. Yes or no?
-4. No body inspection of Coraza for a DAV PUT, with the global body
-   limit kept (section 7). Yes or no?
-5. A Forgejo repository `Keel-Linux/keel-nextcloud` for the prototype.
-   Yes or no?
+1. The fix of keel-overlay-coraza: no body inspection for a request with
+   no Content-Type (variant B of the third test), in a new rule beside
+   10013. Yes or no?
 
 ## Rejected alternatives
 
