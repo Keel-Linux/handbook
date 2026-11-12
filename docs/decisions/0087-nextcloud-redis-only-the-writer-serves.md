@@ -279,13 +279,16 @@ directory has arrived (second test).
   100 MiB, to 2.48 GB (third test). Every site of keel-web in the cloud
   modes is exposed, whatever the application. It is a defect of
   keel-overlay-coraza, not of Nextcloud, and more memory is not a fix. The
-  fix tested as a plugin: no body inspection when there is no
-  Content-Type, the treatment that rule 10013 gives an unknown type. Then
-  10 MiB and 100 MiB bodies get 403 in 0.13 s and 1.0 s, no worker passes
-  93 MB, and a DAV PUT of Nextcloud still passes. Before a release of any
-  application in the cloud modes: that fix in keel-overlay-coraza, and a
-  test of large DAV uploads and downloads (1 GB, several at the same time)
-  with the memory of each worker logged.
+  text parts of a multipart body had the same gap (third test). The fix
+  is keel-overlay-coraza 0.1.5 (Keel-Linux/common#83): rule 10014 does not
+  inspect a body with no Content-Type, the treatment that rule 10013 gives
+  an unknown type, and rule 10015 refuses more than 256 KiB of text parts
+  in a multipart body, files not counted. With 0.1.5 every untyped,
+  oddly typed, chunked and multipart case ended in 1.3 s or less, uploads
+  of files and DAV PUTs passed, and the biggest worker peaked at 110 MB.
+  Before a release of any application in the cloud modes: 0.1.5 in the
+  archive, and a test of large DAV uploads and downloads (1 GB, several at
+  the same time) with the memory of each worker logged.
 
 ### 8. Replicated paths and checks
 
@@ -330,8 +333,9 @@ directory has arrived (second test).
    test). That is for keel.
 8. A Nextcloud package moved by apt (the method of 0084) instead of a
    tarball in the layer.
-9. The defect of nginx memory under Coraza (section 7): the cause is
-   found; the fix in keel-overlay-coraza blocks a release.
+9. The defect of nginx memory under Coraza (section 7): the fix is
+   keel-overlay-coraza 0.1.5 (Keel-Linux/common#83); a release waits for
+   it in the archive.
 
 ## Tests before the release
 
@@ -348,9 +352,8 @@ directory has arrived (second test).
 
 ## Questions for the maintainer
 
-1. The fix of keel-overlay-coraza: no body inspection for a request with
-   no Content-Type (variant B of the third test), in a new rule beside
-   10013. Yes or no?
+None open. The fix of keel-overlay-coraza was approved on 2026-11-12;
+it waits for its merge and publication.
 
 ## Rejected alternatives
 
