@@ -283,7 +283,12 @@ directory has arrived (second test).
   is keel-overlay-coraza 0.1.5 (Keel-Linux/common#83): rule 10014 does not
   inspect a body with no Content-Type, the treatment that rule 10013 gives
   an unknown type, and rule 10015 refuses more than 256 KiB of text parts
-  in a multipart body, files not counted. With 0.1.5 every untyped,
+  in a multipart body, files not counted. The limit is for the sum of
+  the text parts, not for each part: two parts of 150 KiB get 413
+  (`evidence/2026-11-12-upgrade-test-odoo-wordpress-coraza-0.1.5-keel-web-0.4.4.md`).
+  The maintainer decided on 2026-11-12 that the limit stays as it is. An
+  application that must send more text adds an exception in its own
+  layer (0089). With 0.1.5 every untyped,
   oddly typed, chunked and multipart case ended in 1.3 s or less, uploads
   of files and DAV PUTs passed, and the biggest worker peaked at 110 MB.
   Before a release of any application in the cloud modes: 0.1.5 in the
