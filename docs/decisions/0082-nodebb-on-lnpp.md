@@ -218,3 +218,36 @@ converter on NodeBB 4.x.
   the Keel archive (0083), not from the Debian archive.
 
 It applies 0047, 0049, 0050, 0054, 0059, 0068, 0075, 0079 and 0083.
+
+## Amendment 2026-11-12: the results of the prototype
+
+The maintainer answered the questions of the first real-node test on
+2026-11-12. The coordinator chose answer A for the session secret. The
+evidence is `evidence/2026-11-11-keel-nodejs-nodebb-real-node-test.md`
+and `evidence/2026-11-12-keel-nodejs-24-restart-and-session-secret.md`.
+
+1. **The Node.js package of the layer is `keel-nodejs-24`.** Each line is
+   its own package (0083, amendment). The plan names the line. A change
+   of line is a change of the plan and a new commissioning.
+2. **A path unit of the layer restarts NodeBB.** The package has no
+   maintainer script, so NodeBB keeps the old binary after an upgrade.
+   `nodebb-nodejs.path` watches `/usr/lib/keel-nodejs/bin/node` and runs
+   `systemctl try-restart nodebb.service`.
+3. **The session secret is in the database, not in the manifest.**
+   Section 4, "Secrets", said that NodeBB's `secret` is a manifest secret
+   with `shared: true`. The layer keeps it in the one-row table
+   `keel_nodebb_secret` of the database `nodebb`, as WordPress keeps its
+   salts. The first writable boot writes the row, from
+   `KEEL_SECRET_NODEBB_SECRET` when the spec declares
+   `secrets.nodebb_secret`, else a new value. No later boot and no
+   replica changes it. `serve.py` gives it to NodeBB in the environment.
+   So the secret replicates with the session rows. That a login survives
+   a promote is not tested until a pair test runs.
+4. **Known gap of keel:** keel has no general path that gives one
+   generated value to both nodes of a pair. `shared: true` of a manifest
+   is only validated. This note does not need it, and nobody works on it
+   now.
+5. **The writable list of section 4 gets one path:**
+   `node_modules/nodebb-plugin-emoji/build`, and `build/emoji` in it.
+   The plugin writes its data there at the first start of a node.
+6. **NodeBB 4.16.7 runs on PostgreSQL 17.11** ("Not verified" above).
