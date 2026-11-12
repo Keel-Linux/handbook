@@ -2,9 +2,9 @@
 
 Date: 2026-11-12
 
-This file is the evidence for the second real-node test of the prototype,
-after the answers of the maintainer of 2026-11-12 to the questions of
-`2026-11-11-keel-nodejs-nodebb-real-node-test.md`:
+This file is the evidence for the second real-node test of the prototype.
+The maintainer answered the questions of
+`2026-11-11-keel-nodejs-nodebb-real-node-test.md` on 2026-11-12:
 
 1. One binary package for each Node.js line: `keel-nodejs-24`.
 2. `/usr/lib/keel-nodejs` with links in `/usr/bin`.
@@ -18,8 +18,8 @@ is not a commissioning test (0075).
 
 ## The machine
 
-CT 9385 on BR1, the machine of the first test, with NodeBB 4.16.7 on the
-PostgreSQL 17.11 of keel-lnpp 19.0-9 and 4 topics from the first test.
+CT 9385 on BR1, the machine of the first test. NodeBB 4.16.7 runs on the
+PostgreSQL 17.11 of keel-lnpp 19.0-9, with 4 topics from the first test.
 
 ## The code
 
