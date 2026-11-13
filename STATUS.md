@@ -3675,3 +3675,36 @@ release directory. The first signed Proxmox index had a wrong `Infopage`
 and was never published.
 
 The evidence is `evidence/2026-11-10-release-2026-11-11.md`.
+
+## 2026-11-13: release 2026-11-12 of the stable channel, and NodeBB in testing
+
+Release 2026-11-12 revision 1 is signed and published. It gives a new
+revision to the 7 images that hold keel-overlay-coraza. Each new revision
+holds keel-overlay-coraza 0.1.5 and keel-web 0.4.4. Version 0.1.5 corrects
+the defect with a request body that has no Content-Type. The new
+revisions are Web 19.0-14, LNMP 19.0-7, LNPP 19.0-10, Laravel 19.0-8,
+WordPress 19.0-22, Odoo 19.0-19 and ntfy 19.0-7. They hold keel 0.23.96
+and come from the pool `stable-5`.
+
+- Each new image passed the commissioning test of decision 0075 on BR1 and
+  on BR2: 54 runs, 54 PASS. 5 runs passed only on a second run with the
+  same image, and their cause is not known.
+- The channel `stable` is at `2026-11-12/1`. It names 11 layers. Core
+  19.0-13, MariaDB 19.0-12, Redis 19.0-13 and PostgreSQL 19.0-9 did not
+  change.
+- The Proxmox index has 11 records. Each of the 7 repositories has a
+  release with the template, the ISO and their signed checksum files.
+- The application pages at `https://keellinux.org/apps/NAME/` still show
+  the revision before. They need a new run of the page tool.
+
+Release 2026-11-13 revision 1 puts NodeBB 19.0-9 in the channel `testing`
+(decision 0072, no Proxmox index). The channel `testing` is at
+`2026-11-13/1` and names 12 layers. NodeBB is not in the channel `stable`
+and not in the Proxmox index. The same publication put keel 0.23.97 and
+confconsole 2.2.3+keel25 in `trixie-testing` only (apt#122).
+
+The release tool is still not cumulative (apt#112). The layer sets of
+mariadb, redis and postgresql were copied by hand into the release
+directory.
+
+The evidence is `evidence/2026-11-13-release-2026-11-12.md`.
