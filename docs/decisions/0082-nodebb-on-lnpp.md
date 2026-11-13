@@ -257,3 +257,35 @@ and `evidence/2026-11-12-keel-nodejs-24-restart-and-session-secret.md`.
    `node_modules/nodebb-plugin-emoji/build`, and `build/emoji` in it.
    The plugin writes its data there at the first start of a node.
 7. **NodeBB 4.16.7 runs on PostgreSQL 17.11** ("Not verified" above).
+
+## Amendment 2026-11-13: NodeBB logs in to PostgreSQL on the socket
+
+Section 3 said that `config.json` has `database: postgres` on
+`127.0.0.1` and the password from `db_password`. The image 19.0-9 does
+not do that. The cause is the commissioning of the ISO image on
+2026-11-12: an interactive first boot has no `DB_PASS` value, and the
+hook `45nodebb` stopped with "no DB_PASS".
+
+1. **NodeBB logs in on the socket `/run/postgresql`, with the peer
+   authentication of the system user `nodebb`.** `serve.py` and the
+   first boot hook use the same login. `config.json` holds the socket
+   directory as the host and holds no password.
+2. **The role `nodebb` has no password.** The secret `db_password` stays
+   the password of the account `postgres` of the stack. NodeBB does not
+   read it.
+3. **The first boot hook needs no `DB_PASS`.** On a console it asks the
+   NodeBB administrator password (the screen "NodeBB password"). A
+   headless boot of a cloud mode leaves the work to `keel-init`, as
+   before.
+4. **The ISO pass needs a CPU of level x86-64-v2.** Node.js 24 does not
+   start on the `kvm64` type. The first boot hook says so before it asks
+   a question. The commissioning contract sets
+   `vm.cpu: x86-64-v2-AES`. The default CPU type of the commissioning
+   runner stays `kvm64`.
+5. **NodeBB 19.0-9 is in the `testing` channel only**, in release
+   2026-11-13, signed with no index (0072). It is not in the `stable`
+   channel and not in the Proxmox VE index. The maintainer decided this
+   on 2026-11-13. Six commissioning passes passed: the container with
+   console answers, the container with a preseed and the ISO image,
+   each on two sites. The cloud passes of NodeBB did not run.
+   The evidence is `evidence/2026-11-13-release-2026-11-12.md`.
