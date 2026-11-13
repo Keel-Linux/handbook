@@ -3694,14 +3694,17 @@ and come from the pool `stable-5`.
   change.
 - The Proxmox index has 11 records. Each of the 7 repositories has a
   release with the template, the ISO and their signed checksum files.
-- The application pages at `https://keellinux.org/apps/NAME/` still show
-  the revision before. They need a new run of the page tool.
+- The application pages at `https://keellinux.org/apps/NAME/` show the
+  new revisions (made again on 2026-11-13).
 
 Release 2026-11-13 revision 1 puts NodeBB 19.0-9 in the channel `testing`
 (decision 0072, no Proxmox index). The channel `testing` is at
 `2026-11-13/1` and names 12 layers. NodeBB is not in the channel `stable`
 and not in the Proxmox index. The same publication put keel 0.23.97 and
-confconsole 2.2.3+keel25 in `trixie-testing` only (apt#122).
+confconsole 2.2.3+keel25 in `trixie-testing` (apt#122). The upgrade test
+of decision 0090 passed on one node of each published application, and
+the two packages are in `trixie` since 2026-11-13 (apt#123). The evidence
+is `evidence/2026-11-13-upgrade-test-keel-0.23.97-confconsole-keel25.md`.
 
 The release tool is still not cumulative (apt#112). The layer sets of
 mariadb, redis and postgresql were copied by hand into the release
