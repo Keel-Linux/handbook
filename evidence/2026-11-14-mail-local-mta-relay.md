@@ -272,11 +272,21 @@ On 9471 with the relay set:
 
 Read in code: `keel/system/hostname.py` renames the host only in
 `myhostname` and `mydestination`. `keel/system/security.py` writes
-`/etc/aliases` and the cron-apt mail settings, not `main.cf`. Other
-writers of `main.cf`: `inithooks/lib/hostname.sh`,
-`confconsole/plugins.d/System_Settings/hostname.py` (host name) and
-`common/conf/turnkey.d/zz-ssl-ciphers` (build time). No keel step writes
-`relayhost` or a `smtp_sasl_*` setting.
+`/etc/aliases` and the cron-apt mail settings, not `main.cf`. No keel
+step writes `relayhost` or a `smtp_sasl_*` setting. The other writers of
+`main.cf`:
+
+- `confconsole/plugins.d/System_Settings/hostname.py` replaces only the
+  `myhostname` line.
+- `common/conf/turnkey.d/zz-ssl-ciphers` runs at build time only.
+- `inithooks/lib/hostname.sh` (first boot hooks `09hostname` and
+  `31fqdn`) replaces the old host name in all of `main.cf`, where it is a
+  whole name or the first label of a dotted name. **Risk, read in code,
+  not tested:** if a node named `mail` has the relay
+  `[mail.example.org]:587`, a host name change by this hook also changes
+  the relay host. The hook runs at first boot, before a person sets a
+  relay, so the risk is small today. A relay that keel owns must not
+  depend on it.
 
 ## Other findings
 

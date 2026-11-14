@@ -47,7 +47,9 @@ Tested on BR1 on 2026-11-14 with WordPress 19.0-22, LNMP 19.0-7 and Core
   the pair was not tested).
 - `keel spec apply` does not remove a relay. Keel writes `main.cf` only
   for a host name change, and changes only `myhostname` and
-  `mydestination`.
+  `mydestination`. The first boot hook `inithooks/lib/hostname.sh`
+  replaces the old host name in all of `main.cf`, and thus can change a
+  relay host that holds the host name (read in code).
 - The spec has no mail relay key. It has `app.email` and
   `security.alerts` only.
 - `myhostname` is the short host name. The HELO name and the sender
@@ -104,8 +106,12 @@ Rules that validation applies:
 - If `password` is set, `tls` must be `verify` or `encrypt`. Validation
   refuses `may` with a password.
 - `tls: verify` is the default. It checks the certificate of the
-  smart-host against the system certificate authorities. Use it for a
-  public smart-host.
+  smart-host against the system certificate authorities, and checks that
+  the certificate names `host`. Use it for a public smart-host. Keel
+  writes the Postfix level `secure` for it, not the Postfix level
+  `verify`, because `secure` does not trust names from DNS.
+- With `tls: verify`, `host` must be a name. Validation refuses an IP
+  address, because a certificate does not name it.
 - `tls: encrypt` requires TLS but does not check the certificate. Use it
   for an internal relay with its own certificate.
 - `tls: may` uses TLS when the relay offers it, and goes on with no TLS
@@ -129,12 +135,16 @@ never deletes lines by a pattern. It writes only these settings:
 | `smtp_sasl_password_maps` | `hash:/etc/postfix/keel_relay_passwd` | removed | removed |
 | `smtp_sasl_security_options` | `noanonymous` | removed | removed |
 | `smtp_sasl_tls_security_options` | `noanonymous` | removed | removed |
-| `smtp_tls_security_level` | `secure` or `encrypt` | `secure`, `encrypt` or `may` | `may` |
+| `smtp_tls_security_level` | `secure` or `encrypt` | `secure`, `encrypt` or `may` | `may` (open question 5) |
 | `smtp_tls_CAfile` | system bundle, with `verify` | system bundle, with `verify` | removed |
 
 The script of today writes an empty level for a relay with no password,
 which turns TLS off. Keel never writes an empty level. With no password,
 `may` sends no credential.
+
+`inithooks/lib/hostname.sh` must stop the rename in `main.cf`, or limit
+it to `myhostname` and `mydestination` as keel does. Keel then writes
+`relayhost` again from the spec at each apply.
 
 Keel makes `/etc/postfix/keel_relay_passwd` from the secret file, mode
 0600 from the first byte, then runs `postmap`. When the relay goes away,
