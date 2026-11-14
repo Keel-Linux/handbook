@@ -1,11 +1,12 @@
 # 0092: Applications send mail to the local MTA, and Keel owns the relay
 
 Date: 2026-11-14
-Status: **proposed.** The maintainer decided the direction: each
-application sends to the local MTA, and the Postfix of the node decides
-where the mail goes. This note proposes how Keel owns that setting. The
-test on BR1 is in `evidence/2026-11-14-mail-local-mta-relay.md`. Nothing
-in this note is built.
+Status: **accepted 2026-11-14.** The maintainer decided the direction:
+each application sends to the local MTA, and the Postfix of the node
+decides where the mail goes. The maintainer answered yes to the seven
+questions at the end of this note. The test on BR1 is in
+`evidence/2026-11-14-mail-local-mta-relay.md`. Nothing in this note is
+built.
 
 ## What was asked
 
@@ -210,9 +211,9 @@ application. The core holds the relay only.
   receivers refuse direct mail from a residential or a cloud address.
   The relay is then necessary in practice.
 
-## Open questions for the maintainer
+## Questions for the maintainer, answered
 
-Each question has a yes or no answer.
+The maintainer answered yes to each question on 2026-11-14.
 
 1. Is the top-level key `mail.relay` with the shape of item 3 correct?
 2. Does the replica get the `mail` section and its secret file from the
