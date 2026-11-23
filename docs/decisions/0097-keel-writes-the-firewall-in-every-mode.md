@@ -4,9 +4,11 @@ Date: 2026-11-23
 Status: **proposed 2026-11-23. Urgent lane.** The maintainer put the
 fix in the urgent lane on 2026-11-23. His direction: `keel` writes the
 firewall rules in every mode, from one source. The image holds no fixed
-list. This note proposes the design and the transition.
-Two points wait for the maintainer (see "Open points"). Nothing in this
-note is built.
+list. This note proposes the design and the transition. On
+2026-11-23 the maintainer answered the 2 open points: B for the
+transition, and yes for the advisory now (see "Questions for the
+maintainer, answered"). The note waits only for his acceptance of the
+whole note. Nothing in this note is built.
 
 Sources. Each repository path was read on its default branch after
 `git fetch` on 2026-11-23: `keel` `35e8aa6` (keel 0.23.97), `common`
@@ -30,7 +32,8 @@ and IPv6. The maintainer asked for a fix in the urgent lane, with
 `keel` as the one source of the rules in every mode.
 
 A second real-node test of 2026-11-23 ("the second evidence" below:
-`evidence/2026-11-23-firewall-stopgap-and-cloud-advanced.md`, in handbook PR 203 until that PR is merged) found
+[`evidence/2026-11-23-firewall-stopgap-and-cloud-advanced.md`](../../evidence/2026-11-23-firewall-stopgap-and-cloud-advanced.md),
+merged on main by handbook PR 203) found
 that a published node in `cloud_advanced` is also open, and that the
 mesh services answer through the uplink to a neighbour on the same
 link. It also tested the Proxmox VE firewall as a stopgap.
@@ -414,8 +417,8 @@ and `cloud_simple`, validation never accepted `true`, and `keel inspect`
 writes `false` when it finds no file. Thus `false` records no choice of
 the administrator. `off` exists only when the spec says `off`.
 
-How a node in `report` goes to `enforce` is the first open point. The
-choices:
+How a node in `report` goes to `enforce`: the maintainer chose **B**
+on 2026-11-23. The choices were:
 
 - **A. Only the act of the administrator.** A confconsole item, or
   `firewall.state: enforce` in the spec. Danger: a node whose
@@ -437,8 +440,9 @@ choices:
   declare the ports first. Danger: a service of the administrator stops
   answering from outside, and the administrator learns it from a user.
 
-The proposal is **B**. It closes most nodes at their first apply, and
-it does not cut a service that the report can see.
+**Decided: B** (the maintainer, 2026-11-23). It closes most nodes at
+their first apply, and it does not cut a service that the report can
+see.
 
 "Report first" leaves a node open for longer than "enforce at once".
 That is the price of no surprise on a production node. In each choice,
@@ -493,7 +497,7 @@ on IPv4. Each test has an evidence file (0053). No package goes to
 13. **Upgrade of a published node (0090).** One node of each published
     application, from its published image: upgrade `keel` by `apt`,
     run the apply. The node goes to `report` or `enforce` as the answer
-    to open point 1 says. The checks of the application pass. SSH stays
+    to B says. The checks of the application pass. SSH stays
     open. Then a reboot, and the checks again. One test with a service
     of the administrator on a public port, and one with Webmin still
     installed.
@@ -595,32 +599,39 @@ This note changes these notes. It does not edit them.
   `cloud_advanced` node is open, and UDP 12321 answers on IPv4 (the
   second evidence).
 
+## Questions for the maintainer, answered
+
+The maintainer answered on 2026-11-23:
+
+1. How does a node in `report` go to `enforce`? **B**: at an apply that
+   a person starts, keel enforces at once when each public socket
+   belongs to a unit of the resolved manifest. Else the node stays in
+   `report` until the act of the administrator (section 5).
+2. May a public advisory with the tested stopgap go out now, before the
+   fix? **Yes.** The advisory is
+   `docs/advisories/2026-11-23-no-inbound-firewall.md`. It gives the
+   Proxmox VE stopgap of the second evidence.
+
 ## Open points
 
-1. Nodes in the field: how does a node in `report` go to `enforce`? A,
-   B or C (section 5). The proposal is B.
-2. May a public advisory with the tested stopgap go out now, before the
-   fix? Yes or no. The proposal is yes. The advisory would say: "Keel
-   images load no inbound firewall rule in any mode, and in the cloud
-   modes the database answers to a neighbour on the same link. Until a
-   fixed `keel` is published, turn on the Proxmox VE firewall on each
-   guest with the tested procedure. The fix needs one apply on each
-   node." The 2 evidence files that show the gap are already public in
-   the handbook repository.
+None. The note waits only for the acceptance of the maintainer.
 
 ## Work list
 
 In order. Nothing is started.
 
 1. Done: the Proxmox VE firewall stopgap, tested in `simple` and on a
-   `cloud_simple` pair (the second evidence, handbook PR 203).
-2. Write the advisory in `docs/advisories/`, as open point 2 decides.
+   `cloud_simple` pair (the second evidence, merged by handbook
+   PR 203).
+2. The advisory `docs/advisories/2026-11-23-no-inbound-firewall.md`,
+   published before the fix (answer 2). Update it when the fix is in
+   `trixie`.
 3. keel: accept `firewall` in every mode. Add `firewall.state` and
    `firewall.allow`. Read `enabled` as section 5 says. `keel inspect`
    writes `state`.
 4. keel: add the sshd ports instead of the refusal (section 3).
 5. keel: the `report` state, its counter rule and the list of undeclared
-   listeners in `keel diff`. Then the rule of open point 1.
+   listeners in `keel diff`. Then the rule of answer 1 (B).
 6. keel: the rule for the redirected fence ports.
 7. keel: the Monit check `keel-firewall` and its restart.
 8. keel: write Syncthing's `listenAddress` on the loopback when there is
