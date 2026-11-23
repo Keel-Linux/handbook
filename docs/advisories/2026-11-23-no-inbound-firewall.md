@@ -2,8 +2,8 @@
 
 Date: 2026-11-23
 Status: open
-Decision: [0097](../decisions/0097-keel-writes-the-firewall-in-every-mode.md)
-(proposed), keel writes the firewall in every mode
+Decision: [decision 0097, proposed](https://git.pop.coop/Keel-Linux/handbook/pulls/202),
+keel writes the firewall in every mode
 Evidence:
 [2026-11-23, the firewall loader](../../evidence/2026-11-23-webmin-removal-firewall-and-ssh-tunnel.md),
 [2026-11-23, the stopgap and cloud advanced](../../evidence/2026-11-23-firewall-stopgap-and-cloud-advanced.md)
