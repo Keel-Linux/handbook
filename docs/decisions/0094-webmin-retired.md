@@ -7,9 +7,9 @@ on the administrator's computer through an SSH tunnel, and no web
 database tool on the node. He approves this note when he reads it. The
 open points at the end wait for his answer. Nothing in this note is built.
 
-Sources: the study `evidence/webmin-alternatives-2026-11-23.md` and the
-inventory `evidence/package-inventory-2026-11-23.md` of the Keel working
-folder. Each repository path below was read on the default branch of the
+Sources: a study of Webmin and its alternatives and a package inventory,
+both of 2026-11-23. They are not published in this handbook. This note
+gives the repository path for each fact that it takes from them. Each repository path below was read on the default branch of the
 repository on 2026-11-23, after `git fetch`. "Read in code" means that
 nobody tested it on a running node.
 
@@ -40,9 +40,11 @@ the same engine can come much later. It is out of scope.
    on a Keel node, and it is public in every mode today. Decision 0049
    restricts it but is not built. Most Webmin writes go to files that
    `keel diff` does not read: sshd, Postfix, iptables rules, fail2ban,
-   packages, the root password (study, section 1.4).
+   packages, the root password. keel reads only its own nftables table
+   and the units and users (`keel/keel/inspect/`).
 2. **Whether it can be made to work.** An administrator can do nothing
-   in Webmin that a root SSH session cannot do (study, section 1.4).
+   in Webmin that a root SSH session cannot do. Each Webmin module is a
+   front end to files and commands of the system.
    confconsole already has screens that write the spec through `keel`
    (certificate, WireGuard, database mode). DBeaver Community has an SSH
    tunnel and supports MariaDB and PostgreSQL.
@@ -119,7 +121,8 @@ An account whose SSH session opens confconsole directly is an option to
 evaluate. It is not designed here. Its open points:
 
 - Which user: root with a forced command, or a new account. sudo is not
-  in the base plan (study, section 3.1).
+  in the base plan (`common/plans/turnkey/base`) or in the Keel stable
+  pool (`apt/conf/pools/stable-4/files`).
 - Keys only, or keys and a password.
 - SFTP for the same account, or a separate account in a chroot.
 
@@ -174,17 +177,25 @@ by SFTP.
 items below list each place that names 12320, 12321 or 12322. This note
 changes none of them.
 
-| Where | What |
+Files that name one of the 3 ports, by repository (default branch, with
+tests, without changelogs):
+
+| Repository | Files |
 | --- | --- |
-| `keel-core/packages/keel-core/manifest.yaml` | process `webmin`, 12321 `expose: public`, a Monit check, the `root_password` text "for SSH and Webmin" |
-| `keel-core/Makefile`, `keel-web`, `keel-lnmp`, `keel-lnpp`, `keel-mariadb`, `keel-postgresql`, `keel-redis`, `keel-ntfy`, `keel-odoo`, `keel-wordpress` `Makefile` | `WEBMIN_FW_TCP_INCOMING` holds 12321 |
-| `keel-laravel/Makefile` (branch `19.x`) | holds 12320 and 12321 |
-| `common/conf/turnkey.d/webmin-fw`, `webmin-conf-logging` | the default list and the Webmin port |
-| `common/conf/adminer` | 12322, retired Apache stacks only |
-| `services.txt` of `confconsole/conf`, `keel-core`, `keel-web`, `keel-lnmp`, `keel-lnpp`, `keel-redis`, `keel-odoo`, `keel-wordpress`, `keel-laravel` | the Webmin URL. `confconsole/conf/services.txt` also has the web shell on 12320 |
-| `keel/keel/manifest/firewall.py` | opens each `expose: public` port in cloud advanced, thus 12321 |
-| `keel/docs/manifest.md`, `keel/docs/apply.md` | examples with 12320 and 12321 |
-| `site/security.html` | Webmin public on 12321 |
+| `keel-core` | `Makefile`, `README.rst`, `docs/locking-down-services.rst`, `overlay/etc/confconsole/services.txt`, `packages/keel-core/manifest.yaml` (process `webmin`, 12321 `expose: public`, a Monit check, the `root_password` text "for SSH and Webmin"), `tests/banner.bats`, `tests/commission.yaml`, `tests/package.bats` |
+| `keel-web`, `keel-lnmp`, `keel-wordpress`, `keel-nodebb`, `keel-nextcloud` | `Makefile` (`WEBMIN_FW_TCP_INCOMING`), `services.txt` (not nextcloud), `tests/commission.yaml`, `tests/commission-core.yaml`, the recipe or image tests; `keel-wordpress/README.rst` |
+| `keel-lnpp`, `keel-odoo`, `keel-laravel` (branch `19.x`), `keel-loops` | `Makefile`, `services.txt`, `tests/boot-test.sh`, `tests/boot-test.bats`, `tests/lib/boot-test-lib.sh`, `tests/commission*.yaml`; `keel/instance.example.yaml` of lnpp and odoo; `README.rst` of laravel. laravel and loops also open 12320 |
+| `keel-mariadb`, `keel-postgresql`, `keel-redis` | `Makefile`, `README.rst`, `COVERAGE.md`, `keel/instance.example.yaml`, `services.txt`, `tests/README.md`, `tests/boot-test.*`, `tests/firewall.bats`, `tests/commission*.yaml`; `keel-mariadb/evidence/2026-10-08-boot-gate.md` |
+| `keel-ntfy` | `Makefile`, `tests/commission.yaml`, `tests/layer.bats` |
+| `keel-lnmn`, `keel-lnpn`, `keel-pixelfed` | `Makefile`, `services.txt` (pixelfed: no remote branch, read in the local checkout) |
+| `keel-lamp`, `keel-lapp`, `keel-apache-php` | retired by 0059; `Makefile`, `README.rst`, `conf.d/main`, the boot tests |
+| `common` | `conf/turnkey.d/webmin-fw`, `webmin-conf-logging`, `overlays/turnkey.d/fail2ban/etc/fail2ban/jail.local`, `tests/webmin-brand.bats`, `tests/webmin-net.bash`; 12322 in `conf/adminer*`, `mk/turnkey/*.mk`, `overlays/adminer`, and other TurnKey overlays that no Keel image uses |
+| `confconsole` | `README.rst`, `conf/services.txt` (also the web shell on 12320), `confconsole.py`, `docs/Networking.rst`, `tests/test_confconsole_usage.py` |
+| `inithooks` | `default/turnkey-init-fence` (`HTTPS_PORTS=(443 12321 12322)`), its tests and fixtures |
+| `keel` | `keel/manifest/firewall.py` derives 12321 from the manifest in cloud advanced; `docs/apply.md`, `docs/manifest.md` (12320 and 12321 as Core ports), the docstring of `keel/system/dbreadonly.py`, test fixtures |
+| `dot-github` | the commissioning fixtures and `tests/keel-commission-vm.bats`; `lib/commission/screens.py`, `web.sh`, `webshot.py` take the Webmin screenshots |
+| `site` | `security.html` |
+| `apt` | the `Packages` files of `trixie` and `trixie-testing`, which list the Webmin packages |
 
 ## The WireGuard access peer: a later step
 
@@ -355,7 +366,8 @@ SFTP, connect DBeaver through the tunnel.
 7. **keel#74.** Does this note un-park only the basic access peer, and
    leave the wider options parked? Yes or no.
 8. **Index of amended notes.** When this note is accepted, does the
-   index mark 0019, 0049, 0075 and 0077 as amended by 0094? Yes or no.
+   index mark each note under "What this amends" as amended by 0094?
+   Yes or no.
 
 ## Work list
 
