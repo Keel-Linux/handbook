@@ -29,6 +29,12 @@ on TCP 9999, a port that no list names, answered from outside on IPv4
 and IPv6. The maintainer asked for a fix in the urgent lane, with
 `keel` as the one source of the rules in every mode.
 
+A second real-node test of 2026-11-23 ("the second evidence" below:
+`evidence/2026-11-23-firewall-stopgap-and-cloud-advanced.md`, in handbook PR 203 until that PR is merged) found
+that a published node in `cloud_advanced` is also open, and that the
+mesh services answer through the uplink to a neighbour on the same
+link. It also tested the Proxmox VE firewall as a stopgap.
+
 ## What is true today
 
 ### 1. How keel writes the firewall
@@ -40,7 +46,7 @@ manifests, and it is tested on real containers.
 | --- | --- | --- |
 | The rule set | `keel/manifest/firewall.py` | One nftables table, `inet keel`, one input chain with `policy drop` (lines 13-22, 135-137). The file replaces the table in one transaction (lines 128-140) |
 | Always accepted | `keel/manifest/firewall.py:48-56` | `lo`, `ct state established,related`, all ICMPv6, IPv4 echo, DHCPv6 client replies from `fe80::/10` on UDP 546, DHCPv4 on UDP 68. `ct state invalid` is dropped |
-| The allow list | `keel/manifest/firewall.py:83-123` | Each `listen` with `expose: public` of a process whose overlay is enabled, on every interface. Each `expose: mesh` port on the WireGuard interface only. The WireGuard UDP port. TCP 51821 on `wg0`, and the set `mesh_invites` of 0048 |
+| The allow list | `keel/manifest/firewall.py:83-123` | Each `listen` with `expose: public` of a process whose overlay is enabled, on every interface (line 112). Each `expose: mesh` port only for packets that come in on the WireGuard interface: `iifname "wg0"` (line 115). The WireGuard UDP port (line 104). TCP 51821 with `iifname "wg0"` (line 118). The set `mesh_invites` of 0048 on every interface (line 119) |
 | Mesh ports need the overlay | `keel/manifest/firewall.py:102-110` | If the spec declares no `network.overlay.wireguard`, keel opens no mesh port and says so |
 | Guest bridges | `keel/manifest/firewall.py:65-69`, `keel/system/fwstate.py:140-159` | DNS and DHCP on a bridge that only carries guests, never on the uplink |
 | The plan and its guards | `keel/system/firewall.py:54-146` | `nft -c` before `nft -f`. No change while a network change waits for confirmation (0018). A file that keel did not write is not replaced |
@@ -81,8 +87,13 @@ The skip is by design. It rests on a premise that was false.
   screen writes `installation.mode` and the overlays only
   (`confconsole/keelmode.py:226-233`). No installer, preseed or
   commissioning contract writes `firewall:`. The test of 2026-10-16 set
-  `firewall.enabled: true` by hand. Thus a published node in
-  `cloud_advanced` is also open. Read in code, not tested.
+  `firewall.enabled: true` by hand.
+- **Tested: a published node in `cloud_advanced` is open** (the second
+  evidence, T2.2 and T2.4). On a primary, a replica and an etcd witness
+  made with the mode screen, the spec has no `firewall:` key,
+  `keel-manifest.nft` is absent and systemd skips `keel-firewall`. An
+  undeclared TCP and UDP port answers on IPv6 and IPv4. Thus the fix
+  covers the 3 modes and the witness.
 
 ### 3. What the notes promised
 
@@ -106,9 +117,12 @@ that promise only in `cloud_advanced`, and only after an edit by hand.
 
 ### 4. What each image needs open
 
-From the manifests, not from the `Makefile` lists. "wg0" means the
-WireGuard interface only, and only when the spec declares
-`network.overlay.wireguard`.
+From the manifests, not from the `Makefile` lists. "On wg0" is what
+the rule set must accept: packets that come in on the WireGuard
+interface, and only when the spec declares `network.overlay.wireguard`.
+`keel mesh create` and `keel mesh join` write that key
+(`keel/mesh/node.py:216-222`). It is not where the service listens
+(section 4a).
 
 | Image | `simple` | `cloud_simple` and `cloud_advanced` add |
 | --- | --- | --- |
@@ -128,7 +142,9 @@ Sources: `keel-core/packages/keel-core/manifest.yaml:13-30`,
 `keel-mariadb/packages/keel-mariadb/manifest.yaml:16`). The VIP is an
 address on wg0 (0049), so the mesh rules cover it.
 
-Each other listener is on the loopback: Postfix 25 (0092), Anubis 8923,
+In `simple`, each other listener is on the loopback. In the cloud
+modes, the databases are not on the loopback only (section 4a). The
+listeners on the loopback in each mode: Postfix 25 (0092), Anubis 8923,
 CrowdSec 6060 and 8080, the Syncthing GUI 8384, etcd 2381, ntfy 2586,
 Redis in Nextcloud, Odoo (`keel-odoo/overlay/etc/odoo/odoo.conf:13`),
 NodeBB (`keel-nodebb/overlay/usr/lib/inithooks/bin/nodebb.py:230`).
@@ -143,8 +159,51 @@ Two lists differ from the manifests:
 One listener is not in a manifest. With no overlay address, keel writes
 the Syncthing `listenAddress` as `tcp://:0`
 (`keel/system/filesync.py:282-283`). Syncthing then listens on a random
-TCP port on all addresses. The test of 2026-11-23 saw `*:36551` and
-`*:44051`. A drop policy closes it, and no peer uses it.
+TCP port on all addresses. The first test of 2026-11-23 saw `*:36551`
+and `*:44051` on one-node `cloud_simple` nodes with no overlay. In a
+real pair, Syncthing listens on TCP 22000 on the wg0 address (the second
+evidence, T2.3). A drop policy closes the random port, and no peer uses
+it.
+
+UDP 12321 of `miniserv.pl` listens on all IPv4 addresses and answers
+from outside on IPv4 (the second evidence, T1.0 and T2.4). The core
+manifest declares TCP 12321 only.
+
+### 4a. The mesh services answer through the uplink
+
+In `cloud_simple` and `cloud_advanced`, MariaDB 3306, etcd 2379 and
+2380, and Syncthing 22000 listen on the address of wg0. MariaDB also
+listens on the VIP. A neighbour on the same link as eth0 (another guest
+on the same bridge or VLAN, or the upstream router) can send a route for
+that address through the node. Linux accepts a packet for a local
+address on any interface. The second evidence (T2.5, T1.4) shows that
+these ports then answer through eth0, from a machine that is not a mesh
+member. Only the invite port 51821 refuses, because it binds to the
+device (`%wg0`). A probe of the public address does not show this path.
+
+The exposure in one sentence: a neighbour on the link can reach the
+login of MariaDB, and the TLS ports of etcd and Syncthing, with no
+WireGuard key.
+
+How serious each service is, read in code:
+
+- **etcd** requires TLS 1.3 and a client certificate signed by the mesh
+  CA, on the client port and on the peer port
+  (`keel/mesh/etcdconf.py:102-110`: `ETCD_CLIENT_CERT_AUTH=true`,
+  `ETCD_PEER_CLIENT_CERT_AUTH=true`, `ETCD_TLS_MIN_VERSION=TLS1.3`).
+  Without such a certificate, a neighbour gets no access. The test did
+  not try TLS.
+- **Syncthing** accepts only the device IDs that keel writes into its
+  configuration (`keel/system/filesync.py:255-280`).
+- **MariaDB** sends its greeting and accepts a password login. This is
+  the serious part.
+
+The rule set of this note already closes this path, because
+`keel/manifest/firewall.py` accepts mesh ports only with `iifname
+"wg0"` (line 115), and the input policy is `drop` (line 136). A packet
+for the wg0 address or the VIP that comes in on eth0 matches no accept
+rule, unless its port is public. Read in code. Not tested: the second
+evidence probed this path without `inet keel`.
 
 ### 5. What the node always needs
 
@@ -196,7 +255,7 @@ TCP port on all addresses. The test of 2026-11-23 saw `*:36551` and
 | A service of the administrator on a public address | Its new connections are dropped | The report state lists it first |
 | A database opened on purpose to another host | 3306 or 5432 is `mesh`. A client on the uplink is dropped | The report lists it. `firewall.allow` with `from` opens it |
 | Webmin on 12321 | Stays open: the core manifest declares it public | It closes with the removal act of 0094 |
-| The Proxmox firewall on the guest | Both filter. Each can only narrow | No conflict. A port opened at Proxmox must also be declared in keel |
+| The Proxmox firewall on the guest (the stopgap of section 7) | Both filter. Each can only narrow | No conflict. A port opened at Proxmox must also be declared in keel |
 | A container that cannot load nftables | `nft` fails. The old state stays, which is open | The failure is visible (section 4 below) |
 | A pair during replication | The table changes in one transaction. Connections that exist stay (`established`). New ones need the mesh port on wg0 | The report shows a mesh listener that the rule set does not open. One node at a time (0073, item 6) |
 | A pair whose spec has no `network.overlay.wireguard` | No mesh port opens. Replication fails at its next connection | The plan says "not opened" today. The report state shows it before enforcement |
@@ -210,11 +269,11 @@ goes to `trixie`.
 
 ## Why (brief section 10)
 
-1. **Why it is necessary.** Each node in `simple` and `cloud_simple`
-   filters no inbound port today, and each node in `cloud_advanced`
-   also, unless an administrator edited its spec. Any service that
-   listens on a public address is open to the network. This breaks the
-   promise of 0041 and 0095.
+1. **Why it is necessary.** Each published node filters no inbound
+   port today, in each of the 3 modes (tested). Any service that listens
+   on a public address is open to the network. In the cloud modes, the
+   database also answers to a neighbour on the link (section 4a). This
+   breaks the promise of 0041 and 0095.
 2. **Whether it can be made to work.** The rule set, its guards, its
    unit and its drift check exist and passed on real containers in
    cloud advanced. The change is a change of scope, a stronger SSH
@@ -248,6 +307,17 @@ goes to `trixie`.
    with a warning: "do not install iptables-persistent".
 7. **CrowdSec.** Its tables stay. A ban still drops, because a drop in
    any base chain is final.
+
+8. **Mesh ports by input interface.** A `mesh` port is accepted only
+   for a packet that comes in on the WireGuard interface (`iifname`), as
+   `keel/manifest/firewall.py:115` and `:118` do today. Thus a packet for
+   the wg0 address or the VIP that comes in on eth0 is dropped, unless
+   its port is public (section 4a). The rule set does not match on the
+   destination address.
+9. **No sysctl as a second layer.** `rp_filter` and
+   `arp_ignore`/`arp_announce` act on IPv4 only, and IPv6 has no equal
+   setting. The rule set closes the path on both families. This note
+   adds no sysctl, because none was tested and the rule set is enough.
 
 Danger: a node that a host cannot give nftables (for example a container
 of 0043 with no `CAP_NET_ADMIN`) cannot have the firewall. Section 4
@@ -381,7 +451,7 @@ Each test runs in the test VM of a site, one nested Proxmox VE VM for
 each site. The topology is the release topology: 2 nodes on BR1 and 1
 on BR2, with the netem profile of 250 ms. Each probe runs on IPv6 and
 on IPv4. Each test has an evidence file (0053). No package goes to
-`trixie-testing` before items 1 to 11 pass.
+`trixie-testing` before items 1 to 12 pass.
 
 1. **Each mode, closed.** `simple`, a `cloud_simple` pair, a
    `cloud_advanced` pair with its etcd witness: a listener on TCP 9999
@@ -391,37 +461,43 @@ on IPv4. Each test has an evidence file (0053). No package goes to
    the table of "What is true today", section 4, answers from outside.
    The checks of the application pass (0090, item 2).
 3. **Mesh only on wg0.** 3306, 5432, 6379, 2379, 2380, 22000 and 51821
-   answer through wg0 and on the VIP, and do not answer on the uplink.
-4. **Replication.** A write on the primary arrives on the standby. A
+   answer through wg0 and on the VIP, and do not answer on the public
+   address.
+4. **No mesh port through the uplink.** A neighbour on the same link,
+   not a mesh member, adds a route for the wg0 address and for the VIP
+   of each node through eth0, as T2.5 of the second evidence did. Each
+   mesh port gives a timeout on IPv6, and on IPv4 where the overlay has
+   IPv4. The same probe without `inet keel` answers, as a control.
+5. **Replication.** A write on the primary arrives on the standby. A
    file arrives through Syncthing. A failover by `keel vip promote`
    works, and the old primary rejoins.
-5. **Mesh join.** `keel mesh invite` and `keel mesh join` work, and the
+6. **Mesh join.** `keel mesh invite` and `keel mesh join` work, and the
    invite port closes after its expiry.
-6. **Reboot.** The journal shows `keel-firewall.service` before
+7. **Reboot.** The journal shows `keel-firewall.service` before
    `network-pre.target`. The probes of items 1 and 2 give the same
    results.
-7. **SSH.** With `Port 2222` added by hand, an apply keeps 22 and 2222.
+8. **SSH.** With `Port 2222` added by hand, an apply keeps 22 and 2222.
    With an sshd file that keel cannot read, the apply refuses and the
    old state stays.
-8. **Failure.** A broken file: the unit fails, Monit reports it, and
+9. **Failure.** A broken file: the unit fails, Monit reports it, and
    SSH still works. `systemctl restart nftables.service`: Monit loads
    the table again within its cycles.
-9. **First boot.** An interactive first boot: the fence page answers on
+10. **First boot.** An interactive first boot: the fence page answers on
    80 and 443. A container whose nat table is not available: the fence
    rejects, as today.
-10. **ISO.** An install from the ISO in a VM, under BIOS and UEFI
+11. **ISO.** An install from the ISO in a VM, under BIOS and UEFI
     (0052): DHCPv4, DHCPv6 and SLAAC still work after the lease time.
     A Proxmox container with `ip=dhcp,ip6=dhcp` (0080): the same.
-11. **CrowdSec.** In a cloud mode, a ban by `cscli decisions add` still
+12. **CrowdSec.** In a cloud mode, a ban by `cscli decisions add` still
     drops the address.
-12. **Upgrade of a published node (0090).** One node of each published
+13. **Upgrade of a published node (0090).** One node of each published
     application, from its published image: upgrade `keel` by `apt`,
     run the apply. The node goes to `report` or `enforce` as the answer
     to open point 1 says. The checks of the application pass. SSH stays
     open. Then a reboot, and the checks again. One test with a service
     of the administrator on a public port, and one with Webmin still
     installed.
-13. **Pair upgrade.** A `cloud_simple` pair and a `cloud_advanced` pair
+14. **Pair upgrade.** A `cloud_simple` pair and a `cloud_advanced` pair
     under writes: the standby first, the VIP holder last (0073, item 6).
     No acknowledged write is lost.
 
@@ -434,14 +510,18 @@ in testing are affected, in each mode. It goes to
 
 The advisory says:
 
-- Who is affected: each node from a Keel image, in each mode. In
-  `cloud_advanced`, a node with `firewall.enabled: true` in its spec is
-  not affected.
+- Who is affected: each node from a Keel image, in each of the 3
+  modes, the etcd witness included (tested). A `cloud_advanced` node
+  with `firewall.enabled: true` in its spec, set by hand, is not
+  affected.
 - What is open on a node that nobody changed: TCP 22, 80, 443 (web
-  images), TCP and UDP 12321, and in `cloud_simple` a random Syncthing
-  port. The databases listen on the loopback only.
+  images), TCP 12321, and UDP 12321 on IPv4. In `cloud_simple` and
+  `cloud_advanced`, MariaDB 3306, etcd 2379 and 2380, and Syncthing
+  22000 also answer to a neighbour on the same link (section 4a). In
+  `simple`, the databases listen on the loopback only.
 - What is at risk: each service that an administrator added and that
-  listens on a public address.
+  listens on a public address, and in the cloud modes the login of
+  MariaDB from the link.
 - What to do today: the stopgaps below.
 - When the fix comes, and that the fix needs one apply on each node.
 
@@ -449,18 +529,25 @@ Stopgaps:
 
 | Stopgap | State |
 | --- | --- |
-| The Proxmox VE firewall on the guest: enable it at the datacenter and on the guest, set `firewall=1` on the network device, and accept only the ports of the table above. Caution: the datacenter switch also turns on the firewall of the Proxmox hosts. Make sure that 22 and 8006 on the hosts stay open from the place that the administrator uses. Not verified in the Proxmox documentation | **not tested** |
+| The Proxmox VE firewall on the guest. The procedure is in the second evidence, section "Procedure". 3 levels must be on: the datacenter, `firewall=1` on the network device, and `enable: 1` in the guest file. The node level is not necessary: `enable: 0` in `host.fw` keeps the host unfiltered. The guest file needs `dhcp: 1` and `ndp: 1`: with `dhcp: 0`, the node loses its address at the next rebind. A node of a pair needs UDP 51820. The stopgap also closes the path of section 4a | **tested** in `simple` and on a `cloud_simple` pair, with a reboot (the second evidence, T1.2 to T1.4). **Not tested**: `cloud_advanced`, the witness, a VM from the ISO, the nftables back end of Proxmox VE |
 | An `/etc/nftables.conf` written by hand with the same list, loaded by `nftables.service` | **not tested** |
 | In `cloud_advanced`: `firewall.enabled: true` in the spec, then `keel spec apply --system` | tested 2026-10-16 on LNMP 19.0-3 and LNPP 19.0-4, not on the images of release 2026-11-12 |
+
+Caution for the Proxmox stopgap: the datacenter switch sets the
+sysctls `bridge-nf-call-iptables` and `bridge-nf-call-ip6tables` to 1
+for every bridge of the host. Then each bridged frame also goes through
+the `forward` hook. If the host has its own `forward` chain with a drop
+policy, the guest loses all its traffic. Add an accept for the bridged
+traffic first (the second evidence, T1.2).
 
 Caution: on a `cloud_simple` or `cloud_advanced` pair, a stopgap that
 does not accept the WireGuard UDP port and the wg0 ports stops
 replication and Syncthing. Do not install `iptables-persistent` as a
 stopgap: its files have no WireGuard port, and they need `xt_state`.
 
-The proposal is to test the Proxmox stopgap before the advisory goes
-out (work item 1). Whether the advisory can go out before that test is
-the second open point.
+The Proxmox stopgap is now tested in `simple` and `cloud_simple`.
+Whether the advisory goes out now, before the fix, is the second open
+point.
 
 ### 8. Relation to 0094 and 0095 (point F)
 
@@ -497,27 +584,36 @@ This note changes these notes. It does not edit them.
   a restart.
 - The rule set in a VM from the ISO, and in `cloud_advanced` on the
   images of release 2026-11-12.
-- Whether a published `cloud_advanced` node is open. Read in code
-  only: no installer writes `firewall:`.
-- UDP 12321 from outside. The test of 2026-11-23 saw the listener and did
-  not probe it.
+- That `inet keel` drops the path of section 4a. Read in code only.
 - The init fence with a drop policy, and with `iptables-nft`.
-- The stopgaps of section 7, except the third one.
+- The Proxmox stopgap in `cloud_advanced`, on a witness, on a VM from
+  the ISO, and with the nftables back end. The stopgap with
+  `/etc/nftables.conf`.
+- TLS or a login on the mesh ports through the uplink. The second
+  evidence proved a TCP connection and the MariaDB greeting only.
+- Tested since the first version of this note: a published
+  `cloud_advanced` node is open, and UDP 12321 answers on IPv4 (the
+  second evidence).
 
 ## Open points
 
 1. Nodes in the field: how does a node in `report` go to `enforce`? A,
    B or C (section 5). The proposal is B.
-2. May the advisory go out before the Proxmox stopgap is tested? Yes or
-   no. The proposal is no: the test is work item 1, and it is small.
+2. May a public advisory with the tested stopgap go out now, before the
+   fix? Yes or no. The proposal is yes. The advisory would say: "Keel
+   images load no inbound firewall rule in any mode, and in the cloud
+   modes the database answers to a neighbour on the same link. Until a
+   fixed `keel` is published, turn on the Proxmox VE firewall on each
+   guest with the tested procedure. The fix needs one apply on each
+   node." The 2 evidence files that show the gap are already public in
+   the handbook repository.
 
 ## Work list
 
 In order. Nothing is started.
 
-1. Test the Proxmox VE firewall stopgap on one `simple` node and one
-   `cloud_simple` pair in the test VM of BR1. Check that the nested
-   host keeps 22 and 8006 open. Evidence file.
+1. Done: the Proxmox VE firewall stopgap, tested in `simple` and on a
+   `cloud_simple` pair (the second evidence, handbook PR 203).
 2. Write the advisory in `docs/advisories/`, as open point 2 decides.
 3. keel: accept `firewall` in every mode. Add `firewall.state` and
    `firewall.allow`. Read `enabled` as section 5 says. `keel inspect`
@@ -536,10 +632,10 @@ In order. Nothing is started.
     `iptables-legacy` switch with 0094 work item 14. Change the
     `tests/firewall.bats` of `keel-mariadb`, `keel-postgresql` and
     `keel-redis`, and the `WEBMIN_FW_TCP_INCOMING` lists.
-11. The tests of section 6, items 1 to 11, in the test VM of each site.
+11. The tests of section 6, items 1 to 12, in the test VM of each site.
     Evidence file.
-12. `keel` to `trixie-testing`. The upgrade tests of section 6, items 12
-    and 13 (0090). Evidence file.
+12. `keel` to `trixie-testing`. The upgrade tests of section 6, items 13
+    and 14 (0090). Evidence file.
 13. `keel` to `trixie` with the advisory updated (0073, item 6). Build
     the images again and run commissioning (0075) on BR1 and BR2.
 14. Documentation: `keel/docs/spec.md` and `apply.md`,
