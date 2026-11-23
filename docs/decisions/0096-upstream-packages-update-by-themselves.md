@@ -1,10 +1,10 @@
 # 0096: Upstream packages update by themselves, and the maintainer gets only questions of intent
 
 Date: 2026-11-23
-Status: **proposed 2026-11-23.** The maintainer gave the direction on
-2026-11-23. Section 3, the automatic promotion to `trixie`, needs the
-maintainer's confirmation (open point A). The maintainer decided the
-messages of section 2 on 2026-11-23. Nothing in this note is built.
+Status: **accepted 2026-11-23.** The maintainer gave the direction on
+2026-11-23. On the same day he decided the messages of section 2 and
+answered A1 for the automatic promotion of section 3. Nothing in this
+note is built.
 
 ## What was asked
 
@@ -259,12 +259,13 @@ issue. The API shows no mail setting of the instance. The tracker has 2
 watchers: `navigator` and `keel-bridge`. A message by e-mail is later
 work, and it depends on decision 0092.
 
-### 3. Promotion from `trixie-testing` to `trixie`: the maintainer must confirm
+### 3. Promotion from `trixie-testing` to `trixie`
 
-**The maintainer must confirm this section (open point A).** On
-2026-11-23 the maintainer said "acho que sim" (I think so).
+The maintainer decided this rule on 2026-11-23. He first said "acho que
+sim" (I think so). Then he chose A1 from three choices: this rule, 14
+green days, or a promotion by hand.
 
-The proposed rule:
+The rule:
 
 1. **A normal release.** The pipeline promotes a version to `trixie`
    after 7 green days. A green day is one daily run of the upgrade test
@@ -282,11 +283,6 @@ The proposed rule:
    says yes, or says nothing, the package goes to `trixie` only, with an
    advisory (0073 item 6).
 4. `bin/promote` does the copy, as today. The pipeline runs it.
-
-If the maintainer says no: the pipeline stops at `trixie-testing`. It
-still runs the daily test. After 7 green days it writes the evidence and
-the exact `bin/promote` command line into one tracker issue. The
-maintainer runs the command.
 
 ### 4. Toolchains
 
@@ -426,23 +422,16 @@ one before it published one version through the pipeline.
 ## What this amends
 
 - **0090**: the upgrade test becomes automatic and daily. Its rule does
-  not change. If open point A is yes, the pipeline promotes, not a
-  person.
+  not change. The pipeline promotes, not a person.
 - **0061**: a package in the scope starts its own upgrade test. The
   image build stays as 0061 says.
-- **`Keel-Linux/apt`**: `bin/promote` stays. If open point A is yes,
-  the comment "nothing else does it" in `lib/promote.sh` changes.
+- **`Keel-Linux/apt`**: `bin/promote` stays. The comment "nothing else
+  does it" in `lib/promote.sh` changes.
   `bin/publish` takes the files that the CI built.
 
 ## Open points
 
-A. **The promotion of section 3.** Answer with a letter:
-
-- A1: yes, as proposed: 7 green days, a security release after one
-  green run.
-- A2: yes, but 14 green days for a normal release.
-- A3: no. `bin/promote` stays the maintainer's act. The pipeline writes
-  the command line into a tracker issue.
+None. The maintainer answered each point on 2026-11-23.
 
 ## Work, in order
 
@@ -467,7 +456,7 @@ Nothing is started.
 11. Run the pilot with `anubis` 1.28.2 and write its evidence.
 12. Add `govulncheck` and the toolchain and `nginx-abi` triggers.
 13. Make the build-only suite for toolchain backports.
-14. If open point A is yes: the automatic promotion.
+14. Write the automatic promotion of section 3.
 15. Bring the next packages in, in the order of section 9.
 
 ## Related notes
