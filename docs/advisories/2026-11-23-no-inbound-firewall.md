@@ -34,19 +34,19 @@ included. The versions are the ones on the
 [appliances page](https://keellinux.org/appliances.html) of the stable
 channel (releases 2026-11-10, 2026-11-11 and 2026-11-12):
 
-| Image | Version |
-| --- | --- |
-| Keel Core | 19.0-13 |
-| Keel Web | 19.0-14 |
-| Keel LNMP | 19.0-7 |
-| Keel LNPP | 19.0-10 |
-| Keel MariaDB | 19.0-12 |
-| Keel PostgreSQL | 19.0-9 |
-| Keel Redis | 19.0-13 |
-| Keel ntfy | 19.0-7 |
-| Keel WordPress | 19.0-22 |
-| Keel Laravel | 19.0-8 |
-| Keel Odoo | 19.0-19 |
+| Image | Version | Release |
+| --- | --- | --- |
+| Keel Core | 19.0-13 | 2026-11-10 |
+| Keel Web | 19.0-14 | 2026-11-12 |
+| Keel LNMP | 19.0-7 | 2026-11-12 |
+| Keel LNPP | 19.0-10 | 2026-11-12 |
+| Keel MariaDB | 19.0-12 | 2026-11-11 |
+| Keel PostgreSQL | 19.0-9 | 2026-11-10 |
+| Keel Redis | 19.0-13 | 2026-11-11 |
+| Keel ntfy | 19.0-7 | 2026-11-12 |
+| Keel WordPress | 19.0-22 | 2026-11-12 |
+| Keel Laravel | 19.0-8 | 2026-11-12 |
+| Keel Odoo | 19.0-19 | 2026-11-12 |
 
 In the testing channel: Keel NodeBB 19.0-9 (pre-release of 2026-11-13).
 
