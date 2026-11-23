@@ -20,9 +20,10 @@ The maintainer approved the rule of section 11 (the pair moves by
 itself, and its five limits) on 2026-11-23. He agreed to the scope of
 version 1 (section 10 I) on 2026-11-23, to confirm when the note is
 accepted. The items that this revision proposes are marked
-**(proposed)**. Three things are open: one question for the maintainer
-(the answer when no address is up, section "Open points"), the
-acceptance of the note, and the tests that are still to do.
+**(proposed)**. On 2026-11-23 he also decided the answer when no
+address is up: SERVFAIL (section 7, variant A), to be tested before the
+note is accepted. Two things are open: the acceptance of the note, and
+the tests that are still to do.
 
 ## What was asked
 
@@ -331,8 +332,9 @@ handbook.
   a check times out). The value 1 was not tested. With 1, one failed
   check marks an address down, so a switch is expected to be one check
   interval shorter than the measured times. This is to be tested.
-- **When no address is up, the server answers SERVFAIL (proposed, to be
-  tested).** The record uses `backupSelector='empty'` (5.1) and Lua code
+- **When no address is up, the server answers SERVFAIL (decided by the
+  maintainer on 2026-11-23, variant A below; to be tested before the
+  note is accepted).** The record uses `backupSelector='empty'` (5.1) and Lua code
   that raises an error when the result is empty. The 5.1.5 code turns an
   error of a LUA record into SERVFAIL ("Exception building answer packet
   ... sending out servfail", `pdns/packethandler.cc`). A resolver then
@@ -347,11 +349,13 @@ handbook.
   rule above, they get SERVFAIL (not tested).
 - Health checked names have a TTL of 60 s.
 
-**The answer when no address is up: the facts for each variant.** The
-laboratory test ran only variant B below, with `minimumFailures=2`.
+**The answer when no address is up: decided, A (the maintainer,
+2026-11-23).** A DNS server that sees no primary answers SERVFAIL. The
+facts for each variant follow. The laboratory test ran only variant B,
+with `minimumFailures=2`.
 
 - **A: `backupSelector='empty'` and a Lua error, so SERVFAIL (the
-  choice above, not tested).** For: a server never gives the read-only
+  decision, not tested).** For: a server never gives the read-only
   replica because it cannot see the primary, and a resolver asks
   another server. Against: a resolver can keep a SERVFAIL for up to 5
   minutes (RFC 2308, section 7.1). In the gap of a move, when no node
@@ -367,6 +371,22 @@ laboratory test ran only variant B below, with `minimumFailures=2`.
 The laboratory test made no gap with no primary: the new node answered
 200 at the time when the old node failed. The length of that gap in a
 real move decides the cost of each variant (section 10 K, case 15).
+
+**Pass conditions of variant A (proposed).** The real test of section
+10 K, with the validating resolver behind netem, must show all of
+these:
+
+1. The Lua form of section 10 E gives SERVFAIL when no address is up,
+   and the addresses that are up in all other cases.
+2. While at least one DNS server gives the primary, the resolver gives
+   the client an answer, not SERVFAIL (case 7).
+3. After the gap of a move, the resolver gives the new primary no later
+   than 60 s (the TTL of the name) after the first DNS server gives it
+   (case 15).
+
+If condition 1 fails, or if the resolver keeps a SERVFAIL for longer
+than the limits of conditions 2 or 3, the choice goes back to the
+maintainer with variant B.
 
 ### 8. Ports, mesh, TLS and health
 
@@ -491,8 +511,8 @@ administrator turns on failover for a name.
 
 **A DNS server with a wrong view.** A server that cannot reach the
 primary, or that has no egress in one address family, sees no address
-up. With variant A of section 7 it answers SERVFAIL, and the resolver
-asks another server (not tested). With variant B it gives both
+up. With variant A of section 7 (the decision) it answers SERVFAIL, and
+the resolver asks another server (not tested). With variant B it gives both
 addresses: the laboratory test measured this on a server with no path
 to the web nodes (Q3).
 
@@ -721,8 +741,9 @@ with BR2 only. The second is the time to the first write that succeeds.
     answer.
 14. The import of the keys of a signed test zone: the DS record at the
     parent does not change, and the answers stay `secure`.
-15. The gap of a move: how long all servers answer SERVFAIL, against
-    `backupSelector='all'`.
+15. The gap of a move: how long all servers answer SERVFAIL, and how
+    long after the first DNS server gives the new primary the resolver
+    gives it (pass condition 3 of section 7: at most 60 s).
 16. The DNSSEC algorithm, NSEC or NSEC3, and the CPU cost of live
     signing: measured, then chosen.
 
@@ -971,24 +992,19 @@ maintainer to accept this note.
 
 ## Open points
 
-**One question for the maintainer: the answer when no address is up**
-(section 7 gives the facts for each variant).
+No question is open for the maintainer. The answer when no address is
+up was decided on 2026-11-23: SERVFAIL (section 7, variant A), with
+pass conditions for the real test.
 
-- **A:** keep SERVFAIL (`backupSelector='empty'` and a Lua error), and
-  test it first. A server never gives the replica. A resolver can keep
-  the SERVFAIL for up to 5 minutes.
-- **B:** `backupSelector='all'`, the variant that the laboratory test
-  measured. The server gives both addresses, the read-only replica
-  too, and never SERVFAIL after the first query.
-
-**Also open:** the acceptance of this note by the maintainer, with the
-items marked proposed.
+**Open:** the acceptance of this note by the maintainer, with the items
+marked proposed.
 
 **Still to be tested** (the laboratory test proved the build on trixie,
 PowerDNS on hot standbys, the packet cache, redirects, the cold start
 with variant B, and the check through a TCP proxy):
 
-1. Variant A of section 7, and `minimumFailures=1`.
+1. Variant A of section 7 with its pass conditions, and
+   `minimumFailures=1`.
 2. Resolver and client caches, with netem at the profiles of 0050.
 3. A real Keel pair in `cloud_advanced`, with the check address of
    `keel` and the etcd witness, and a gap with no primary (section
@@ -1025,8 +1041,9 @@ with variant B, and the check through a TCP proxy):
 - **Sections 10 to 12, new:** the failover of names, the pair change, and
   the certificate on the replica.
 - **The laboratory test:** the measured values replace the estimates of
-  sections 1, 3, 6, 7 and 10 J. The answer when no address is up is a
-  question for the maintainer (A or B).
+  sections 1, 3, 6, 7 and 10 J. The maintainer decided the answer when
+  no address is up on 2026-11-23: SERVFAIL (variant A), with pass
+  conditions for the real test.
 - **Production facts** are not in this note. It states only general
   rules for an edge.
 
