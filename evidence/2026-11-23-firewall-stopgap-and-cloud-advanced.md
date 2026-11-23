@@ -84,7 +84,7 @@ Versions on the images: `keel` 0.23.96, `keel-core` 0.1.4, `confconsole`
 Secret handling: the VM made the secrets of 9410 and 9411 inside the file
 system of each stopped CT, and no command printed them. The runner made
 the secrets of the cloud nodes and wrote none to its record. The runner
-records, with the console transcripts and the invites, stay on the
+records, with the console transcripts, stay on the
 workstation and are not part of this file (log 90).
 
 ## Results, Test 1: the Proxmox guest firewall as a stopgap
@@ -147,17 +147,21 @@ device (`firewall=1`) and the guest file (`enable: 1`). The node level is
 not necessary.** The node firewall stayed off for the whole test, and the
 guest rules worked.
 
-The datacenter switch turns on `br_netfilter`: `bridge-nf-call-iptables`
-and `bridge-nf-call-ip6tables` went from 0 to 1. Then each bridged frame
-also goes through the `forward` hook of iptables and nftables. With
+The datacenter switch set the sysctls `bridge-nf-call-iptables` and
+`bridge-nf-call-ip6tables` from 0 to 1. These sysctls apply to every
+bridge of the host. Then each bridged frame also goes through the
+`forward` hook of iptables and nftables. With
 `firewall=1`, the guest is behind its own bridge `fwbr9410i0`. In L1 the
 `forward` chain of the VM's `inet keel_test_fw` saw `iifname` and
 `oifname` `fwbr9410i0`, matched no rule and dropped the frame. All
 traffic to the guest stopped, also neighbour discovery (IPv6 probes got
 `EHOSTUNREACH`). The test added 1 rule, `iifname "fwbr*" oifname
 "fwbr*" accept` (L1b), and removed it at the end. This is a fact of this
-test VM. It also applies to a production host that has a `forward` chain
-with a drop policy of its own (see the procedure, step 1).
+test VM. The guests without `firewall=1` (9411, and the pair while the
+runner checked it) kept their traffic, because `keel_test_fw` accepts
+`vmbr1` to `vmbr1`. Inference, not tested: on a host whose `forward`
+chain has a drop policy and no such rule, the switch can also cut the
+traffic of guests that have no firewall.
 
 ### T1.3 The stopgap (tested, logs 34, 35, 36, 39)
 
@@ -242,7 +246,8 @@ writes the rule set of 0097. Each step says if this test did it.
      you use. **Tested together with the first item, not alone.**
 
    Then make a timer that turns the firewall off again after 10 min.
-   **Tested.**
+   **The rollback script was tested by a direct run. The timer was armed
+   and stopped each time, and it never fired.**
 3. **Write the guest file** `/etc/pve/firewall/VMID.fw`. **Tested.**
 
    ```
@@ -280,16 +285,18 @@ writes the rule set of 0097. Each step says if this test did it.
 5. **Turn on the datacenter firewall:** `enable: 1` in `cluster.fw`.
    **Tested.**
 
-   Caution: the switch turns on `br_netfilter` for every bridge of the
-   host. If the host has a `forward` chain with a drop policy, add an
-   accept for the `fwbr*` bridges first. If you do not, the guest loses
-   all its traffic. **Tested.**
+   Caution: the switch sends the frames of every bridge of the host
+   through the `forward` hook. If the host has a `forward` chain with a
+   drop policy, add an accept for the bridged traffic first. If you do
+   not, the guest loses all its traffic. **Tested for the `fwbr*` hop of
+   the guest. For the other bridges: inference, not tested.**
 6. **Check from a second machine:** an undeclared port gives a timeout.
    Port 22 and the application ports answer. The node keeps its
    addresses. `apt-get update` works. **Tested.**
 7. **Remove the timer of step 2** when you have proved access to the
    host. **Tested.**
-8. **Reboot the guest once** and do step 6 again. **Tested.**
+8. **Reboot the guest once** and do step 6 again. **Tested: addresses
+   and probes. `apt-get update` was not repeated after the reboot.**
 
 The stopgap does not replace the fix of 0097. It filters on the host,
 so a copy of the guest to another host without the same files is open
@@ -397,7 +404,7 @@ That is read in code, not tested here.
 |---|---|
 | T1. Does the Proxmox guest firewall close a `simple` node? | **yes**: undeclared TCP and UDP ports give a timeout on IPv6 and IPv4. 22, 80, 443, 12321 answer. Survives `pct reboot` |
 | T1. Levels | datacenter, network device `firewall=1`, guest file `enable: 1`. Not the node level |
-| T1. Side effects | DHCPv4, DHCPv6, RA and neighbour discovery work with `dhcp: 1` and `ndp: 1`. `dhcp: 0` loses the address at the next rebind. The datacenter switch turns on `br_netfilter`, and a `forward` drop on the host then drops all guest traffic |
+| T1. Side effects | DHCPv4, DHCPv6, RA and neighbour discovery work with `dhcp: 1` and `ndp: 1`. `dhcp: 0` loses the address at the next rebind. The datacenter switch sets the `bridge-nf-call` sysctls to 1, and a `forward` drop on the host then drops all traffic of the guest |
 | T1. `cloud_simple` pair | the stopgap plus UDP 51820: closed, replication, Syncthing and a reboot work |
 | T2. Is a published `cloud_advanced` node open? | **yes**: no `firewall:` key, no rule file, `keel-firewall` skipped, undeclared TCP and UDP ports answer on both families |
 | T2. Mesh-only ports on the public address | none answer: they bind to the wg0 address |
@@ -426,6 +433,10 @@ These are proposals only. Note 0097 is not changed by this file.
    (T1.0, T2.4).
 
 ## What was not tested
+
+- A node upgraded by `apt`. The images carry `keel` 0.23.96 and
+  `confconsole` 2.2.3+keel24, not the `keel` 0.23.97 and `keel25` that
+  0097 read.
 
 - The nftables back end of the Proxmox firewall (`nftables: 1`).
 - The stopgap in `cloud_advanced`, on a witness, and on a VM from the ISO.
