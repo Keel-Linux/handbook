@@ -30,8 +30,9 @@ the handbook yet.
   builds from source (class B and C): `anubis`, `libcoraza`,
   `libnginx-mod-http-coraza`, `coreruleset`, `syncthing`. `keel-nodejs`
   repacks the official Node.js binary (class E, 0083).
-- Each of the 6 is behind upstream. `anubis` 1.27.0 does not have the
-  security fixes of 1.28.0.
+- The 5 packages of class B and C are behind upstream. `anubis` 1.27.0
+  does not have the security fixes of 1.28.0. `keel-nodejs` 24.22.3 was
+  not compared with nodejs.org.
 - No timer looks for a new upstream version. A person sees it.
 - Each package repository has a CI that builds and tests
   (`.forgejo/workflows/package.yml` of `Keel-Linux/anubis`). It calls
@@ -56,8 +57,8 @@ the handbook yet.
 - The upgrade test of 0090 is done by hand (handbook#186, handbook#194).
 - The image build of 0061 starts for image repositories only. A package
   repository does not start it.
-- A node reads Keel `trixie` and Keel `trixie-security`. It does not
-  read `trixie-testing`. cron-apt installs from Keel `trixie-security`
+- A node on the stable track reads Keel `trixie` and Keel
+  `trixie-security`. It does not read `trixie-testing`. cron-apt installs from Keel `trixie-security`
   with no person (0073 item 5).
 
 | Package | `debian/watch` | autopkgtest | Patch series | Build in CI |
@@ -103,9 +104,9 @@ These source packages are not in the pipeline:
 
 - Keel's own packages (class A, 16). Keel is their upstream. A Keel
   commit changes them.
-- The TurnKey packages that Keel changed (class D, 10). Keel carries 1 to
-  37 own revisions on each of them, thus Keel is their upstream in
-  practice. A Keel commit changes them.
+- The TurnKey packages that Keel changed (class D, 10). TurnKey seldom
+  changes them, and the Keel changes are Keel commits. A Keel commit
+  changes them.
 - `webmin`. Decision 0094 retires it (handbook#197).
 - `ojs-3.5`. It enters after its first publication (0084).
 - A later package enters when it is published and has the items of
@@ -159,17 +160,20 @@ The automated repair step obeys these rules:
 1. It never removes, skips or weakens a test. It does not change
    `debian/tests/`, the CI workflows or a lintian override. A CI check
    fails if a repair commit touches one of these paths.
-2. It never removes a Keel patch whose fate (section 7) is "Keel-only".
-   It can rebase or rewrite such a patch. The guard test of the patch
-   must pass with no change.
-3. It removes a patch only when its fate is "drop when upstream >= X"
+2. It never removes a Keel patch whose fate (section 7) is "Keel-only"
+   and that has a guard test. It can rebase or rewrite such a patch. The
+   guard test of the patch must pass with no change.
+3. A "Keel-only" patch with no guard test carries no property that Keel
+   uses. If it no longer applies, the step removes it. The step writes
+   this in `debian/changelog`.
+4. It removes another patch only when its fate is "drop when upstream >= X"
    and the new version is X or higher.
-4. It never changes what the package does on the node: the maintainer
+5. It never changes what the package does on the node: the maintainer
    scripts, the systemd units, the default configuration, the paths and
    the users stay the same.
-5. Its changes are ordinary commits in the PR. The CI gates them as
+6. Its changes are ordinary commits in the PR. The CI gates them as
    any other commit.
-6. One attempt is one repair commit and one complete CI run. It makes
+7. One attempt is one repair commit and one complete CI run. It makes
    at most 3 attempts for one upstream version. The count starts again
    for a newer upstream version.
 
@@ -214,8 +218,8 @@ The proposed rule:
    after 7 green days. A green day is one daily run of the upgrade test
    of 0090 on the candidate, with each check green. A red run starts the
    count again. The number 7 is the time of the reminder of 0085 and the
-   refresh time of 0073 item 7. A node does not read `trixie-testing`.
-   Thus only the daily test adds evidence, not the calendar.
+   refresh time of 0073 item 7. A node on the stable track does not read
+   `trixie-testing`. Thus only the daily test adds evidence, not the calendar.
 2. **A security release (section 6).** The pipeline promotes after one
    green run of the upgrade test, with no wait. The test runs, thus no
    yes of the maintainer is necessary (0090 item 3 is for a promotion
@@ -330,12 +334,15 @@ as follows (the patch analysis):
 
 - `challenge-without-gzip`: `keel-only`, rebased. The guard is the
   `behind-nginx` step with 512 requests and no `Accept-Encoding`.
-- `redirect-domains-ipv6`: `keel-only`. It applies with no change on
-  1.28.2 and stays.
+- `redirect-domains-ipv6`: `keel-only`, with no guard test, because Keel
+  does not set `REDIRECT_DOMAINS`. It applies with no change on 1.28.2
+  and stays.
 - `redir-same-host`: `keel-only`, rewritten in `PassChallenge`. The guard
   is the `behind-nginx` cases that refuse another host.
 - `redir-validate`: `drop-when-upstream >= 1.28.0`. Its `behind-nginx`
-  cases stay and must pass on the upstream code.
+  cases stay and must pass on the upstream code. Upstream 1.28.2 gives
+  the same messages that the test looks for: "Invalid redirect" and
+  "Redirect domain not allowed" (`lib/localization/locales/en.json`).
 - `keep-cookie-of-request-without-cookie`: `drop-when-upstream >= 1.28.0`.
 
 The pilot must show these results before the next package enters:
