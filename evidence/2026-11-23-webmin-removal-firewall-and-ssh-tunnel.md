@@ -105,7 +105,8 @@ no host firewall that filters input.
   empty chains, policy `accept`.
 - `keel-firewall.service` is enabled, but systemd skips it:
   `ConditionPathExists=/etc/keel/firewall/keel-manifest.nft` is not met.
-  keel writes that file only in `cloud_advanced`.
+  keel writes that file only in `cloud_advanced` (read in code: the unit
+  comment and `keel/docs/spec.md`, `firewall`).
 - In `cloud_simple`, the CrowdSec bouncer adds `table ip crowdsec` and
   `table ip6 crowdsec6`. Their input chains have policy `accept` and drop
   only the addresses that CrowdSec bans.
@@ -131,10 +132,12 @@ list names, answered from the VM on IPv6 and IPv4 (logs 11, 54):
 10.189.0.43:9999 curl_exit=0 http=404
 ```
 
-Thus each socket that listens on a public address is open to the
-network today. On these nodes that is 22, 80, 443 and 12321 (TCP), UDP
-12321, and in `cloud_simple` the Syncthing listener on a random TCP port
-on all addresses (`*:36551` on 9403, `*:44051` on 9404).
+Thus each TCP socket that listens on a public address is open to the
+network today. On these nodes that is 22, 80, 443 and 12321, and in
+`cloud_simple` the Syncthing listener on a random TCP port on all
+addresses (`*:36551` on 9403, `*:44051` on 9404). UDP 12321 also listens
+on all IPv4 addresses, and no rule filters it. UDP was not probed from
+the VM.
 
 Not tested: an ISO install in a VM, and `cloud_advanced`. The unit files
 are absent from the image file system, so a VM made from the same layers
@@ -194,8 +197,10 @@ The same on the 4 nodes:
    Error: /etc/keel/instance.yaml: appliance.name: the chain of lnmp does not resolve: in web: base: core cannot be used: /usr/share/keel/appliances/core.yaml fails validation (1 errors)
    ```
 
-   Before the removal, the same commands exit 0 (`manifest validate`) or
-   14 (`diff`, drift found).
+   Before the removal, `keel manifest validate` exited 0 and `keel diff`
+   exited 14 (drift found) on the 4 nodes (log 21). `keel spec validate`
+   and `keel spec apply --system-only --dry-run` ran only after the
+   removal, on 9401 and 9403 (log 55).
 3. **confconsole** still shows `Webmin: https://[...]:12321` and
    `Webmin: https://...:12321` on its usage screen. The lines come from
    `/etc/confconsole/services.txt`. No exception.
@@ -324,13 +329,17 @@ V4 (log 47): with `PermitOpen 127.0.0.1:3306 localhost:3306
 `localhost:3306` also gets the MariaDB greeting. `127.0.0.1:3306` still
 works, and `[::1]:3306` is still refused.
 
-`MaxSessions 2` (log 45): 1 SSH connection with `-L` carried 4 TCP
-connections at the same time. All 4 got the MariaDB greeting. A shell
-command and an SFTP batch on other SSH connections worked at the same
-time. A forwarded TCP connection is not a session for `MaxSessions`.
+`MaxSessions 2` (log 45): 1 SSH connection with `-L` and no session
+channel (`ssh -N`) carried 4 TCP connections at the same time. All 4 got
+the MariaDB greeting. Thus `MaxSessions 2` does not limit the forwarded
+connections of a tunnel. After the tunnel closed, a shell command as
+`evtunnel` worked. Not tested: 1 SSH connection that carries a session
+and forwards at the same time.
 
-SFTP (log 45): `sftp -b` with `pwd` and `ls -a` works for `evtunnel` and
-for `root` with a key (exit 0).
+SFTP (log 45): the first SFTP run in `multi.sh` read its batch from
+standard input and stopped at the 60 s timeout (`exit=124`). A separate
+run with a batch file passed: `sftp -b` with `pwd` and `ls -a` works for
+`evtunnel` and for `root` with a key (exit 0).
 
 End to end with real clients through the tunnel (log 46). On each node,
 the node itself was the SSH client to its own public address, so the
@@ -452,6 +461,8 @@ These are proposals only. Nothing was changed in a repository.
 - Redis, and the images other than lnmp and lnpp on a running node.
   The other 9 images were read from their file system only (A5, B1).
 - A `Match Group` form, and the restricted login of work item 6.
+- 1 SSH connection that carries a session and forwards at the same time,
+  as a client such as DBeaver can open.
 
 ## Logs
 
