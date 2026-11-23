@@ -268,7 +268,7 @@ tested.
 
 | Case | With a drop policy | Guard |
 | --- | --- | --- |
-| sshd on a second port, set by hand | Today keel refuses the whole rule set, and the node stays open (`keel/system/firewall.py:131-138`) | This note: keel opens each port that sshd is configured for, and each port that a running sshd listens on (section 3) |
+| sshd on a second port, set by hand | Today keel refuses the whole rule set, and the node stays open (`keel/system/firewall.py:131-138`) | This note: keel opens each port that sshd is configured for, and each port that the running sshd daemon listens on (section 3) |
 | A service of the administrator on a public address | Its new connections are dropped | The report state lists it first |
 | A database opened on purpose to another host | 3306 or 5432 is `mesh`. A client on the uplink is dropped | The report lists it. `firewall.allow` with `from` opens it |
 | Webmin on 12321 | Stays open: the core manifest declares it public | It closes with the removal act of 0094 |
@@ -381,8 +381,11 @@ database port with no `from`.
    the plan:
    - the ports that sshd is configured for: `sshd -T`, and
      `ssh.socket` while it is active.
-   - the ports that a running sshd listens on now: the sockets of the
-     units of sshd, or of a process with the name `sshd`.
+   - the ports that the running sshd daemon listens on now: the
+     process runs as root and is the daemon of the sshd unit, or the
+     listener of an active `ssh.socket`. A process that only has the
+     name `sshd` does not count. A process of a user session inside the
+     unit does not count.
 
    It does not refuse any more when sshd listens on a port that the
    manifests do not declare. This changes `keel/system/firewall.py:131-138`.
@@ -391,6 +394,9 @@ database port with no `from`.
    port from `SSHD_OPTS` in `/etc/default/ssh`, and a `Port` changed in
    the file before a restart of sshd (item 4). The second set is built
    after the second test (`82a085b`) and is not tested on a real node.
+   A review of pull request 307 found that the code matched by name
+   only. The pull request corrects this before its merge, and the
+   correction is not tested on a real node yet.
 2. If `sshd -T` does not answer, keel reads `sshd_config` and
    `sshd_config.d/*.conf` as sshd reads them. The ports are unknown only
    when a file cannot be read, or when an `Include` names a file outside
@@ -806,8 +812,8 @@ not merged and still changes.
 2. Done: the advisory `docs/advisories/2026-11-23-no-inbound-firewall.md`,
    published before the fix (answer 2, handbook PR 204). Update it when
    the fix is in `trixie`.
-   When this note is merged, change the `Decision:` link of the
-   advisory from handbook PR 202 back to this file.
+   Done: the `Decision:` link of the advisory names this file, not
+   handbook PR 202.
 3. Built: keel accepts `firewall` in every mode. It has `firewall.state`
    and `firewall.allow`, and reads `enabled` as section 5 says.
    `keel inspect` writes `state: enforce` only, and leaves a `report`

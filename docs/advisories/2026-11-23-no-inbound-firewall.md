@@ -2,7 +2,7 @@
 
 Date: 2026-11-23
 Status: open
-Decision: [decision 0097, proposed](https://git.pop.coop/Keel-Linux/handbook/pulls/202),
+Decision: [decision 0097](../decisions/0097-keel-writes-the-firewall-in-every-mode.md),
 keel writes the firewall in every mode
 Evidence:
 [2026-11-23, the firewall loader](../../evidence/2026-11-23-webmin-removal-firewall-and-ssh-tunnel.md),
