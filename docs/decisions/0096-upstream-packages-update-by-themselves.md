@@ -107,7 +107,7 @@ These source packages are not in the pipeline:
 - The TurnKey packages that Keel changed (class D, 10). TurnKey seldom
   changes them, and the Keel changes are Keel commits. A Keel commit
   changes them.
-- `webmin`. Decision 0094 retires it (handbook#197).
+- `webmin`. Decision 0094 retires it.
 - `ojs-3.5`. It enters after its first publication (0084).
 - A later package enters when it is published and has the items of
   section 7.
@@ -410,4 +410,6 @@ Nothing is started.
 
 ## Related notes
 
-It applies 0053, 0055, 0063, 0073, 0083, 0085 and 0090.
+It applies 0053, 0055, 0063, 0073, 0083, 0085 and 0090. Decision 0095
+makes this pipeline item 1 of the product level: an image goes to
+stable only when its third-party packages are in the pipeline.
