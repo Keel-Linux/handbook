@@ -626,6 +626,8 @@ In order. Nothing is started.
 2. The advisory `docs/advisories/2026-11-23-no-inbound-firewall.md`,
    published before the fix (answer 2). Update it when the fix is in
    `trixie`.
+   When this note is merged, change the `Decision:` link of the
+   advisory from handbook PR 202 back to this file.
 3. keel: accept `firewall` in every mode. Add `firewall.state` and
    `firewall.allow`. Read `enabled` as section 5 says. `keel inspect`
    writes `state`.
