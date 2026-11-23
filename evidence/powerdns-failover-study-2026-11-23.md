@@ -2,7 +2,10 @@
 
 Date: 2026-11-23. Site: none. Status: study, for decision 0045 (second
 round). No real-platform test is in this file. No guest, container or DNS
-server was made or changed.
+server was made or changed. A laboratory test later measured many items
+of this file: `evidence/2026-11-23-powerdns-5.1-standby-and-failover-record.md`
+(in PR 205 until merged; "the laboratory test" below). The section
+"Not verified" gives the result for each item.
 
 ## Question
 
@@ -227,7 +230,8 @@ Measurements:
   the minimum of the SOA MINIMUM field and the TTL of the SOA.
 
 **Switch time.** Decision 0045, section 10 J, gives the estimate with
-each term. It is not measured here. The first version of this file left
+each term. It is not measured here. The laboratory test measured the
+DNS server terms (Q3). The first version of this file left
 out GRACE, the 3 failed checks of the pair rule, the packet cache and
 the client floor after a full TTL. Section 14 gives the settings.
 
@@ -452,8 +456,8 @@ production site is built.
 - **Result.** The check connects to the listed address, sends the host
   of the URL as SNI and as `Host`, and accepts any certificate.
   `CURLOPT_RESOLVE` pins only the host of the URL. A redirect to another
-  name resolves through public DNS. Thus the check address must never
-  redirect.
+  name resolves through the resolver of the DNS server (measured in the
+  laboratory test, Q3). Thus the check address must never redirect.
 - **General rules for an edge.** Where an edge passes 443 in TCP by
   SNI, the check reaches the node that the edge gives for the name.
   Where an edge ends TLS, it must pass the check path unchanged, and
@@ -532,7 +536,8 @@ Repository `Keel-Linux/keel`, `origin/main` at `35e8aa6`.
   `auth-5.1.5`, the catch of `std::exception`: "Exception building
   answer packet ... sending out servfail" (lines 1731 to 1735). Thus a
   LUA record that raises an error when its result is empty gives
-  SERVFAIL. **Not tested.** A LUA record that starts with `;` runs as
+  SERVFAIL. **Not tested** (the laboratory test used
+  `backupSelector='all'`). A LUA record that starts with `;` runs as
   Lua code with its own `return` (`docs/lua-records/index.rst`).
 - **Shared Lua state** (`docs/lua-records/index.rst`): "the state is
   per-thread ... there is no single shared Lua environment". Thus a
@@ -557,17 +562,32 @@ Repository `Keel-Linux/keel`, `origin/main` at `35e8aa6`.
 
 ## Not verified
 
-1. A LUA record at the zone apex.
+The results of the laboratory test are after each item.
+
+1. A LUA record at the zone apex. **Measured:** it works, for A and
+   AAAA, signed (Q2).
 2. A documented minimum TTL for Google, Cloudflare, Quad9 or OpenDNS.
-3. The DNS cache of Windows 10 and 11.
-4. That a `location` in `keel-front.d` is served before Anubis.
+   Still not verified.
+3. The DNS cache of Windows 10 and 11. Still not verified.
+4. That a `location` in `keel-front.d` is served before Anubis. Still
+   not verified.
 5. That the Debian source `pdns` 5.1.5-2 builds on trixie.
+   **Measured:** it builds with no change, and its tests pass (Q1).
 6. PowerDNS on a PostgreSQL hot standby with no write (section 12).
+   **Measured:** no write and no cancelled query (Q2).
 7. That the packet cache holds the answers of LUA records.
+   **Measured:** it does not (Q2).
 8. The NSEC and NSEC3 records of names that carry LUA records.
+   **Measured:** both validate (Q2).
 9. The SERVFAIL of a LUA record that raises an error (section 14).
-10. The check through an edge (section 11).
-11. Any switch time.
+   Still not tested: the laboratory test used `backupSelector='all'`.
+10. The check through an edge (section 11). **Measured** for a TCP
+    proxy that routes by SNI (Q4). TLS that ends on a proxy is not
+    tested.
+11. Any switch time. **Measured** for the DNS servers, with
+    `minimumFailures=2`: 5.5 s to 14.4 s when the old primary refuses
+    or answers 404, and 9.7 s to 18.9 s when it is powered off (Q3).
+    The resolver and client caches are not measured.
 12. The Debian packaging files were read on sources.debian.org, not on
     Salsa.
 

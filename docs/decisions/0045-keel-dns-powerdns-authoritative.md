@@ -10,16 +10,19 @@ LUA records, and the servers run on different sites. Those points stand.
 The second round adds the automatic failover of names and rewrites the
 note as one text. The number stays, because the note was never accepted
 and nothing is built from it. The section "What changed in the second
-round" lists the changes. The evidence is
-`evidence/powerdns-failover-study-2026-11-23.md`. Nothing here is
+round" lists the changes. The evidence is the study
+`evidence/powerdns-failover-study-2026-11-23.md` and the laboratory
+test `evidence/2026-11-23-powerdns-5.1-standby-and-failover-record.md`
+(in PR 205 until merged; "the laboratory test" below). Nothing here is
 implemented.
 
 The maintainer approved the rule of section 11 (the pair moves by
 itself, and its five limits) on 2026-11-23. He agreed to the scope of
 version 1 (section 10 I) on 2026-11-23, to confirm when the note is
 accepted. The items that this revision proposes are marked
-**(proposed)**. Only two things are open: the acceptance of the note by
-the maintainer, and the results of the real tests.
+**(proposed)**. Three things are open: one question for the maintainer
+(the answer when no address is up, section "Open points"), the
+acceptance of the note, and the tests that are still to do.
 
 ## What was asked
 
@@ -111,8 +114,16 @@ the scope of 0096 as a later package (0096, section 1). Four reasons:
    these back ends goes to 5.1.5 with no schema change.
 
 **The cost.** Debian security does not cover the backport. Keel follows
-the 5.1 releases through 0096. That the source of 5.1.5-2 builds on
-trixie is not verified (work list, item 6).
+the 5.1 releases through 0096.
+
+**The build on trixie (measured in the laboratory test, Q1).** The
+forky source 5.1.5-2 builds on trixie with no change, only the backport
+entry in `debian/changelog`. All build dependencies come from trixie.
+The build-time tests pass, and lintian gives 0 errors and 2 warnings.
+`dscverify` fails, because the signing key of the upload is not in the
+`debian-keyring` package of trixie. The source must come through
+`apt-get source` from a `deb-src` line, which apt checks against the
+signed `Sources` index.
 
 **Security gate.** PowerDNS advisory 2026-13 (CVE-2026-73206, a denial
 of service in the decompression of names) is fixed in 4.9.18, 5.0.8 and
@@ -183,12 +194,27 @@ frontend attached for managing records" (`docs/modes-of-operation.rst`,
 - `gpgsql-dnssec=yes`, so that it reads the keys;
 - no `pdnsutil` act that writes.
 
-**To test:**
+**Measured in the laboratory test (Q2).** One writer and 2 hot
+standbys of Debian PostgreSQL 17, asynchronous streaming with no TLS,
+PowerDNS 5.1.5:
 
-- A hot standby answers each query of a signed zone with LUA records.
-- It logs no error of a read-only transaction.
-- The replay of the writer does not cancel the short queries of
-  PowerDNS (`hot_standby_feedback`, `max_standby_streaming_delay`).
+- Each hot standby answered each query of a signed zone with LUA
+  records. Each answer of the signed zone validated.
+- The standbys logged no error of a read-only transaction from a query,
+  in more than 1 million queries.
+- The replay of the writer cancelled no PowerDNS query, also with
+  `max_standby_streaming_delay = 0`. `VACUUM FULL` on the writer
+  delayed 0.11 % to 0.21 % of the answers beyond 2 s.
+- With the writer stopped for 120 s, both standbys kept their answers.
+  A standby cut from the writer for 180 s gave the old data, and gave
+  the new data 11.2 s after the cut ended.
+- `primary=no`, `secondary=no` and `api=no` were enough.
+- A `pdns.conf` that replaces the Debian file must keep
+  `include-dir=/etc/powerdns/pdns.d`.
+- A PostgreSQL `listen_addresses` with fixed addresses fails to bind
+  when PostgreSQL starts before the addresses exist. Keel must start
+  PostgreSQL after the addresses, or listen on `*` and limit access in
+  `pg_hba.conf`.
 
 ### 4. The set of servers
 
@@ -218,6 +244,19 @@ server is on a site that holds no node of the pairs that it serves.
   `disabled` in each mode.
 - **No outside secondary in version 1.** A zone with failover names
   cannot have one (section 3, constraint 2).
+- **A new zone and the zone cache.** A record change in an existing
+  zone reached the standbys in 16.6 s to 22.1 s (laboratory test, Q2).
+  A new zone is different. Each server, the writer too, serves it only
+  at its next zone cache refresh (`zone-cache-refresh-interval`,
+  default 300 s): measured 316 s to 320 s after the start of `pdns`.
+  The options are: (a) keep 300 s, so a new zone waits up to 5 minutes;
+  (b) a lower `zone-cache-refresh-interval` on each server; (c)
+  `pdns_control rediscover` on each server after the renderer adds a
+  zone, which needs a control path from the writer to each standby.
+  **Decision (proposed, to be tested): (a).** It is the least-power
+  option. A failover name in an existing zone is a record change, not a
+  new zone. A new zone is a rare act of the administrator. (b) is the
+  fallback if a new zone must answer faster.
 
 ### 5. Updates from nodes, and the TSIG keys
 
@@ -253,8 +292,16 @@ Each server signs each answer with the keys in its local copy.
   and `zone-metadata-cache-ttl` (default 60 s). A standby that lags then
   serves the old key set for a time that is still safe.
 
+**Measured in the laboratory test (Q2).** With NSEC and with NSEC3, the
+answers for names with LUA records validated from the writer and from
+both standbys. The bitmap shows the types that the LUA records make.
+When the writer removed a ZSK, each server stopped signing with it
+after 21.1 s to 29.5 s, and removed it from the DNSKEY set after
+32.9 s to 42.8 s.
+
 **Items for the real test, not decided:** the algorithm of the keys,
 NSEC or NSEC3 (and NSEC3 narrow), and the CPU cost of live signing.
+The laboratory test did not measure the CPU cost.
 
 **Custody.** The keys are rows in the `cryptokeys` table. The
 replication uses TLS on the mesh. The backup is encrypted (0037). The
@@ -264,32 +311,62 @@ handbook.
 ### 7. LUA records and the health checks (proposed)
 
 - `enable-lua-records=yes` on each server, in the file.
-- `lua-health-checks-interval` stays at 5 s.
+- `lua-health-checks-interval` stays at 5 s. A check that waits for its
+  2 s timeout runs only every 10 s (laboratory test, Q3): the next
+  check is due 5 s after the end of the last check, and the next round
+  is too early for it.
+- **The packet cache does not keep LUA answers** (laboratory test, Q2:
+  10 queries of a LUA name gave 10 misses). `cache-ttl` adds no time to
+  a switch.
 - `lua-health-checks-expire-delay` is 86400 s. A timer on each server
   queries each failover name every 5 minutes, so that its checks stay.
 - `enable-lua-record-updates` (5.1, default `no`) stays `no` on the
   standbys. On the writer it is `yes` only if the renderer uses the
-  API. The real test checks if `pdnsutil` needs it.
+  API. `pdnsutil` does not need it (laboratory test, Q2).
 - `minimumFailures` stays at its default of 1. A value of 2 is unsafe:
   in the 5.1.5 code a first failed check sets the status to up
-  (`state->status = ++state->failures < minimumFailures`). A replica that
-  answers 503 would then count as up for one interval after each start.
+  (`state->status = ++state->failures < minimumFailures`). The
+  laboratory test used 2 and measured this: in each switch and after
+  each start, every server gave both addresses for about 5 s (10 s when
+  a check times out). The value 1 was not tested. With 1, one failed
+  check marks an address down, so a switch is expected to be one check
+  interval shorter than the measured times. This is to be tested.
 - **When no address is up, the server answers SERVFAIL (proposed, to be
   tested).** The record uses `backupSelector='empty'` (5.1) and Lua code
   that raises an error when the result is empty. The 5.1.5 code turns an
   error of a LUA record into SERVFAIL ("Exception building answer packet
   ... sending out servfail", `pdns/packethandler.cc`). A resolver then
   asks another server of the zone. A server never gives the replica as a
-  second address because it cannot see the primary.
+  second address because it cannot see the primary. **The laboratory
+  test did not test this form.** It tested only
+  `backupSelector='all'`.
 - `failOnIncompleteCheck='true'` (5.0) gives SERVFAIL on the query that
-  starts a check. Later queries before the first result find all
-  addresses down, and the rule above gives SERVFAIL too.
+  starts a check. Measured (laboratory test, Q3): only that query gets
+  SERVFAIL. Later queries before the first result find all addresses
+  down. With `'all'`, they got both addresses for about 5 s. With the
+  rule above, they get SERVFAIL (not tested).
 - Health checked names have a TTL of 60 s.
 
-The costs of SERVFAIL: a resolver can keep a SERVFAIL for up to 5
-minutes (RFC 2308, section 7.1). In the gap of a move, when no node
-answers as the primary, all servers answer SERVFAIL. The real test
-measures this gap and compares it with `backupSelector='all'`.
+**The answer when no address is up: the facts for each variant.** The
+laboratory test ran only variant B below, with `minimumFailures=2`.
+
+- **A: `backupSelector='empty'` and a Lua error, so SERVFAIL (the
+  choice above, not tested).** For: a server never gives the read-only
+  replica because it cannot see the primary, and a resolver asks
+  another server. Against: a resolver can keep a SERVFAIL for up to 5
+  minutes (RFC 2308, section 7.1). In the gap of a move, when no node
+  answers as the primary, all servers answer SERVFAIL. That the Lua
+  form works is not tested.
+- **B: `backupSelector='all'` (measured).** When all checks failed, and
+  on a server with no path to the web nodes, the server gave both
+  addresses. There was no SERVFAIL except the first query after a
+  start. Against: in these cases a client can reach the read-only
+  replica, and a server with a wrong view gives it too. A replica
+  refuses writes, so no acknowledged write is lost.
+
+The laboratory test made no gap with no primary: the new node answered
+200 at the time when the old node failed. The length of that gap in a
+real move decides the cost of each variant (section 10 K, case 15).
 
 ### 8. Ports, mesh, TLS and health
 
@@ -376,8 +453,10 @@ Rules for the check address:
   body is public.
 - **It never redirects**, and nothing in front of it redirects. The
   PowerDNS checker follows redirects (`CURLOPT_FOLLOWLOCATION`, true in
-  `pdns/minicurl.cc`). A redirect to another name resolves through public
-  DNS, and can reach the other node.
+  `pdns/minicurl.cc`). A redirect to another name resolves through the
+  resolver of the DNS server, and can reach the other node. Measured
+  (laboratory test, Q3): a 301 to the other node made the check pass
+  with the answer of the other node.
 - **It is served before Anubis**, in the front server of keel-web
   (`keel-front.d`). That this works is not verified.
 - The LNMP page `/keel-check/` is not usable: it answers 200 on both
@@ -412,8 +491,10 @@ administrator turns on failover for a name.
 
 **A DNS server with a wrong view.** A server that cannot reach the
 primary, or that has no egress in one address family, sees no address
-up. It answers SERVFAIL (section 7), and the resolver asks another
-server. It never gives the replica as a second address.
+up. With variant A of section 7 it answers SERVFAIL, and the resolver
+asks another server (not tested). With variant B it gives both
+addresses: the laboratory test measured this on a server with no path
+to the web nodes (Q3).
 
 **Partitions.** In `cloud_advanced`, a holder that is cut from the etcd
 majority turns read only after 6 s (the holder's doubt). It loses the
@@ -474,7 +555,10 @@ clientdomain.com. 60 IN LUA AAAA ";local r = ifurlup('https://clientdomain.com/.
 ```
 
 That this Lua form works (the type of `r`, the SERVFAIL) is to be
-tested.
+tested. The laboratory test used the plain `ifurlup` form with
+`backupSelector='all'` and `minimumFailures='2'`, not this form. A LUA
+record at the zone apex works, for A and AAAA, signed (laboratory
+test, Q2).
 
 **Both families list both sites, or the family has no record.** If the
 AAAA record lists BR1 only and the A record lists BR2 only, the A record
@@ -513,13 +597,18 @@ per address family. The design works per family:
    address in an AAAA record.
 2. **An edge that passes 443 in TCP by SNI.** The check reaches the node
    that the edge gives for the name. The edge does not see the path.
-   This works with no change to the edge.
+   This works with no change to the edge. Measured with a TCP proxy that
+   routes by SNI (laboratory test, Q4): the check reached the node and
+   read its answer.
 3. **An edge that ends TLS.** It must pass `/.well-known/keel/primary`
    to the node of its own site with the path, the `Host` header and the
    answer unchanged. It must not cache it, answer it itself or redirect
    it. Version 1 does not cover this case (section I).
 4. **A TCP open on 443 of an edge proves only the edge.** Thus
-   `ifportup` is not usable through an edge.
+   `ifportup` is not usable through an edge. Measured (laboratory test,
+   Q4): with the proxy up and the node behind it down, the proxy
+   accepted TCP, the check stopped at its 2 s timeout, and the proxy
+   address was marked down. That check then runs every 10 s.
 5. **The edge of the other site must be ready before a move.** The
    public address of BR2 in each family must already know the customer
    name and send 443 to the BR2 node. The certificate must be valid
@@ -556,20 +645,29 @@ accepted:
 - **`simple` installations.** There is one node, so there is nothing to
   fail over to.
 
-#### J. Switch time (estimate, to be measured)
+#### J. Switch time (partly measured)
 
-These are estimates from the code and the documentation. A real test
-gives the numbers. The terms:
+The DNS server terms are measured in the laboratory test (Q3), with
+`minimumFailures=2`, the check interval 5 s, the check timeout 2 s and
+the TTL 60 s. The other terms are estimates from the code and the
+documentation. The terms:
 
-| Term | Estimate | Source |
+| Term | Value | Source |
 | --- | --- | --- |
 | Node down or site cut: the other node writable | about 25 s (measured 24.6 s on keel 0.23.68) | `evidence/2026-11-01-keel-0.23.68-mariadb-faults.md`, K2 |
-| Failure of service (section 11): 3 failed checks and the next tick | 15 s to 20 s | section 11 |
-| The promote: release, the wait for the lease (up to the TTL of 20 s), GRACE (19 s) when a lease was revoked, the writes back | up to about 50 s | `docs/vip.md`, `keel/mesh/vipetcd.py`, keel#169 |
-| Each DNS server sees the new primary | one interval and the timeout, 5 s + 2 s | section 7 |
-| The packet cache of PowerDNS (`cache-ttl` 20 s), if it holds LUA answers | 0 s to 20 s | not verified |
-| The resolver cache | up to the TTL, 60 s | |
-| The client: Chrome keeps an answer for at least 60 s, Java 30 s | up to 60 s | evidence section 4 |
+| Failure of service (section 11): 3 failed checks and the next tick | 15 s to 20 s (estimate) | section 11 |
+| The promote: release, the wait for the lease (up to the TTL of 20 s), GRACE (19 s) when a lease was revoked, the writes back | up to about 50 s (estimate) | `docs/vip.md`, `keel/mesh/vipetcd.py`, keel#169 |
+| Each DNS server gives the new primary only, when the old primary refuses or answers 404 | measured 5.5 s to 12.4 s after the change (7.6 s to 14.4 s from the start of the act) | laboratory test, Q3 |
+| The same, when the old primary is powered off (the check times out and runs every 10 s) | measured 9.7 s to 13.9 s after the change (14.2 s to 18.9 s from the start of the act) | laboratory test, Q3 |
+| The packet cache of PowerDNS | 0 s: it does not keep LUA answers (measured) | laboratory test, Q2 |
+| The resolver cache | up to the TTL, 60 s (not measured) | |
+| The client: Chrome keeps an answer for at least 60 s, Java 30 s | up to 60 s (not measured) | evidence section 4 |
+
+With `minimumFailures=1` (section 7), one failed check is enough. The
+DNS server terms are then expected to be one check interval shorter.
+This is to be tested. In the measured switches, every server gave both
+addresses for about 5 s (10 s for a timeout) before the new primary
+only, because of `minimumFailures=2`.
 
 Thus a failure of service gives an estimate of about 2 to 4 minutes for
 most clients, and a node down less. About 2 % of resolvers keep an old
@@ -852,8 +950,8 @@ maintainer to accept this note.
 - **The 5.1 package is a Keel backport.** Debian security does not
   cover it. The pipeline of 0096 must follow each 5.1 release.
 - **DNS failover is slow at its best.** About 2 % of resolvers keep an
-  old answer after a change, and browsers keep an answer for 60 s. The
-  times of section 10 J are estimates until the real test.
+  old answer after a change, and browsers keep an answer for 60 s. In
+  section 10 J, only the DNS server terms are measured.
 - **SERVFAIL in the gap of a move** can be kept by resolvers for up to
   5 minutes (section 7). The real test measures it.
 - **The private DNSSEC keys are on four servers.** A server that is
@@ -861,8 +959,9 @@ maintainer to accept this note.
   the backup is encrypted (0037).
 - **A key roll that goes faster than the replication and the caches**
   gives `bogus` answers. Each wait of section 6 is longer than their sum.
-- **Way N is not tested yet.** If PowerDNS fails on a hot standby,
-  section 3 falls back to way F.
+- **Way N is tested only in the laboratory** (section 3), with Debian
+  PostgreSQL, 2 standbys and no TLS. If PowerDNS fails on a hot standby
+  of the Keel `postgresql` image, section 3 falls back to way F.
 - **The pair change of section 11 is new code in the most sensitive
   part of Keel.** It can move the pair for a fault that is not real. Its
   own real tests come first.
@@ -872,12 +971,37 @@ maintainer to accept this note.
 
 ## Open points
 
-No question is open for the maintainer. Two things are open:
+**One question for the maintainer: the answer when no address is up**
+(section 7 gives the facts for each variant).
 
-1. The acceptance of this note by the maintainer, with the items marked
-   proposed.
-2. The results of the real tests of sections 10 K and 11, and of the
-   items marked "to be tested".
+- **A:** keep SERVFAIL (`backupSelector='empty'` and a Lua error), and
+  test it first. A server never gives the replica. A resolver can keep
+  the SERVFAIL for up to 5 minutes.
+- **B:** `backupSelector='all'`, the variant that the laboratory test
+  measured. The server gives both addresses, the read-only replica
+  too, and never SERVFAIL after the first query.
+
+**Also open:** the acceptance of this note by the maintainer, with the
+items marked proposed.
+
+**Still to be tested** (the laboratory test proved the build on trixie,
+PowerDNS on hot standbys, the packet cache, redirects, the cold start
+with variant B, and the check through a TCP proxy):
+
+1. Variant A of section 7, and `minimumFailures=1`.
+2. Resolver and client caches, with netem at the profiles of 0050.
+3. A real Keel pair in `cloud_advanced`, with the check address of
+   `keel` and the etcd witness, and a gap with no primary (section
+   10 K, case 15).
+4. The PostgreSQL replication with TLS, over a real link between sites.
+5. The Keel `postgresql` image with one writer and several standbys.
+6. A ZSK and a KSK roll with their waits, a standby that lags during a
+   roll, and the import of keys from another server.
+7. TLS that ends on a proxy (outside version 1).
+8. A certificate renewal on the primary that reaches the replica
+   (section 12).
+9. The zone cache choice of section 4.
+10. The real tests of sections 10 K and 11.
 
 ## What changed in the second round
 
@@ -900,6 +1024,9 @@ No question is open for the maintainer. Two things are open:
 - **Section 9:** PowerDNS-Admin and the Recursor facts corrected.
 - **Sections 10 to 12, new:** the failover of names, the pair change, and
   the certificate on the replica.
+- **The laboratory test:** the measured values replace the estimates of
+  sections 1, 3, 6, 7 and 10 J. The answer when no address is up is a
+  question for the maintainer (A or B).
 - **Production facts** are not in this note. It states only general
   rules for an edge.
 
