@@ -1,16 +1,18 @@
 # 0094: Keel retires Webmin: SSH, confconsole, SFTP and a database client through SSH
 
 Date: 2026-11-23
-Status: **proposed 2026-11-23.** The maintainer decided the direction on
-2026-11-23: Keel retires Webmin. He also chose the database tool: DBeaver
-on the administrator's computer through an SSH tunnel, and no web
-database tool on the node. He approves this note when he reads it. The
-open points at the end wait for his answer. Nothing in this note is built.
+Status: **accepted 2026-11-23.** The maintainer decided the direction on
+2026-11-23: Keel retires Webmin. He chose the database tool: DBeaver on
+the administrator's computer through an SSH tunnel, and no web database
+tool on the node. On 2026-11-23 he answered the 8 questions of the
+proposal. The answers are under "Questions for the maintainer,
+answered". Nothing in this note is built.
 
 Sources: a study of Webmin and its alternatives and a package inventory,
 both of 2026-11-23. They are not published in this handbook. This note
-gives the repository path for each fact that it takes from them. Each repository path below was read on the default branch of the
-repository on 2026-11-23, after `git fetch`. "Read in code" means that
+gives the repository path for each fact that it takes from them. Each
+repository path below was read on the default branch of the repository
+on 2026-11-23, after `git fetch`. "Read in code" means that
 nobody tested it on a running node.
 
 ## What was asked
@@ -64,6 +66,16 @@ the same engine can come much later. It is out of scope.
 4. Port 12321 closes. Keel opens no new public port.
 5. Removal from a node in the field is always an act of its
    administrator, never a side effect of an upgrade.
+6. An administrator account opens confconsole directly when it logs in
+   by SSH (design rule 3).
+7. Redis has no graphical tool. The administrator uses `redis-cli` in
+   the SSH session.
+8. keel copies the settings sections of `instance.yaml` from the primary
+   to the replica, as 0092 decided for `mail`.
+9. A read-only confconsole screen shows the resource use: CPU, memory,
+   disk, I/O and PSI.
+10. Webmin is deprecated with the first stable image that has all the
+    menus.
 
 ## What replaces each Webmin task
 
@@ -76,8 +88,9 @@ No mechanism copies `instance.yaml` from one node of a pair to the
 other today. Only `appliance.vip` travels, in the invite
 (`keel/docs/spec.md`, `appliance.vip`). Decision 0092 decided that the
 replica gets the `mail` section, but that is not built. Thus "Pair" is
-"no" for each setting, and spec propagation is a dependency of reason 2
-(work item 3).
+"no" for each setting today. Decision 8 makes keel copy the settings
+sections to the replica (work item 4). Until then, reason 2 of the
+maintainer is not solved.
 
 | Task | Replacement | Spec key | Screen | Pair |
 | --- | --- | --- | --- | --- |
@@ -88,8 +101,8 @@ replica gets the `mail` section, but that is not built. Thus "Pair" is
 | b4. Python, Go, Rust, Ruby back ends | the same model as b3, one key set per runtime (0091 names `keel-app.service`) | no | no | no |
 | c. Import a dump (`.sql`, `.sql.gz`, `.zip`) | the dump goes up by SFTP, then a confconsole screen calls a `keel` command that imports it. DBeaver can also import it | n/a (data) | no | yes, by database replication, when the import runs on the primary |
 | d. Browse and edit tables, database users, single fields | DBeaver through an SSH tunnel to the primary | n/a (data) | n/a | yes, by database replication |
-| d2. The same for Redis | open point 2 | n/a | n/a | depends on the image: 0087 keeps one Redis on each node, not replicated |
-| e. Resource use: CPU, memory, disk, I/O, PSI | today: the `monitor` section sends alerts for CPU, load, memory, swap, disk, inodes and network (`keel/docs/spec.md`, `monitor`, and decision 0021). A live view of I/O and PSI does not exist. Proposal: a read-only confconsole screen (open point 4) | `monitor.checks.*` for thresholds | no | no |
+| d2. The same for Redis | `redis-cli` in the SSH session (decision 7) | n/a | n/a | depends on the image: 0087 keeps one Redis on each node, not replicated |
+| e. Resource use: CPU, memory, disk, I/O, PSI | today: the `monitor` section sends alerts for CPU, load, memory, swap, disk, inodes and network (`keel/docs/spec.md`, `monitor`, and decision 0021). A live view of I/O and PSI does not exist. A read-only confconsole screen shows it (decision 9) | `monitor.checks.*` for thresholds | no | no |
 | f. Add system users | a confconsole screen that calls `keel` | yes: `users.<name>` with `authorized_keys`, `shell`, `groups` (`apply --system` creates, never deletes) | no | no |
 | g. TLS certificates | the confconsole Let's Encrypt screen. It writes `tls.acme.*` through `keelcli` (`confconsole/plugins.d/Lets_Encrypt/get_certificate.py`) | yes: `tls.acme.*` | yes | no |
 | h. A root terminal | SSH | n/a | n/a | n/a |
@@ -115,10 +128,10 @@ File transfer is SFTP, the subsystem of OpenSSH that each image already
 has. Keel does not offer plain FTP, because FTP sends the password and
 the files in clear text and needs extra ports.
 
-### 3. A restricted administrator login: to evaluate
+### 3. A restricted administrator login
 
-An account whose SSH session opens confconsole directly is an option to
-evaluate. It is not designed here. Its open points:
+An administrator account opens confconsole directly when it logs in by
+SSH. The design is work item 6. It must answer these questions:
 
 - Which user: root with a forced command, or a new account. sudo is not
   in the base plan (`common/plans/turnkey/base`) or in the Keel stable
@@ -149,7 +162,7 @@ What the node must allow, checked against the images:
 
 | Need | State today | Work |
 | --- | --- | --- |
-| sshd lets the account forward a TCP port | **no**: `common/overlays/turnkey.d/sshd/etc/ssh/sshd_config.d/turnkey.conf` sets `AllowTcpForwarding no` and `MaxSessions 2` (read in code) | a `Match User` block for the administrator account with `AllowTcpForwarding local` and `PermitOpen` set to the loopback database ports only (3306, 5432, 6379). sshd keeps the first value it reads for a keyword, and the TurnKey file ends in `Match user *`. Thus the place and order of a Keel drop-in must be tested |
+| sshd lets the account forward a TCP port | **no**: `common/overlays/turnkey.d/sshd/etc/ssh/sshd_config.d/turnkey.conf` sets `AllowTcpForwarding no` and `MaxSessions 2` (read in code) | a `Match User` block for the administrator account with `AllowTcpForwarding local` and `PermitOpen` set to the loopback database ports only (3306, 5432). Redis needs no forward, because `redis-cli` runs on the node. sshd keeps the first value it reads for a keyword, and the TurnKey file ends in `Match user *`. Thus the place and order of a Keel drop-in must be tested |
 | The database listens on the loopback | yes: MariaDB `bind-address = ::1,127.0.0.1` (`keel-lnmp/conf.d/main`, `99-keel-bind.cnf`). PostgreSQL `listen_addresses = '::1,127.0.0.1'` (`keel-postgresql/conf.d/main`) | none |
 | A database account with a password | MariaDB: `admin` on `localhost`, `::1`, `127.0.0.1`, with the password of `secrets.db_password` at first boot (`keel-mariadb/conf.d/main`). PostgreSQL: `postgres` gets the same password at first boot (`keel-postgresql/README.rst`). Redis: an ACL user that the first boot declares (`keel-redis/conf.d/main`) | a confconsole screen that shows the account name and that changes its password through `keel`. Whether `pg_hba.conf` accepts a password on TCP loopback is not checked |
 | No write on a replica | MariaDB: keel takes `READ_ONLY ADMIN` from every account except the socket accounts, `admin` included (`keel/keel/system/dbreadonly.py`). PostgreSQL: a hot standby refuses writes | the guide tells the administrator to tunnel to the primary. The Webmin warning of 0049 goes away with Webmin |
@@ -231,14 +244,18 @@ database port if the maintainer wants it) and gets no operator root
 rights. The reason is the list above: a peer that the spec lists can
 become an operator root, and it reaches each mesh port.
 
-The basic version: one confconsole item makes the peer and gives a
-configuration file to download. The private key can be made in 2 places:
+The direction of the maintainer for the basic version: the
+administrator pastes one command in a terminal on his computer, as the
+install command of `cloudflared` does, with a token in the command.
+Rules proposed for that work, to confirm when it is designed:
 
-- On the node, and downloaded once. This is simple, but the node has the
-  key for a moment. Acceptable only for a first version, if the
-  maintainer says so (open point 6).
-- On the computer of the administrator, which sends only its public key.
-  This is better.
+- The value in the command is an enrolment token that is valid once and
+  for a short time. It is not the WireGuard private key.
+- The script makes the key pair on the computer of the administrator and
+  sends only the public key. The node never has the private key.
+- The node itself serves the script, or a signed Keel source does.
+
+The platforms (Linux, macOS, Windows) are a question for that design.
 
 Dependency: keel#303. CrowdSec bans a mesh address, because its
 whitelist does not have the mesh prefix.
@@ -246,9 +263,8 @@ whitelist does not have the mesh prefix.
 Out of scope: the transport. WireGuard uses UDP only. Thus "443" can
 only be UDP 443 or another transport, not TCP 443.
 
-keel#74 holds the wider workstation idea. The wider options of
-2026-11-19 stay parked. This note proposes to un-park only the basic
-access peer (open point 7).
+keel#74 holds the wider workstation idea. This note un-parks only the
+basic access peer. The wider options of 2026-11-19 stay parked.
 
 ## Transition
 
@@ -268,8 +284,9 @@ order:
    mode) is built and tested before any removal.
 2. **The menus exist.** The screens of the table above, the sshd change
    for the tunnel and the guides are in a stable image.
-3. **Webmin is deprecated.** The release notes, the site and the boot
-   banner give a date (open point 3).
+3. **Webmin is deprecated** with the first stable image that has all
+   the menus (decision 10). The release notes, the site and the boot
+   banner say so.
 4. **New images ship without Webmin.** No `webmin*` package, no 12321,
    no Webmin process in the manifest.
 5. **A node in the field keeps Webmin until its administrator removes
@@ -311,8 +328,7 @@ This note changes these notes. It does not edit them.
 - **0077**: the application pages show no Webmin.
 - **0091**: `keel-lnmn` does not copy the `webmin-mysql` lines.
 
-The index row of each amended note changes only when this note is
-accepted (open point 8).
+The index row of each amended note says "amended by 0094".
 
 ## Consequences
 
@@ -337,65 +353,76 @@ Lost:
 - Settings that have no menu yet: until the menu exists, the
   administrator edits the file in SSH, as Webmin did.
 
-What users must learn: an SSH client, an SFTP client and DBeaver with
+What users must learn: an SSH client, an SFTP client, `redis-cli`, and DBeaver with
 its SSH tunnel.
 
 Documentation needed: a short guide for each platform (Windows, macOS,
 Linux) for people from cPanel: make an SSH key, connect, send files by
 SFTP, connect DBeaver through the tunnel.
 
-## Open points for the maintainer
+## Questions for the maintainer, answered
 
-1. **Restricted login.** Does Keel evaluate an account whose session
-   opens confconsole directly? Yes or no.
-2. **Redis tool.** DBeaver Community has no Redis. Which answer?
-   (a) `redis-cli` in the SSH session only. (b) Another Redis Desktop
-   Manager, MIT, with an SSH tunnel in its feature list
-   (<https://github.com/qishibo/AnotherRedisDesktopManager>).
-   (c) Redis Insight, SSPL, which has SSH tunnel code but no vendor page
-   that states it. (d) A paid DBeaver edition.
-3. **Deprecation date.** Which date? For example (a) the first stable
-   image with all the menus. (b) A fixed date that you give.
-4. **Resource view.** Is the read-only resource view (CPU, memory, disk,
-   I/O, PSI) a confconsole screen? Yes or no.
-5. **Spec propagation.** Does keel copy the settings sections of
-   `instance.yaml` from the primary to the replica, as 0092 decided for
-   `mail`? Yes or no.
-6. **Private key of the access peer.** For the first version only: is
-   a key made on the node and downloaded once acceptable? Yes or no.
-7. **keel#74.** Does this note un-park only the basic access peer, and
-   leave the wider options parked? Yes or no.
-8. **Index of amended notes.** When this note is accepted, does the
-   index mark each note under "What this amends" as amended by 0094?
-   Yes or no.
+The maintainer answered on 2026-11-23.
+
+1. Does an administrator account open confconsole directly at its SSH
+   login? Yes.
+2. Which Redis tool? (a) `redis-cli` in the SSH session only.
+3. When is Webmin deprecated? (a) With the first stable image that has
+   all the menus.
+4. Is the resource view a confconsole screen? Yes.
+5. Does keel copy the settings sections of `instance.yaml` from the
+   primary to the replica? Yes.
+6. Is a private key made on the node acceptable for the access peer? Not
+   necessary: the direction is one command with an enrolment token, and
+   the key pair is made on the computer of the administrator.
+7. Does this note un-park only the basic access peer of keel#74? Yes.
+8. Does the index mark each amended note? Yes.
+
+## What stays open
+
+- The design of the restricted login: which user, keys or a password,
+  and SFTP for the same account or a separate one (work item 6).
+- The design of the access peer: the platforms, the transport, and the
+  confirmation of its 3 rules (work item 18).
+- The facts that the work list tests first: the firewall loader, the
+  order of the sshd drop-ins, and `pg_hba.conf` on TCP loopback.
 
 ## Work list
 
 In order. Nothing is started.
 
-1. Test on one node: what loads the iptables rules in the simple mode,
-   and what stops after the removal of `webmin-firewall`. Evidence file.
-2. Build the replacement firewall loader for the simple and cloud
+1. **Firewall loader.** Read in code, not tested on a node: test first.
+   Test on one node in the simple and the cloud simple mode what loads
+   the iptables rules, and what stops after the removal of
+   `webmin-firewall`. Evidence file.
+2. **sshd forwarding.** Read in code, not tested on a node: test first.
+   `AllowTcpForwarding no` in the TurnKey drop-in stops the tunnel. Test
+   a `Match User` drop-in with `AllowTcpForwarding local` and
+   `PermitOpen` to 3306 and 5432 on the loopback: its order with the
+   TurnKey drop-in, SFTP, and `MaxSessions 2` with DBeaver. Evidence
+   file.
+3. Build the replacement firewall loader for the simple and cloud
    simple modes, and drop the `iptables-legacy` switch from `webmin-fw`.
-3. keel: spec propagation across the pair (if open point 5 is yes).
-4. sshd: a `Match User` drop-in with `AllowTcpForwarding local` and
-   `PermitOpen` to the loopback database ports. Test the order with the
-   TurnKey drop-in, SFTP, and `MaxSessions 2` with DBeaver.
-5. keel and confconsole: a screen for the database account and its
-   password.
-6. keel and confconsole: the dump import command and screen.
-7. confconsole: the users screen on `users.<name>`.
-8. keel and confconsole: keys and screens for sshd, nginx and PHP, then
-   the other runtimes.
-9. confconsole: the resource view (if open point 4 is yes).
-10. The guides: SSH, SFTP and DBeaver for each platform.
-11. The deprecation notice: release notes, site, boot banner.
-12. The image changes: remove Webmin from `common/plans/turnkey/base`,
+4. keel: copy the settings sections of `instance.yaml` to the replica.
+5. sshd: the drop-in of item 2 in the image.
+6. The restricted login: design, then build, with confconsole as the
+   session.
+7. keel and confconsole: a screen for the database account and its
+   password. Check `pg_hba.conf` on TCP loopback.
+8. keel and confconsole: the dump import command and screen.
+9. confconsole: the users screen on `users.<name>`.
+10. keel and confconsole: keys and screens for sshd, nginx and PHP, then
+    the other runtimes.
+11. confconsole: the resource view.
+12. The guides: SSH, SFTP, DBeaver and `redis-cli` for each platform.
+13. The deprecation notice with the first stable image that has all the
+    menus: release notes, site, boot banner.
+14. The image changes: remove Webmin from `common/plans/turnkey/base`,
     the `webmin-*` conf scripts, the image plans, the manifest, the
     firewall lists, `services.txt`, the banner, Monit, `keel` (TLS
     restart, unit list), the boot tests, the fail2ban jail.
-13. The removal act for nodes in the field, and its 0090 test.
-14. commissioning (0075) and the application pages (0077) without Webmin.
-15. The site: `site/security.html`.
-16. Later: the WireGuard access peer (keel#74, keel#303, the missing
+15. The removal act for nodes in the field, and its 0090 test.
+16. commissioning (0075) and the application pages (0077) without Webmin.
+17. The site: `site/security.html`.
+18. Later: the WireGuard access peer (keel#74, keel#303, the missing
     screen of `common/packages/wireguard/manifest.yaml`).
