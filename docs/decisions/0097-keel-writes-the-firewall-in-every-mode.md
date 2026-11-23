@@ -1,14 +1,19 @@
 # 0097: keel writes the firewall in every mode, with a drop policy for inbound traffic
 
 Date: 2026-11-23
-Status: **proposed 2026-11-23. Urgent lane.** The maintainer put the
-fix in the urgent lane on 2026-11-23. His direction: `keel` writes the
-firewall rules in every mode, from one source. The image holds no fixed
-list. This note proposes the design and the transition. On
-2026-11-23 the maintainer answered the 2 open points: B for the
+Status: **accepted 2026-11-23 by the maintainer. Urgent lane.** The
+maintainer put the fix in the urgent lane on 2026-11-23. His direction:
+`keel` writes the firewall rules in every mode, from one source. The
+image holds no fixed list. He answered the 2 questions: B for the
 transition, and yes for the advisory now (see "Questions for the
-maintainer, answered"). The note waits only for his acceptance of the
-whole note. Nothing in this note is built.
+maintainer, answered"). Then he accepted the whole note. The code is in
+`keel` pull request 307 (branch `fix/firewall-every-mode`), which is not
+merged. Two real-node tests of that pull request are merged on main:
+["the first test"](../../evidence/2026-11-23-keel-307-firewall-real-test.md)
+(head `86370ed`) and
+["the second test"](../../evidence/2026-11-23-keel-307-firewall-real-test-2.md)
+(head `2120276`). Where the built design differs from the first text of
+this note, the note says what is built and why.
 
 Sources. Each repository path was read on its default branch after
 `git fetch` on 2026-11-23: `keel` `35e8aa6` (keel 0.23.97), `common`
@@ -18,8 +23,10 @@ Sources. Each repository path was read on its default branch after
 `9d9807f`, `keel-redis` `da0d67b`, `keel-ntfy` `36f8e2e`,
 `keel-wordpress` `d1fa447`, `keel-laravel` `3642463` (branch `19.x`),
 `keel-odoo` `7900659`, `keel-nextcloud` `33d2a8c`, `keel-nodebb`
-`8aa6ac8`. "Read in code" means that nobody tested it on a running
-node. "Tested" names the evidence file.
+`8aa6ac8`. `keel` pull request 307 was read at `de69d2b`: its
+`docs/spec.md`, its `docs/apply.md` and the code. "Read in code" means
+that nobody tested it on a running node. "Tested" names the evidence
+file. A commit after `2120276` is "built, not tested on a real node".
 
 ## What was asked
 
@@ -205,8 +212,11 @@ The rule set of this note already closes this path, because
 `keel/manifest/firewall.py` accepts mesh ports only with `iifname
 "wg0"` (line 115), and the input policy is `drop` (line 136). A packet
 for the wg0 address or the VIP that comes in on eth0 matches no accept
-rule, unless its port is public. Read in code. Not tested: the second
-evidence probed this path without `inet keel`.
+rule, unless its port is public. Tested on IPv6 in both tests of pull
+request 307 (the first test, item 3, and the second test, item 2): each
+mesh port gives a timeout through eth0, and the control without
+`inet keel` answers. The overlay had no IPv4 address, so IPv4 was not
+tested.
 
 ### 5. What the node always needs
 
@@ -219,7 +229,10 @@ evidence probed this path without `inet keel`.
 - **A Proxmox container** gets its network from `pct` through
   `/etc/network/interfaces` (0080). The rule set loads in an
   unprivileged container: tested 2026-10-16, and `nftables.service`
-  loaded its table in each container of 2026-11-23.
+  loaded its table in each container of 2026-11-23. In `enforce`, a
+  DHCPv4 and DHCPv6 rebind, a router advertisement and neighbour
+  discovery worked in a container (the second test, item 1c). SLAAC and
+  a lease that expires by time are not tested.
 - **A VM from the ISO** uses the same network stack (0080, item 3). The
   rule set was never loaded in a VM from the ISO. Not tested.
 
@@ -254,7 +267,7 @@ evidence probed this path without `inet keel`.
 
 | Case | With a drop policy | Guard |
 | --- | --- | --- |
-| sshd on a second port, set by hand | Today keel refuses the whole rule set, and the node stays open (`keel/system/firewall.py:131-138`) | This note: keel adds each port of `sshd -T` |
+| sshd on a second port, set by hand | Today keel refuses the whole rule set, and the node stays open (`keel/system/firewall.py:131-138`) | This note: keel opens each port that sshd is configured for, and each port that a running sshd listens on (section 3) |
 | A service of the administrator on a public address | Its new connections are dropped | The report state lists it first |
 | A database opened on purpose to another host | 3306 or 5432 is `mesh`. A client on the uplink is dropped | The report lists it. `firewall.allow` with `from` opens it |
 | Webmin on 12321 | Stays open: the core manifest declares it public | It closes with the removal act of 0094 |
@@ -286,7 +299,7 @@ goes to `trixie`.
    opens a port through `keel`, so the port goes to the replica and
    survives an upgrade.
 
-## Decision (proposed)
+## Decision
 
 ### 1. One rule set in every mode (point A)
 
@@ -295,7 +308,12 @@ goes to `trixie`.
 2. `keel-firewall.service` is the one unit that loads inbound rules at
    boot. On a new image, `nftables.service` is disabled, because its
    file holds only an empty accept table. On a node in the field, keel
-   does not change `nftables.service` or `/etc/nftables.conf`.
+   does not change `/etc/nftables.conf` and does not disable
+   `nftables.service`. The package adds a drop-in to `nftables.service`
+   that loads keel's file again after each start, reload and stop of
+   that unit (section 4, item 2). The first text said that keel does not
+   change `nftables.service`. The drop-in is necessary, because a
+   restart of that unit removes `inet keel` (the first test, item 6).
 3. Output and forward stay as they are. This note filters inbound
    traffic only.
 4. keel touches no other table: not CrowdSec's, not an iptables rule,
@@ -337,9 +355,13 @@ The allow list is the union of these, and nothing else:
    administrator. Each item has `port`, `protocol` and an optional
    `from`, a list of prefixes. With no `from`, the port opens on every
    interface.
-4. While the init fence runs: TCP 60080 and 60443, only for redirected
-   packets (`ct status dnat`). A direct connection to these ports stays
-   dropped. The fence ports come from `/etc/default/turnkey-init-fence`.
+4. While the unit of the init fence is enabled: TCP 60080 and 60443,
+   only for redirected packets (`ct status dnat`). A direct connection
+   to these ports stays dropped. The fence ports come from
+   `/etc/default/turnkey-init-fence`. A socket of the fence's own unit
+   on these ports does not keep rule B in `report` (section 5). The
+   first test found that a running fence kept the node in `report`
+   (item 8). The second test passed this case (item 3).
 
 An administrator opens a port with `keel` only. Later, a confconsole
 menu writes `firewall.allow` (0094, design rule 1). A hand edit of the
@@ -354,12 +376,27 @@ database port with no `from`.
 
 ### 3. SSH is never closed
 
-1. keel adds each port of `sshd -T`, and of `ssh.socket` while it is
-   active, to the allow list. It names them in the plan. It does not
-   refuse any more when sshd listens on a port that the manifests do not
-   declare. This changes `keel/system/firewall.py:131-138`.
-2. If keel cannot find the ports of sshd, keel writes nothing and loads
-   nothing. The old state stays, and the failure is visible.
+1. keel adds 2 sets of TCP ports to the allow list, and names them in
+   the plan:
+   - the ports that sshd is configured for: `sshd -T`, and
+     `ssh.socket` while it is active.
+   - the ports that a running sshd listens on now: the sockets of the
+     units of sshd, or of a process with the name `sshd`.
+
+   It does not refuse any more when sshd listens on a port that the
+   manifests do not declare. This changes `keel/system/firewall.py:131-138`.
+   The first text named `sshd -T` only. `sshd -T` reads the files, not
+   the running process. The second test found 2 lock-outs with it: a
+   port from `SSHD_OPTS` in `/etc/default/ssh`, and a `Port` changed in
+   the file before a restart of sshd (item 4). The second set is built
+   after the second test (`82a085b`) and is not tested on a real node.
+2. If `sshd -T` does not answer, keel reads `sshd_config` and
+   `sshd_config.d/*.conf` as sshd reads them. The ports are unknown only
+   when a file cannot be read, or when an `Include` names a file outside
+   `sshd_config.d`. Then keel writes nothing and loads nothing. The old
+   state stays, and the plan says why. Section 5 says when this fails
+   the apply. Tested: the first test, item 5, and the second test,
+   item 7.
 3. `nft -c` checks the file before `nft -f`, and the load is one
    transaction. A file that nft refuses leaves the old table (as today).
 4. `ct state established,related` keeps the SSH session that runs the
@@ -371,13 +408,35 @@ database port with no `from`.
 
 1. If `keel-firewall.service` fails at boot, the node comes up without
    `inet keel`. On a new node that is open. The unit fails, and the
-   node is `degraded`.
-2. Monit gets a check `keel-firewall`: the loaded table has the digest
-   of the file (the comparison of `keel diff`, `keel/diff/appliance.py:205-214`).
-   If the table is absent or differs, Monit restarts
-   `keel-firewall.service`. Thus a `systemctl restart nftables.service`
-   by hand leaves the node open for at most one Monit cycle and 2 cycles
-   of grace.
+   node is `degraded`. Tested with a broken file: the unit fails, a
+   loaded table stays, and SSH works (the first test, item 5, and the
+   second test, item 6). An empty or cut file loads no table, and nft
+   does not refuse it. The second test found such a node open after a
+   reboot, with the unit in success (item 6). Now a check after the
+   load fails the unit when `inet keel` is not loaded with the policy of
+   the file. The apply writes an empty or cut file again. This is built
+   after the second test (`de69d2b`) and is not tested on a real node.
+2. A lost table comes back without Monit, in every mode, whatever the
+   spec says:
+   - A drop-in for `nftables.service` loads keel's file again after
+     each start, reload and stop of that unit. The node is open between
+     the 2 nft runs.
+   - `keel-firewall-watch.timer` runs `keel firewall check --restore`
+     every 30 s. This covers a flush by hand, which no unit can see.
+   - `keel firewall check` compares the rules of the loaded table with
+     the rules of the file, one by one, and runs `nft -c` on the file.
+     It trusts no comment.
+   - If the spec enables the monitor, Monit runs the same check.
+
+   The first text gave this task to Monit. The first test found that a
+   node with no `monitor:` section has no Monit check, and no published
+   spec has one. That node stayed open for 540 s (item 6). In the
+   second test, a restart of `nftables.service` left the node open for
+   at most about 0.22 s. A flush by hand left it open for 17.7 to
+   27.1 s (item 5). The second test also found 2 failures: an upgrade
+   of `keel` stopped the timer, and keel did not see a rule replaced by
+   a wider rule (cases b and d). The fixes are built after the second
+   test (`f1f58f0`, `ad04bdc`) and are not tested on a real node.
 3. When 0085 exists, a failed check sends one ntfy message.
 
 Danger: a boot with a broken file leaves the node open until the
@@ -388,11 +447,17 @@ chooses the open node with a visible failure, as the guards of 0041 do.
 ### 5. The transition (point C)
 
 **New images.** The image build runs `keel spec apply --system --root`
-on the image. keel writes the `simple` rule set of the image's manifest
+on the image, with `firewall.state: enforce` in the spec of the build.
+keel writes the `simple` rule set of the image's manifest
 and does not load it. At the first boot, `keel-firewall.service` loads
 it before the network. Thus the node is closed from its first packet.
 The first apply then writes the rule set of the chosen mode. The mode
-screen writes `firewall.state: enforce` into `instance.yaml`.
+screen writes `firewall.state: enforce` into `instance.yaml`. Under
+`--root`, keel sees no socket, so a spec with no state writes `report`.
+Thus the build must declare `enforce` (keel `docs/spec.md`, "firewall").
+This rule stays, and it is not built yet. In the second test, a new
+node got `enforce` from its first-boot apply. But no file existed
+before the first boot, so the table loaded after the network (item 8).
 
 **Nodes in the field.** The upgrade of `keel` changes nothing by itself
 (`debian/keel.postinst`). The change comes at the next system apply.
@@ -402,7 +467,12 @@ confconsole menu. In a cloud mode, keel also runs it with no person:
 of the members applies the whole spec (`keel/mesh/sync.py:498`,
 `keel/mesh/node.py:63-66`). Thus a rule that goes to `enforce` by
 itself must run only in an apply that a person starts, never in an
-apply of `keel mesh`. The spec gets a key `firewall.state` with 3
+apply of `keel mesh`. As built, `keel mesh` never begins enforcement,
+also when the spec says `enforce`. It keeps `report` until a person
+applies. The apply of a person holds the lock of `keel mesh sync`.
+Thus a mesh apply cannot write `report` over the `enforce` that the
+apply of a person wrote. Tested: the first test, item 4, and the second
+test, items 3 and 9. The spec gets a key `firewall.state` with 3
 values:
 
 | Value | Meaning |
@@ -411,11 +481,45 @@ values:
 | `report` | `inet keel` with `policy accept`, and one counter rule for each packet that `enforce` would drop. `keel diff` lists each socket that listens on an address that is not a loopback and that the allow list does not open. The table drops nothing |
 | `off` | no table of keel's. `keel diff` warns |
 
-`firewall.enabled: true` reads as `enforce`. An absent key, or
-`firewall.enabled: false`, reads as `report`. The reason: in `simple`
+How keel reads each spelling (from keel `docs/spec.md`, "firewall", in
+pull request 307):
+
+| The spec says | The state | Who moves it |
+| --- | --- | --- |
+| no `firewall:` key (each published spec) | `report`, then `enforce` by rule B | the first apply that a person runs and whose sockets all belong to the manifests. Never `keel mesh` |
+| `firewall: {enabled: false}` (what `keel inspect` of keel 0.23.97 wrote) | the same as no key | the same |
+| `firewall: {allow: [...]}` with no state | the same as no key, with those ports | the same |
+| `firewall: {enabled: true}` | `enforce` | an apply that a person runs. `keel mesh` keeps `report` until then |
+| `firewall: {state: enforce}` | `enforce` | the same |
+| `firewall: {state: report}` | `report`, on purpose. Rule B never moves it | only a change of the spec |
+| `firewall: {state: off}` | no table of keel's. The plan and `keel diff` warn | only a change of the spec |
+
+An absent key and `firewall.enabled: false` give `report`, and rule B
+then decides. The reason: in `simple`
 and `cloud_simple`, validation never accepted `true`, and `keel inspect`
 writes `false` when it finds no file. Thus `false` records no choice of
 the administrator. `off` exists only when the spec says `off`.
+`state: report` is the one way to keep a node in `report` on purpose.
+When keel's file is in `enforce`, an apply with no state keeps
+`enforce`. keel refuses `enabled` together with `state`. `keel inspect`
+writes `state: enforce` from keel's file, and leaves a `report` state
+out. Thus a spec that inspect writes again does not keep a node in
+`report`. The first test found that rule B did not run on a spec with
+no `firewall:` key (item 1). The second test found `enforce` on 9 nodes
+with no key (item 1).
+
+**A firewall that keel cannot decide.** If the spec does not say
+`enforce`, a guard that refuses does not fail the apply. A rule set
+that nft refuses does not fail it either. The plan says `NOT APPLIED,
+the node keeps the firewall it has`, with the reason, and the other
+steps run. Only an explicit `state: enforce` or `enabled: true` makes
+it a failure of the apply. The first text did not say this. The reason:
+a node that chose nothing must not lose its other steps because of the
+firewall, and `keel mesh` must not put the spec back for it. Tested:
+the second test, item 7. The second test also found that a masked
+timer failed the apply with no explicit `enforce` (case c). The fix is
+built after the second test (`f1f58f0`) and is not tested on a real
+node.
 
 How a node in `report` goes to `enforce`: the maintainer chose **B**
 on 2026-11-23. The choices were:
@@ -428,7 +532,11 @@ on 2026-11-23. The choices were:
   apply that a person starts, keel lists each socket on a public
   address. If each one belongs to a unit of the resolved manifest,
   keel goes to `enforce`. Else it stays in `report`, tells the
-  administrator, and waits. A port of a declared process that the
+  administrator, and waits. As built, a socket on a mesh port also
+  keeps `report` when its address is not the overlay address or the
+  VIP, for example MariaDB on `0.0.0.0`. The reason: `enforce` opens
+  that port on wg0 only, and cuts a client outside the mesh. Tested:
+  the second test, item 3. A port of a declared process that the
   manifest does not list closes, and `keel diff` names it as
   information. Two such ports exist on each published node: UDP 12321
   of `miniserv.pl` (the manifest declares TCP 12321 only,
@@ -457,43 +565,82 @@ on BR2, with the netem profile of 250 ms. Each probe runs on IPv6 and
 on IPv4. Each test has an evidence file (0053). No package goes to
 `trixie-testing` before items 1 to 12 pass.
 
+Status after the 2 tests of pull request 307. Both tests ran in the
+test VM of BR1 only, on one bridge, with no netem. Thus no item passed
+in the release topology yet. "Covered" names what the tests showed on
+the core, lnmp and lnpp images. "Remains" names what is still to test.
+
 1. **Each mode, closed.** `simple`, a `cloud_simple` pair, a
    `cloud_advanced` pair with its etcd witness: a listener on TCP 9999
    and on UDP 9999 does not answer from outside. UDP 12321 does not
    answer.
+   Covered: each mode and the witness, IPv6 and IPv4 (the second test,
+   item 1c). Remains: the release topology.
 2. **Each application, open.** On each of the 13 images: each port of
    the table of "What is true today", section 4, answers from outside.
    The checks of the application pass (0090, item 2).
+   Covered: the declared ports of core, lnmp and lnpp (the second test,
+   item 1c). Remains: the other 10 images, and the checks of each
+   application in `enforce`.
 3. **Mesh only on wg0.** 3306, 5432, 6379, 2379, 2380, 22000 and 51821
    answer through wg0 and on the VIP, and do not answer on the public
    address.
+   Covered: replication on 3306, etcd and Syncthing work on wg0 in
+   `enforce` (the second test, item 2). Remains: 5432 and 6379, which
+   no tested pair had.
 4. **No mesh port through the uplink.** A neighbour on the same link,
    not a mesh member, adds a route for the wg0 address and for the VIP
    of each node through eth0, as T2.5 of the second evidence did. Each
    mesh port gives a timeout on IPv6, and on IPv4 where the overlay has
    IPv4. The same probe without `inet keel` answers, as a control.
+   Covered: on IPv6, with the control (the first test, item 3, and the
+   second test, item 2). The overlay had no IPv4. Remains: the release
+   topology.
 5. **Replication.** A write on the primary arrives on the standby. A
    file arrives through Syncthing. A failover by `keel vip promote`
    works, and the old primary rejoins.
+   Covered: the write, Syncthing, a failover by `pct shutdown`, and the
+   return of the old primary (the second test, item 2). Remains: a
+   failover by `keel vip promote`, and by a hard stop.
 6. **Mesh join.** `keel mesh invite` and `keel mesh join` work, and the
    invite port closes after its expiry.
+   Remains: all of it.
 7. **Reboot.** The journal shows `keel-firewall.service` before
    `network-pre.target`. The probes of items 1 and 2 give the same
    results.
+   Covered (the first test, item 2c, and the second test, item 1c).
 8. **SSH.** With `Port 2222` added by hand, an apply keeps 22 and 2222.
    With an sshd file that keel cannot read, the apply refuses and the
    old state stays.
-9. **Failure.** A broken file: the unit fails, Monit reports it, and
-   SSH still works. `systemctl restart nftables.service`: Monit loads
-   the table again within its cycles.
+   Covered: `Port 2222` with 22, `Port 2222` alone, `ssh.socket` on a
+   second port, and an unreadable configuration (the first test,
+   item 5, and the second test, items 4 and 7). Remains: the 2
+   lock-outs of the second test (section 3), with `82a085b`.
+9. **Failure.** A broken file: the unit fails, the node is `degraded`,
+   and SSH still works. `systemctl restart nftables.service`: the
+   drop-in loads the table again at once. A flush by hand: the timer
+   loads the table again within about 35 s.
+   Covered: the broken file, the restart and the flush (the second
+   test, items 5 and 6). Remains: an empty or cut file, a wider rule,
+   and an upgrade of `keel`, with the fixes after the second test.
 10. **First boot.** An interactive first boot: the fence page answers on
    80 and 443. A container whose nat table is not available: the fence
    rejects, as today.
+   Covered: the fence page through the legacy redirect, and a direct
+   connection to the fence ports dropped (the first test, item 8, and
+   the second test, item 3). Remains: the container with no nat table,
+   and the fence with `iptables-nft`.
 11. **ISO.** An install from the ISO in a VM, under BIOS and UEFI
     (0052): DHCPv4, DHCPv6 and SLAAC still work after the lease time.
     A Proxmox container with `ip=dhcp,ip6=dhcp` (0080): the same.
+    Covered: in a container, a DHCPv4 and DHCPv6 rebind and a router
+    advertisement (the second test, item 1c). Remains: the ISO, SLAAC,
+    and a lease that expires by time.
 12. **CrowdSec.** In a cloud mode, a ban by `cscli decisions add` still
     drops the address.
+    Covered (the first test, item 8). Also seen: a restart of
+    `nftables.service` removes the CrowdSec tables, and keel does not
+    load them again (the second test, item 8).
 13. **Upgrade of a published node (0090).** One node of each published
     application, from its published image: upgrade `keel` by `apt`,
     run the apply. The node goes to `report` or `enforce` as the answer
@@ -501,9 +648,16 @@ on IPv4. Each test has an evidence file (0053). No package goes to
     open. Then a reboot, and the checks again. One test with a service
     of the administrator on a public port, and one with Webmin still
     installed.
+    Covered: `dpkg -i` on core, lnmp and lnpp in each mode, with Webmin
+    installed. The upgrade loads no rule, and the apply gives `enforce`.
+    A listener of the administrator keeps `report` (the second test,
+    items 1 and 3). Remains: `apt` from the repository, the other 10
+    images, and the checks of each application.
 14. **Pair upgrade.** A `cloud_simple` pair and a `cloud_advanced` pair
     under writes: the standby first, the VIP holder last (0073, item 6).
     No acknowledged write is lost.
+    Remains: the upgrade under writes. The tests upgraded the pair and
+    the trio in this order with no load.
 
 ### 7. Advisory and stopgap (point E)
 
@@ -549,9 +703,9 @@ does not accept the WireGuard UDP port and the wg0 ports stops
 replication and Syncthing. Do not install `iptables-persistent` as a
 stopgap: its files have no WireGuard port, and they need `xt_state`.
 
-The Proxmox stopgap is now tested in `simple` and `cloud_simple`.
-Whether the advisory goes out now, before the fix, is the second open
-point.
+The Proxmox stopgap is now tested in `simple` and `cloud_simple`. The
+maintainer answered yes: the advisory goes out now, before the fix
+(answer 2).
 
 ### 8. Relation to 0094 and 0095 (point F)
 
@@ -583,21 +737,42 @@ This note changes these notes. It does not edit them.
 
 ## Not verified
 
-- Whether a package upgrade of `nftables` restarts `nftables.service`.
-  Section 1, item 2 disables the unit on new images, and section 4 covers
-  a restart.
-- The rule set in a VM from the ISO, and in `cloud_advanced` on the
-  images of release 2026-11-12.
-- That `inet keel` drops the path of section 4a. Read in code only.
-- The init fence with a drop policy, and with `iptables-nft`.
+Tested since the first text of this note:
+
+- A published `cloud_advanced` node is open, and UDP 12321 answers on
+  IPv4 (the second evidence).
+- `inet keel` drops the path of section 4a, on IPv6 (the first test,
+  item 3, and the second test, item 2).
+- The rule set in each mode, the witness included, on the published
+  core, lnmp and lnpp images (the second test, item 1).
+- The init fence with a drop policy, through the legacy redirect (the
+  first test, item 8, and the second test, item 3).
+- An upgrade of `nftables` (`apt-get install --reinstall`) stops and
+  starts `nftables.service`. The drop-in loads `inet keel` again, and
+  the node is open for about 0.15 s (the second test, item 5).
+
+Still not verified:
+
+- The rule set in a VM from the ISO, under BIOS and UEFI.
+- The release topology: 2 sites with the netem profile of 250 ms.
+- The other 10 of the 13 images.
+- `keel mesh invite` and `keel mesh join` with the invite port, and the
+  close of that port after its expiry.
+- The image build with `--root` and `state: enforce`, and the mode
+  screen that writes `firewall.state: enforce`.
+- The init fence with `iptables-nft`, and a container whose nat table is
+  not available.
+- SLAAC, and a lease that expires by time.
+- A power loss between the write and the rename of the rule set (the
+  second test, item 6: the kill did not hit that window).
+- The commits after `2120276`: the ports of a running sshd, the timer
+  after an upgrade and when masked, the rule-by-rule check, and an
+  empty or cut file. Pull request 307 still changes.
 - The Proxmox stopgap in `cloud_advanced`, on a witness, on a VM from
   the ISO, and with the nftables back end. The stopgap with
   `/etc/nftables.conf`.
 - TLS or a login on the mesh ports through the uplink. The second
   evidence proved a TCP connection and the MariaDB greeting only.
-- Tested since the first version of this note: a published
-  `cloud_advanced` node is open, and UDP 12321 answers on IPv4 (the
-  second evidence).
 
 ## Questions for the maintainer, answered
 
@@ -612,47 +787,49 @@ The maintainer answered on 2026-11-23:
    `docs/advisories/2026-11-23-no-inbound-firewall.md`. It gives the
    Proxmox VE stopgap of the second evidence.
 
-## Open points
-
-None. The note waits only for the acceptance of the maintainer.
-
 ## Work list
 
-In order. Nothing is started.
+In order. Items 3 to 8 are built in `keel` pull request 307, which is
+not merged and still changes.
 
 1. Done: the Proxmox VE firewall stopgap, tested in `simple` and on a
    `cloud_simple` pair (the second evidence, merged by handbook
    PR 203).
-2. The advisory `docs/advisories/2026-11-23-no-inbound-firewall.md`,
-   published before the fix (answer 2). Update it when the fix is in
-   `trixie`.
+2. Done: the advisory `docs/advisories/2026-11-23-no-inbound-firewall.md`,
+   published before the fix (answer 2, handbook PR 204). Update it when
+   the fix is in `trixie`.
    When this note is merged, change the `Decision:` link of the
    advisory from handbook PR 202 back to this file.
-3. keel: accept `firewall` in every mode. Add `firewall.state` and
-   `firewall.allow`. Read `enabled` as section 5 says. `keel inspect`
-   writes `state`.
-4. keel: add the sshd ports instead of the refusal (section 3).
-5. keel: the `report` state, its counter rule and the list of undeclared
-   listeners in `keel diff`. Then the rule of answer 1 (B).
-6. keel: the rule for the redirected fence ports.
-7. keel: the Monit check `keel-firewall` and its restart.
-8. keel: write Syncthing's `listenAddress` on the loopback when there is
-   no overlay address, not `tcp://:0`.
+3. Built: keel accepts `firewall` in every mode. It has `firewall.state`
+   and `firewall.allow`, and reads `enabled` as section 5 says.
+   `keel inspect` writes `state: enforce` only, and leaves a `report`
+   state out.
+4. Built: keel adds the sshd ports instead of the refusal (section 3).
+5. Built: the `report` state, its counter rule and the list of
+   undeclared listeners in `keel diff`. The rule of answer 1 (B).
+6. Built: the rule for the redirected fence ports.
+7. Built: the drop-in for `nftables.service`,
+   `keel-firewall-watch.timer`, and the Monit check `keel-firewall`
+   where the spec enables the monitor (section 4).
+8. Built: keel writes Syncthing's `listenAddress` on the loopback when
+   there is no overlay address, not `tcp://:0`.
 9. confconsole: the mode screen writes `firewall.state: enforce`. Later
    a menu for `firewall.allow` (0094).
-10. Images: the build writes the `simple` rule set with `--root`.
+10. Images: the build writes the `simple` rule set with `--root` and
+    `firewall.state: enforce` (section 5).
     Disable `nftables.service`. Remove `rules.v4`, `rules.v6` and the
     `iptables-legacy` switch with 0094 work item 14. Change the
     `tests/firewall.bats` of `keel-mariadb`, `keel-postgresql` and
     `keel-redis`, and the `WEBMIN_FW_TCP_INCOMING` lists.
 11. The tests of section 6, items 1 to 12, in the test VM of each site.
-    Evidence file.
+    Evidence file. Started: the 2 tests of pull request 307 in the test
+    VM of BR1. Section 6 says what remains.
 12. `keel` to `trixie-testing`. The upgrade tests of section 6, items 13
     and 14 (0090). Evidence file.
 13. `keel` to `trixie` with the advisory updated (0073, item 6). Build
     the images again and run commissioning (0075) on BR1 and BR2.
-14. Documentation: `keel/docs/spec.md` and `apply.md`,
-    `docs/manifest-v1.md`, the application pages (0077), and the site's
+14. Documentation: `keel/docs/spec.md` and `apply.md` (written in pull
+    request 307), `docs/manifest-v1.md`, the application pages (0077), and the site's
     security page.
 15. When 0085 exists: the ntfy message for a failed check and for a node
     in `report`.
