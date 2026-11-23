@@ -322,9 +322,14 @@ The first apply then writes the rule set of the chosen mode. The mode
 screen writes `firewall.state: enforce` into `instance.yaml`.
 
 **Nodes in the field.** The upgrade of `keel` changes nothing by itself
-(`debian/keel.postinst`). The change comes at the next
-`keel spec apply --system`, which the administrator runs, or which a
-confconsole menu runs. The spec gets a key `firewall.state` with 3
+(`debian/keel.postinst`). The change comes at the next system apply.
+A person runs it with `keel spec apply --system` or through a
+confconsole menu. In a cloud mode, keel also runs it with no person:
+`keel-mesh-sync.timer` runs `keel mesh sync` every 15 min, and a change
+of the members applies the whole spec (`keel/mesh/sync.py:498`,
+`keel/mesh/node.py:63-66`). Thus a rule that goes to `enforce` by
+itself must run only in an apply that a person starts, never in an
+apply of `keel mesh`. The spec gets a key `firewall.state` with 3
 values:
 
 | Value | Meaning |
@@ -345,12 +350,19 @@ choices:
 - **A. Only the act of the administrator.** A confconsole item, or
   `firewall.state: enforce` in the spec. Danger: a node whose
   administrator never acts stays open for ever.
-- **B. Enforce at once when the report is empty, else wait for the
-  act.** At an apply, if no undeclared socket listens on a public
-  address, keel goes to `enforce`. Else it stays in `report`, tells the
-  administrator, and waits. Danger: the report sees the sockets of that
-  moment only. A service that a timer starts later is not in it, and
-  `enforce` cuts it.
+- **B. Enforce at once when no unknown process listens, else wait for
+  the act.** The test looks at the process, not at the port. At an
+  apply that a person starts, keel lists each socket on a public
+  address. If each one belongs to a unit of the resolved manifest,
+  keel goes to `enforce`. Else it stays in `report`, tells the
+  administrator, and waits. A port of a declared process that the
+  manifest does not list closes, and `keel diff` names it as
+  information. Two such ports exist on each published node: UDP 12321
+  of `miniserv.pl` (the manifest declares TCP 12321 only,
+  `keel-core/packages/keel-core/manifest.yaml:27`), and the random
+  Syncthing port of a node with no overlay address. Nothing uses them.
+  Danger: the report sees the sockets of that moment only. A service
+  that a timer starts later is not in it, and `enforce` cuts it.
 - **C. Enforce at the next apply on every node.** The advisory says:
   declare the ports first. Danger: a service of the administrator stops
   answering from outside, and the administrator learns it from a user.
@@ -360,20 +372,21 @@ it does not cut a service that the report can see.
 
 "Report first" leaves a node open for longer than "enforce at once".
 That is the price of no surprise on a production node. In each choice,
-the node is open until somebody runs an apply. The advisory (section E)
+the node is open until a person runs an apply. The advisory (section E)
 says how to run it.
 
 ### 6. How it is proved (point D)
 
 Each test runs in the test VM of a site, one nested Proxmox VE VM for
 each site. The topology is the release topology: 2 nodes on BR1 and 1
-on BR2, with the netem profile of 250 ms. Each probe runs on IPv6 and on IPv4. Each
-test has an evidence file (0053). No package goes to `trixie-testing`
-before items 1 to 10 pass.
+on BR2, with the netem profile of 250 ms. Each probe runs on IPv6 and
+on IPv4. Each test has an evidence file (0053). No package goes to
+`trixie-testing` before items 1 to 11 pass.
 
 1. **Each mode, closed.** `simple`, a `cloud_simple` pair, a
    `cloud_advanced` pair with its etcd witness: a listener on TCP 9999
-   and on UDP 9999 does not answer from outside.
+   and on UDP 9999 does not answer from outside. UDP 12321 does not
+   answer.
 2. **Each application, open.** On each of the 13 images: each port of
    the table of "What is true today", section 4, answers from outside.
    The checks of the application pass (0090, item 2).
@@ -436,7 +449,7 @@ Stopgaps:
 
 | Stopgap | State |
 | --- | --- |
-| The Proxmox VE firewall on the guest: enable it at the datacenter and on the guest, set `firewall=1` on the network device, and accept only the ports of the table above | **not tested** |
+| The Proxmox VE firewall on the guest: enable it at the datacenter and on the guest, set `firewall=1` on the network device, and accept only the ports of the table above. Caution: the datacenter switch also turns on the firewall of the Proxmox hosts. Make sure that 22 and 8006 on the hosts stay open from the place that the administrator uses. Not verified in the Proxmox documentation | **not tested** |
 | An `/etc/nftables.conf` written by hand with the same list, loaded by `nftables.service` | **not tested** |
 | In `cloud_advanced`: `firewall.enabled: true` in the spec, then `keel spec apply --system` | tested 2026-10-16 on LNMP 19.0-3 and LNPP 19.0-4, not on the images of release 2026-11-12 |
 
@@ -503,7 +516,8 @@ This note changes these notes. It does not edit them.
 In order. Nothing is started.
 
 1. Test the Proxmox VE firewall stopgap on one `simple` node and one
-   `cloud_simple` pair in the test VM of BR1. Evidence file.
+   `cloud_simple` pair in the test VM of BR1. Check that the nested
+   host keeps 22 and 8006 open. Evidence file.
 2. Write the advisory in `docs/advisories/`, as open point 2 decides.
 3. keel: accept `firewall` in every mode. Add `firewall.state` and
    `firewall.allow`. Read `enabled` as section 5 says. `keel inspect`
