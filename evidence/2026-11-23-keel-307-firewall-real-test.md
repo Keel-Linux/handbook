@@ -128,12 +128,15 @@ then the VIP holder.
 | Node still open | TCP and UDP 9998 `refused` from CT 9400, both families | | |
 | MariaDB, etcd, Syncthing, `wg-quick@wg0` | not restarted | not restarted. Replica `Slave_IO_Running: Yes`, 0 s behind | not restarted. etcd 3 healthy voters. The VIP stays on 9420 |
 
-The restart of the `keel-vip` units comes from the trigger of the
-package `keel-overlay-vip` (`interest-noawait
+The restart of `keel-vip.service` and `keel-vip-control.service` comes
+from the trigger of the package `keel-overlay-vip` (`interest-noawait
 /usr/lib/python3/dist-packages/keel`), which exists before this pull
 request. The journal of 9420 says: `vip fd4f:478b:3701::ffff:1: kept
 while the unit restarts`. The VIP address stayed on wg0. The restart of
-the mesh-members units comes from the package scripts of `keel`.
+`keel-mesh-members.service` and `keel-database-position.service` comes
+from `debian/rules` of `keel`: `dh_installsystemd --name=...` with no
+`--no-restart-after-upgrade`, so the package restarts these units after
+an upgrade. Both exist before this pull request.
 
 A run of `keel-mesh-sync.service` (the unit of the timer) with stable
 members said `no member this node does not know` and applied nothing
@@ -348,7 +351,10 @@ about 1 min until the key was set again.
 
 ## Item 5: the SSH guard and a broken file (PASS)
 
-On 9403 (core, `enforce`), with a console path through `pct exec` (log 37):
+On 9403 (core, `enforce`), with a console path through `pct exec` (log 37).
+The spec had the `firewall:` key of item 1c, so keel asked `sshd -T`
+and `ssh.socket`. Without the key, keel reads the SSH ports from the
+files only (item 1b).
 
 | Case | Observed |
 | --- | --- |
@@ -400,7 +406,8 @@ keel file. Thus Monit does not run the check.
 | 501 s later | still no `inet keel`. `keel firewall check`: `table inet keel is not loaded ...`, exit 14. `monit.log` has no `keel-firewall` line |
 | TCP 9999 from CT 9400 | `18:39:14 open`, and open to the end of the probe at 540 s |
 
-On 9430 (`cloud_simple`, published spec), `nft flush ruleset` removed
+On 9430 (`cloud_simple`, a spec with no `monitor:` section; it had the
+`firewall:` key of item 1c), `nft flush ruleset` removed
 `inet keel`, `ip crowdsec` and `ip6 crowdsec6`. 180 s later no table was
 back. `systemctl restart keel-firewall.service
 crowdsec-firewall-bouncer.service` brought all 3 back (log 38).
@@ -439,8 +446,9 @@ link removed, `systemctl daemon-reload`, `pct reboot 9404`.
 | The file, the table | `# state: report`, `policy accept`, `keel-report` counter |
 | `keel diff` | `enforce would close udp 0.0.0.0:12321 of webmin.service (miniserv.pl)` only |
 
-At this first boot, no file existed before the network came up, so the
-table loaded after the network. That part is expected until the images
+At this first boot, no file existed before the network came up. Thus
+the table loaded after the network, by inference: the journal order was
+not checked on this node. That part is expected until the images
 write the rule set with `--root` (a follow-up of the pull request).
 
 **Result for item 7: FAIL**, for the cause of item 1.
@@ -449,7 +457,7 @@ write the rule set with `--root` (a follow-up of the pull request).
 
 | Check | Observed |
 | --- | --- |
-| `nft -c` and `nft -f` in an unprivileged container | each apply on the 10 CTs: `checked by nft -c as a copy first ...: done`, `load it in one transaction ...: done` |
+| `nft -c` and `nft -f` in an unprivileged container | each apply on the 9 CTs that got 0.23.99: `checked by nft -c as a copy first ...: done`, `load it in one transaction ...: done` |
 | CrowdSec tables next to `inet keel` | `inet filter`, `ip crowdsec`, `ip6 crowdsec6`, `inet keel` on each cloud node |
 | CrowdSec ban on 9430 in enforce | `cscli decisions add --ip` for both addresses of CT 9400. From CT 9400: IPv6 TCP 22 and 80 `error:OSError:113` (no route to host), IPv4 `timeout`. After `cscli decisions delete`: `open` (log 38) |
 | `iptables` alternative | `/usr/sbin/iptables-legacy` on the images |
