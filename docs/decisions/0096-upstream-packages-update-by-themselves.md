@@ -3,8 +3,8 @@
 Date: 2026-11-23
 Status: **proposed 2026-11-23.** The maintainer gave the direction on
 2026-11-23. Section 3, the automatic promotion to `trixie`, needs the
-maintainer's confirmation (open point A). Open point B asks if a
-technical stop sends a message. Nothing in this note is built.
+maintainer's confirmation (open point A). The maintainer decided the
+messages of section 2 on 2026-11-23. Nothing in this note is built.
 
 ## What was asked
 
@@ -196,19 +196,18 @@ The version goes to no suite. The published version stays. The pipeline
 opens one issue in `Keel-Linux/tracker` with the facts: the check that
 failed, the repairs that it tried, and the links to the PR and the CI
 runs. A person does this work as ordinary engineering, through a normal
-PR with review and CI. It is not a question for the maintainer. Open
-point B asks if a stop also sends a message. A stopped security release
-(section 6) always sends one ntfy message of level `notice` to
-`keel-alerts`, as layer 3 does.
+PR with review and CI. It is not a question for the maintainer. The
+maintainer gets one message ("Messages to the maintainer" below).
 
 A failure of the infrastructure does not stop the version. Examples: a
 runner that is down, a test VM that does not answer. The pipeline runs
 again the next day, and the failure goes to the infrastructure work.
+The maintainer gets one message, because the pipeline did not run.
 
 #### Layer 3: the maintainer
 
-The pipeline stops and tells the maintainer only for one of these
-reasons. Each one is a question of intent:
+The pipeline stops and asks the maintainer a question only for one of
+these reasons. Each one is a question of intent:
 
 1. The upstream licence changes, or a new vendored part has a licence
    that is not free (DFSG).
@@ -220,18 +219,45 @@ reasons. Each one is a question of intent:
 5. A security fix of upstream does not pass the upgrade test of 0090.
 
 Reason 3 starts from a stop: the person who does the work finds that
-the patch cannot be carried, and opens the layer 3 notice.
+the patch cannot be carried, and opens the layer 3 issue.
 
-The notice is one ntfy message and one tracker issue:
+#### Messages to the maintainer
 
-- The message goes to the topic `keel-alerts` (0063) with the level
-  `notice` (0085). It gives the package, the version, the reason number
-  above and the link to the issue.
-- The issue in `Keel-Linux/tracker` gives what upstream changed and
-  what the nodes have now. It links to the PR and the CI runs. It asks
-  one question that the maintainer can answer with yes, no or a letter. It says what happens with no answer: the
-  published version stays.
-- The issue joins the list of tracker#1. There is no reminder.
+The maintainer decided this rule on 2026-11-23: "De alguma forma eu
+tenho que ser avisado, nem que seja por e-mail, de que um job CI/CD
+falhou" (in some way I must be told, by e-mail if necessary, that a
+CI/CD job failed).
+
+1. **One message for each stop.** Each time a pipeline job fails and a
+   version stops, the maintainer gets one message. This applies to a
+   technical stop (layer 2), to a question of intent (layer 3) and to a
+   failure of the infrastructure.
+2. **The channel is ntfy.** The message goes to the topic `keel-alerts`
+   (0063) with the level `notice` (0085). The maintainer reads this
+   topic on his phone today.
+3. **No repeat.** The pipeline sends one message for each stopped
+   version, and one for each failure of the infrastructure. A daily run
+   that fails again in the same way sends no new message.
+4. **The content.** Each message gives the package, the version, the
+   kind of stop and the link to the tracker issue.
+   - A technical stop: the message says that the stop is engineering
+     work for a person. It asks no question.
+   - A failure of the infrastructure: the message says that the pipeline
+     did not run. It asks no question.
+   - A question of intent: the message gives the question.
+5. **The tracker issue.** Each stop has one issue in
+   `Keel-Linux/tracker`. It says what failed or what upstream changed,
+   and what the nodes have now. It links to the PR and the CI runs. The
+   issue of a question of intent asks one question that the maintainer
+   can answer with yes, no or a letter. It says what happens with no
+   answer: the published version stays. This issue joins the list of
+   tracker#1. There is no reminder.
+
+E-mail is not part of this rule today. It is not verified if
+git.pop.coop sends an e-mail to a watcher of the tracker for a new
+issue. The API shows no mail setting of the instance. The tracker has 2
+watchers: `navigator` and `keel-bridge`. A message by e-mail is later
+work, and it depends on decision 0092.
 
 ### 3. Promotion from `trixie-testing` to `trixie`: the maintainer must confirm
 
@@ -382,7 +408,8 @@ The pilot must show these results before the next package enters:
    no person.
 2. The fixed repairs choose Go 1.27 and drop the 2 patches with the
    fate `drop-when-upstream >= 1.28.0`. The version then stops on the 2
-   patches that do not apply, and the pipeline opens one tracker issue.
+   patches that do not apply. The pipeline opens one tracker issue and
+   sends one ntfy message with no question.
 3. A person adds the `.wasm` component, rebases one patch and rewrites
    the other, through a normal PR. No file in `debian/tests/` changes.
 4. The upgrade test of 0090 is green on each published image that holds
@@ -417,16 +444,6 @@ A. **The promotion of section 3.** Answer with a letter:
 - A3: no. `bin/promote` stays the maintainer's act. The pipeline writes
   the command line into a tracker issue.
 
-B. **A technical stop (section 2, layer 2).** When a version stops for
-a technical reason, is the maintainer told by ntfy? Answer with a
-letter:
-
-- B1: no message. Only the tracker issue goes into the queue
-  (proposed).
-- B2: one ntfy message of level `notice` for each stop.
-
-With B1 or B2, a security release that stops always sends one message.
-
 ## Work, in order
 
 Nothing is started.
@@ -445,8 +462,8 @@ Nothing is started.
 8. Make the archive push run with no person, with a restricted key as
    `keel-channel-push` has.
 9. Write the 5 fixed repairs of layer 2.
-10. Write the stop issue of layer 2 and the layer 3 notice: the ntfy
-    message and the tracker issue.
+10. Write the messages of section 2: the ntfy message with no repeat,
+    and the tracker issue.
 11. Run the pilot with `anubis` 1.28.2 and write its evidence.
 12. Add `govulncheck` and the toolchain and `nginx-abi` triggers.
 13. Make the build-only suite for toolchain backports.
