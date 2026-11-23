@@ -3,7 +3,8 @@
 Date: 2026-11-23
 Status: **proposed 2026-11-23.** The maintainer gave the direction on
 2026-11-23. Section 3, the automatic promotion to `trixie`, needs the
-maintainer's confirmation (open point A). Nothing in this note is built.
+maintainer's confirmation (open point A). Open point B asks if a
+technical stop sends a message. Nothing in this note is built.
 
 ## What was asked
 
@@ -17,6 +18,8 @@ The maintainer gave this direction on 2026-11-23:
 - The maintainer is told only when no technical solution exists and the
   problem becomes a question of intent.
 - "Do the basic thing and do it well."
+- The pipeline is code: scripts, timers and CI. No program that decides
+  by its own judgement does the work.
 
 ## What is true today
 
@@ -79,7 +82,7 @@ the handbook yet.
 2. **Whether it can be made to work.** It can. Most steps exist: the
    watch files, the CI build, lintian, autopkgtest, the unattended
    signature (0055) and the upgrade test of 0090. The missing parts are
-   one timer, one repair step, one automatic upgrade test and one
+   one timer, 5 fixed repairs, one automatic upgrade test and one
    unattended archive push.
 3. **Why this is better.** The CI is the only judge of a technical
    change. The maintainer reads only a question that a test cannot
@@ -114,6 +117,12 @@ These source packages are not in the pipeline:
 
 ### 2. Three layers
 
+**The pipeline is deterministic code only.** It is scripts, timers and
+CI. Each step gives the same result for the same input. No program that
+writes or changes packaging by its own judgement runs in the pipeline.
+A change that needs judgement is the work of a person, in a normal PR
+with review and CI.
+
 #### Layer 1: automatic
 
 A timer on the build host runs each day for each package in the scope.
@@ -147,54 +156,71 @@ A timer on the build host runs each day for each package in the scope.
 Steps 5 and 8 (`bin/publish`, the signature) exist. Steps 1 to 4, 6, 7,
 9, the use of the CI files and the unattended archive push are to build.
 
-#### Layer 2: automated repair
+#### Layer 2: fixed repairs
 
-If a check of layer 1 is red, an automated repair step changes the
-packaging on a new commit in the same PR. Examples: a newer Go toolchain
-(section 4), a new build dependency, a patch rebase, a change of the
-build system. The same CI and the same upgrade test are the only judge.
-If the PR becomes green, layer 1 goes on. Nobody is told.
+If a check of layer 1 is red, the pipeline tries the fixed repairs
+below, and no other change. Each repair is a new commit in the same PR.
+The same CI and the same upgrade test are the only judge. If the PR
+becomes green, layer 1 goes on. Nobody is told.
 
-The automated repair step obeys these rules:
+1. **Toolchain.** The pipeline reads the `go` line of `go.mod`. It
+   takes the first Debian suite of section 4 that has this Go version.
+   It changes the version number in `Build-Depends` and in the
+   toolchain path of `debian/rules`, and nothing else.
+2. **Patch refresh.** If a patch applies with an offset and with fuzz
+   0, the pipeline runs `quilt refresh` on it. It never rewrites a
+   patch. A patch that needs fuzz or does not apply stops the version.
+3. **Patch drop.** A patch can have the fate "drop when upstream >= X"
+   (section 7). If the new version is X or higher, the pipeline removes
+   the patch from the series.
+4. **Changelog.** The pipeline adds the next `debian/changelog` entry,
+   with the next `+keelN` version and the list of the repairs it did.
+5. **Rebuild.** If the Debian Go toolchain gets a security fix, or the
+   `nginx-abi` of trixie changes, the pipeline makes a rebuild with no
+   source change. The only change is the changelog entry.
+
+These rules apply to each pipeline commit:
 
 1. It never removes, skips or weakens a test. It does not change
-   `debian/tests/`, the CI workflows or a lintian override. A CI check
-   fails if a repair commit touches one of these paths.
-2. It never removes a Keel patch whose fate (section 7) is "Keel-only"
-   and that has a guard test. It can rebase or rewrite such a patch. The
-   guard test of the patch must pass with no change.
-3. A "Keel-only" patch with no guard test carries no property that Keel
-   uses. If it no longer applies, the step removes it. The step writes
-   this in `debian/changelog`.
-4. It removes another patch only when its fate is "drop when upstream >= X"
-   and the new version is X or higher.
-5. It never changes what the package does on the node: the maintainer
+   `debian/tests/`, the CI workflows or a lintian override.
+2. It changes only `debian/changelog`, `debian/patches/` and the
+   toolchain lines of item 1. A CI check fails if a pipeline commit
+   touches another path.
+3. It never removes a patch whose fate is `keel-only`.
+4. It never changes what the package does on the node: the maintainer
    scripts, the systemd units, the default configuration, the paths and
    the users stay the same.
-6. Its changes are ordinary commits in the PR. The CI gates them as
-   any other commit.
-7. One attempt is one repair commit and one complete CI run. It makes
-   at most 3 attempts for one upstream version. The count starts again
-   for a newer upstream version.
 
-A failure of the infrastructure is not an attempt and is not a reason
-for layer 3. Examples: a runner that is down, a test VM that does not
-answer. It goes to the infrastructure work.
+**If the fixed repairs do not make the PR green, the version stops.**
+The version goes to no suite. The published version stays. The pipeline
+opens one issue in `Keel-Linux/tracker` with the facts: the check that
+failed, the repairs that it tried, and the links to the PR and the CI
+runs. A person does this work as ordinary engineering, through a normal
+PR with review and CI. It is not a question for the maintainer. Open
+point B asks if a stop also sends a message. A stopped security release
+(section 6) always sends one ntfy message of level `notice` to
+`keel-alerts`, as layer 3 does.
+
+A failure of the infrastructure does not stop the version. Examples: a
+runner that is down, a test VM that does not answer. The pipeline runs
+again the next day, and the failure goes to the infrastructure work.
 
 #### Layer 3: the maintainer
 
 The pipeline stops and tells the maintainer only for one of these
-reasons:
+reasons. Each one is a question of intent:
 
 1. The upstream licence changes, or a new vendored part has a licence
    that is not free (DFSG).
 2. Upstream removes or reverses a function that Keel uses by design.
-3. A Keel-only patch goes against the intent of upstream and can no
-   longer be carried. The guard test fails after 3 attempts.
+3. A `keel-only` patch goes against the intent of upstream and can no
+   longer be carried.
 4. Upstream is dead: the repository is archived, or upstream says that
    the project ends.
-5. The repair failed after 3 attempts.
-6. A security fix of upstream does not pass the upgrade test of 0090.
+5. A security fix of upstream does not pass the upgrade test of 0090.
+
+Reason 3 starts from a stop: the person who does the work finds that
+the patch cannot be carried, and opens the layer 3 notice.
 
 The notice is one ntfy message and one tracker issue:
 
@@ -202,8 +228,8 @@ The notice is one ntfy message and one tracker issue:
   `notice` (0085). It gives the package, the version, the reason number
   above and the link to the issue.
 - The issue in `Keel-Linux/tracker` gives what upstream changed and
-  what the nodes have now. It links to the PR and the CI runs. It asks one question that the maintainer can answer with
-  yes, no or a letter. It says what happens with no answer: the
+  what the nodes have now. It links to the PR and the CI runs. It asks
+  one question that the maintainer can answer with yes, no or a letter. It says what happens with no answer: the
   published version stays.
 - The issue joins the list of tracker#1. There is no reminder.
 
@@ -250,9 +276,9 @@ The pipeline reads the version that upstream needs. For Go, this is the
 `go` line of `go.mod`. The pipeline takes the first source in this list
 that has the version.
 It never uses `/usr/local`, a tarball of the toolchain or a download at
-build time. If no Debian suite has the version, the package waits at
-its version. For a security release that waits, the automated repair
-step backports the upstream fix as a patch with the fate "drop when
+build time. If no Debian suite has the version, the version stops
+(section 2, layer 2). If a security release stops, a person backports
+the upstream fix as a patch through a normal PR. Its fate is "drop when
 upstream >= X".
 
 Gaps today: `syncthing` uses Go from `/usr/local/go1.26` on the build
@@ -305,7 +331,7 @@ images hold the old version until they are built again (0073 item 7).
    node uses it.
 3. A guard test in `debian/tests/` for each Keel patch that carries a
    security or design property. A test inside the patch is not enough,
-   because a rewrite of the patch can change it.
+   because a change of the patch can change it.
 4. A patch series with a DEP-3 header on each patch. A field
    `Keel-Fate` gives one of: `keel-only`, `forwarded <URL>`,
    `drop-when-upstream >= X`. A field `Keel-Guard` names the guard test.
@@ -332,12 +358,13 @@ goes to Debian or to upstream without the maintainer's word.
 The pilot is `anubis` 1.28.2, to `trixie-testing` only. Its patches go
 as follows (the patch analysis):
 
-- `challenge-without-gzip`: `keel-only`, rebased. The guard is the
+- `challenge-without-gzip`: `keel-only`, rebased by a person. The guard is the
   `behind-nginx` step with 512 requests and no `Accept-Encoding`.
 - `redirect-domains-ipv6`: `keel-only`, with no guard test, because Keel
   does not set `REDIRECT_DOMAINS`. It applies with no change on 1.28.2
   and stays.
-- `redir-same-host`: `keel-only`, rewritten in `PassChallenge`. The guard
+- `redir-same-host`: `keel-only`, rewritten in `PassChallenge` by a
+  person. The guard
   is the `behind-nginx` cases that refuse another host.
 - `redir-validate`: `drop-when-upstream >= 1.28.0`. Its `behind-nginx`
   cases stay and must pass on the upstream code. Upstream 1.28.2 gives
@@ -345,18 +372,25 @@ as follows (the patch analysis):
   "Redirect domain not allowed" (`lib/localization/locales/en.json`).
 - `keep-cookie-of-request-without-cookie`: `drop-when-upstream >= 1.28.0`.
 
+Two patches do not apply on 1.28.2, and the `.wasm` component is new.
+Thus the first run of the pilot stops. This is the expected result, and
+it tests the stop.
+
 The pilot must show these results before the next package enters:
 
 1. The timer finds 1.28.2 and imports it with the signature check, with
    no person.
-2. The automated repair step makes the Go 1.27, `.wasm` and patch
-   changes. The CI is green, and no file in `debian/tests/` changed.
-3. The upgrade test of 0090 is green on each published image that holds
+2. The fixed repairs choose Go 1.27 and drop the 2 patches with the
+   fate `drop-when-upstream >= 1.28.0`. The version then stops on the 2
+   patches that do not apply, and the pipeline opens one tracker issue.
+3. A person adds the `.wasm` component, rebases one patch and rewrites
+   the other, through a normal PR. No file in `debian/tests/` changes.
+4. The upgrade test of 0090 is green on each published image that holds
    `anubis`.
-4. The CI files go to `trixie-testing` with no person.
-5. A red case that cannot be repaired, made on purpose in a test
-   repository, sends exactly one ntfy message and one tracker issue.
-6. The evidence file exists.
+5. The CI files go to `trixie-testing` with no person.
+6. A layer 3 case, made on purpose in a test repository, sends exactly
+   one ntfy message and one tracker issue.
+7. The evidence file exists.
 
 The order after the pilot: `libcoraza`, `libnginx-mod-http-coraza`,
 `coreruleset`, `syncthing`, `keel-nodejs`. Each package enters after the
@@ -383,6 +417,16 @@ A. **The promotion of section 3.** Answer with a letter:
 - A3: no. `bin/promote` stays the maintainer's act. The pipeline writes
   the command line into a tracker issue.
 
+B. **A technical stop (section 2, layer 2).** When a version stops for
+a technical reason, is the maintainer told by ntfy? Answer with a
+letter:
+
+- B1: no message. Only the tracker issue goes into the queue
+  (proposed).
+- B2: one ntfy message of level `notice` for each stop.
+
+With B1 or B2, a security release that stops always sends one message.
+
 ## Work, in order
 
 Nothing is started.
@@ -390,8 +434,8 @@ Nothing is started.
 1. Add the `Keel-Fate` and `Keel-Guard` fields to the 5 `anubis`
    patches.
 2. Write `.forgejo/keel-pipeline.yaml` for `anubis`.
-3. Add the CI check that fails when a repair commit touches
-   `debian/tests/`, a workflow or a lintian override.
+3. Add the CI check that fails when a pipeline commit touches a path
+   outside the list of layer 2.
 4. Write the import step: `uscan`, the signature check, `gbp import`,
    the branch and the PR.
 5. Write the daily timer on the build host.
@@ -400,8 +444,9 @@ Nothing is started.
 7. Make `bin/publish` take the CI files of a merged PR.
 8. Make the archive push run with no person, with a restricted key as
    `keel-channel-push` has.
-9. Write the automated repair step with the rules of layer 2.
-10. Write the layer 3 notice: the ntfy message and the tracker issue.
+9. Write the 5 fixed repairs of layer 2.
+10. Write the stop issue of layer 2 and the layer 3 notice: the ntfy
+    message and the tracker issue.
 11. Run the pilot with `anubis` 1.28.2 and write its evidence.
 12. Add `govulncheck` and the toolchain and `nginx-abi` triggers.
 13. Make the build-only suite for toolchain backports.
