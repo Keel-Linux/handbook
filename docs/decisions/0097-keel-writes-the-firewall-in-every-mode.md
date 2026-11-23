@@ -12,8 +12,9 @@ merged. Two real-node tests of that pull request are merged on main:
 ["the first test"](../../evidence/2026-11-23-keel-307-firewall-real-test.md)
 (head `86370ed`) and
 ["the second test"](../../evidence/2026-11-23-keel-307-firewall-real-test-2.md)
-(head `2120276`). Where the built design differs from the first text of
-this note, the note says what is built and why.
+(head `2120276`). "The second evidence" stays the name of the
+stopgap evidence of handbook PR 203. Where the built design differs from
+the first text of this note, the note says what is built and why.
 
 Sources. Each repository path was read on its default branch after
 `git fetch` on 2026-11-23: `keel` `35e8aa6` (keel 0.23.97), `common`
@@ -459,8 +460,11 @@ This rule stays, and it is not built yet. In the second test, a new
 node got `enforce` from its first-boot apply. But no file existed
 before the first boot, so the table loaded after the network (item 8).
 
-**Nodes in the field.** The upgrade of `keel` changes nothing by itself
-(`debian/keel.postinst`). The change comes at the next system apply.
+**Nodes in the field.** The upgrade of `keel` loads no rule by itself
+(`debian/keel.postinst`). As built, the upgrade also enables
+`keel-firewall-watch.timer` with no start, and installs the drop-in
+for `nftables.service`. The second test records this against 0073 as
+"not met" (item 1x). The change comes at the next system apply.
 A person runs it with `keel spec apply --system` or through a
 confconsole menu. In a cloud mode, keel also runs it with no person:
 `keel-mesh-sync.timer` runs `keel mesh sync` every 15 min, and a change
@@ -648,8 +652,9 @@ the core, lnmp and lnpp images. "Remains" names what is still to test.
     open. Then a reboot, and the checks again. One test with a service
     of the administrator on a public port, and one with Webmin still
     installed.
-    Covered: `dpkg -i` on core, lnmp and lnpp in each mode, with Webmin
-    installed. The upgrade loads no rule, and the apply gives `enforce`.
+    Covered: `dpkg -i` with Webmin installed, on lnmp in each mode, on
+    core in `simple` and as the witness, and on lnpp in `simple`. The
+    upgrade loads no rule, and the apply gives `enforce`.
     A listener of the administrator keeps `report` (the second test,
     items 1 and 3). Remains: `apt` from the repository, the other 10
     images, and the checks of each application.
@@ -743,13 +748,16 @@ Tested since the first text of this note:
   IPv4 (the second evidence).
 - `inet keel` drops the path of section 4a, on IPv6 (the first test,
   item 3, and the second test, item 2).
-- The rule set in each mode, the witness included, on the published
-  core, lnmp and lnpp images (the second test, item 1).
+- The rule set on published images: lnmp in each mode, core in
+  `simple` and as the witness, and lnpp in `simple` (the second test,
+  item 1).
 - The init fence with a drop policy, through the legacy redirect (the
   first test, item 8, and the second test, item 3).
-- An upgrade of `nftables` (`apt-get install --reinstall`) stops and
+- A reinstall of `nftables` (`apt-get install --reinstall`) stops and
   starts `nftables.service`. The drop-in loads `inet keel` again, and
-  the node is open for about 0.15 s (the second test, item 5).
+  the node is open for about 0.15 s (the second test, item 5). An
+  upgrade to a new version runs the same maintainer scripts. That is an
+  inference, not a test.
 
 Still not verified:
 
