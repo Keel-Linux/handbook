@@ -11,19 +11,21 @@ The second round adds the automatic failover of names and rewrites the
 note as one text. The number stays, because the note was never accepted
 and nothing is built from it. The section "What changed in the second
 round" lists the changes. The evidence is the study
-`evidence/powerdns-failover-study-2026-11-23.md` and the laboratory
-test `evidence/2026-11-23-powerdns-5.1-standby-and-failover-record.md`
-(in PR 205 until merged; "the laboratory test" below). Nothing here is
-implemented.
+`evidence/powerdns-failover-study-2026-11-23.md`, the laboratory test
+`evidence/2026-11-23-powerdns-5.1-standby-and-failover-record.md` ("the
+laboratory test" below), and the test of variant A
+`evidence/2026-11-23-powerdns-no-primary-servfail.md` ("the variant A
+test" below). Nothing here is implemented.
 
 The maintainer approved the rule of section 11 (the pair moves by
 itself, and its five limits) on 2026-11-23. He agreed to the scope of
 version 1 (section 10 I) on 2026-11-23, to confirm when the note is
 accepted. The items that this revision proposes are marked
-**(proposed)**. On 2026-11-23 he also decided the answer when no
-address is up: SERVFAIL (section 7, variant A), to be tested before the
-note is accepted. Two things are open: the acceptance of the note, and
-the tests that are still to do.
+**(proposed)**. On 2026-11-23 he decided the answer when no address is
+up: SERVFAIL (section 7, variant A). The variant A test followed. On
+2026-11-24 he decided that variant A stays, with the result of Knot
+Resolver as a known limit. Two things are open: the acceptance of the
+note, and the tests that are still to do.
 
 ## What was asked
 
@@ -321,6 +323,15 @@ handbook.
   a switch.
 - `lua-health-checks-expire-delay` is 86400 s. A timer on each server
   queries each failover name every 5 minutes, so that its checks stay.
+- **A warm-up query at each start (proposed).** At each `pdns` start,
+  the server sends one query for each failover name, A and AAAA, at
+  once. The query that starts the checks of a name gets SERVFAIL. Thus
+  the warm-up query takes that SERVFAIL, not a client (variant A test,
+  item 4).
+- **Restart the DNS servers one at a time (proposed).** A cold server
+  costs nothing, because the resolver asks another server. When all
+  servers are cold for one name at the same time, a client can get one
+  SERVFAIL, and Unbound keeps it for 5 s (variant A test, item 4).
 - `enable-lua-record-updates` (5.1, default `no`) stays `no` on the
   standbys. On the writer it is `yes` only if the renderer uses the
   API. `pdnsutil` does not need it (laboratory test, Q2).
@@ -329,64 +340,76 @@ handbook.
   (`state->status = ++state->failures < minimumFailures`). The
   laboratory test used 2 and measured this: in each switch and after
   each start, every server gave both addresses for about 5 s (10 s when
-  a check times out). The value 1 was not tested. With 1, one failed
-  check marks an address down, so a switch is expected to be one check
-  interval shorter than the measured times. This is to be tested.
+  a check times out). The variant A test used 1 and measured that one
+  failed check marks an address down (item 2).
 - **When no address is up, the server answers SERVFAIL (decided by the
-  maintainer on 2026-11-23, variant A below; to be tested before the
-  note is accepted).** The record uses `backupSelector='empty'` (5.1) and Lua code
+  maintainer on 2026-11-23, and kept on 2026-11-24 after the variant A
+  test).** The record uses `backupSelector='empty'` (5.1) and Lua code
   that raises an error when the result is empty. The 5.1.5 code turns an
   error of a LUA record into SERVFAIL ("Exception building answer packet
   ... sending out servfail", `pdns/packethandler.cc`). A resolver then
-  asks another server of the zone. A server never gives the replica as a
-  second address because it cannot see the primary. **The laboratory
-  test did not test this form.** It tested only
-  `backupSelector='all'`.
+  asks another server of the zone. The variant A test measured that this
+  form works as written, for A and AAAA, `www` and the apex, signed.
 - `failOnIncompleteCheck='true'` (5.0) gives SERVFAIL on the query that
   starts a check. Measured (laboratory test, Q3): only that query gets
   SERVFAIL. Later queries before the first result find all addresses
-  down. With `'all'`, they got both addresses for about 5 s. With the
-  rule above, they get SERVFAIL (not tested).
+  down. With variant A, they get SERVFAIL until the first check result
+  of an address that is up (variant A test, item 4).
 - Health checked names have a TTL of 60 s.
 
-**The answer when no address is up: decided, A (the maintainer,
-2026-11-23).** A DNS server that sees no primary answers SERVFAIL. The
-facts for each variant follow. The laboratory test ran only variant B,
-with `minimumFailures=2`.
+**The answer when no address is up: decided, A.** The maintainer chose
+variant A on 2026-11-23. On 2026-11-24, after the variant A test, he
+decided that variant A stays, with the result of Knot Resolver below as
+a known limit. A DNS server that sees no primary answers SERVFAIL.
 
 - **A: `backupSelector='empty'` and a Lua error, so SERVFAIL (the
-  decision, not tested).** For: a server never gives the read-only
-  replica because it cannot see the primary, and a resolver asks
-  another server. Against: a resolver can keep a SERVFAIL for up to 5
-  minutes (RFC 2308, section 7.1). In the gap of a move, when no node
-  answers as the primary, all servers answer SERVFAIL. That the Lua
-  form works is not tested.
-- **B: `backupSelector='all'` (measured).** When all checks failed, and
-  on a server with no path to the web nodes, the server gave both
-  addresses. There was no SERVFAIL except the first query after a
-  start. Against: in these cases a client can reach the read-only
-  replica, and a server with a wrong view gives it too. A replica
-  refuses writes, so no acknowledged write is lost.
+  decision, measured in the variant A test).** A server that sees no
+  primary never gives the read-only replica. A resolver asks another
+  server. In the gap of a move, all servers answer SERVFAIL. The
+  resolvers kept a SERVFAIL for at most 5.1 s (Unbound), 1.9 s (BIND)
+  and 0.7 s (Knot Resolver), not the 5 minutes that RFC 2308 permits.
+- **B: `backupSelector='all'` (measured in the laboratory test, not
+  used).** When all checks failed, and on a server with no path to the
+  web nodes, the server gave both addresses. A client could then reach
+  the read-only replica.
 
-The laboratory test made no gap with no primary: the new node answered
-200 at the time when the old node failed. The length of that gap in a
-real move decides the cost of each variant (section 10 K, case 15).
-
-**Pass conditions of variant A (proposed).** The real test of section
-10 K, with the validating resolver behind netem, must show all of
-these:
+**Pass conditions of variant A, and the results of the variant A test.**
+A validating resolver was in front of 3 DNS servers, behind netem at
+250 ms with about 2 % loss:
 
 1. The Lua form of section 10 E gives SERVFAIL when no address is up,
-   and the addresses that are up in all other cases.
+   and the addresses that are up in all other cases. **PASS:** 504
+   answers in 14 states. Each SERVFAIL was in a state with no address
+   up, and each other answer had the correct addresses and validated.
 2. While at least one DNS server gives the primary, the resolver gives
-   the client an answer, not SERVFAIL (case 7).
+   the client an answer, not SERVFAIL (case 7). **Unbound: PASS. BIND:
+   PASS. Knot Resolver 5.7.5 in forwarder mode: FAIL.** It gave
+   SERVFAIL in 6 of 8 runs, to up to 6.3 % of the queries of a phase.
+   Knot Resolver in iterating mode was not tested.
 3. After the gap of a move, the resolver gives the new primary no later
    than 60 s (the TTL of the name) after the first DNS server gives it
-   (case 15).
+   (case 15). **PASS** for the 3 resolvers. The worst time was 39.3 s,
+   from the positive cache of the old address (TTL 60 s), not from a
+   SERVFAIL.
 
-If condition 1 fails, or if the resolver keeps a SERVFAIL for longer
-than the limits of conditions 2 or 3, the choice goes back to the
-maintainer with variant B.
+**Known limit, accepted (2026-11-24).** A client behind Knot Resolver
+in forwarder mode can get SERVFAIL while a server with no path to the
+nodes answers SERVFAIL and another server gives the primary.
+
+**Facts for both variants (variant A test, item 2).**
+
+- `minimumFailures=1`: one failed check marks an address down.
+- **The old address can stay listed for up to 9.5 s in a switch.** A
+  server gives the result of its last check until its next check. On
+  the servers that checked every 5 s, a switch took at most 5.0 s after
+  the new primary answered 200. On one server, some checks ran every
+  10 s (the 10 s period of the check that is due 5 s after the end of
+  the last check, in whole seconds), and the time went up to 9.5 s. In
+  that time the server can give the replica. Variant A and variant B
+  have the same time.
+- With variant A, a server answers SERVFAIL until its next check of the
+  new primary: at most 4.7 s on the servers with a 5 s period, and
+  9.1 s on the server with the 10 s period.
 
 ### 8. Ports, mesh, TLS and health
 
@@ -512,7 +535,9 @@ administrator turns on failover for a name.
 **A DNS server with a wrong view.** A server that cannot reach the
 primary, or that has no egress in one address family, sees no address
 up. With variant A of section 7 (the decision) it answers SERVFAIL, and
-the resolver asks another server (not tested). With variant B it gives both
+the resolver asks another server. The variant A test measured this for
+Unbound and BIND. Knot Resolver in forwarder mode gave SERVFAIL to up
+to 6.3 % of the queries (the known limit of section 7). With variant B it gives both
 addresses: the laboratory test measured this on a server with no path
 to the web nodes (Q3).
 
@@ -574,9 +599,8 @@ placeholder token:
 clientdomain.com. 60 IN LUA AAAA ";local r = ifurlup('https://clientdomain.com/.well-known/keel/primary', {'2001:db8:1::10', '2001:db8:2::10'}, {stringmatch='keel-primary TOKEN', selector='all', backupSelector='empty', failOnIncompleteCheck='true'}) if #r == 0 then error('no primary') end return r"
 ```
 
-That this Lua form works (the type of `r`, the SERVFAIL) is to be
-tested. The laboratory test used the plain `ifurlup` form with
-`backupSelector='all'` and `minimumFailures='2'`, not this form. A LUA
+This Lua form works: `#r` gives the number of addresses, and the error
+gives SERVFAIL (variant A test, pass condition 1). A LUA
 record at the zone apex works, for A and AAAA, signed (laboratory
 test, Q2).
 
@@ -684,10 +708,12 @@ documentation. The terms:
 | The client: Chrome keeps an answer for at least 60 s, Java 30 s | up to 60 s (not measured) | evidence section 4 |
 
 With `minimumFailures=1` (section 7), one failed check is enough. The
-DNS server terms are then expected to be one check interval shorter.
-This is to be tested. In the measured switches, every server gave both
-addresses for about 5 s (10 s for a timeout) before the new primary
-only, because of `minimumFailures=2`.
+variant A test measured the DNS server term with 1: from the first 200
+of the new primary to the new primary only, at most 5.0 s on a server
+that checks every 5 s, and up to 9.5 s on a server with the 10 s
+period. From the start of the act: 3.5 s to 14.1 s. The resolvers kept
+a SERVFAIL for at most 5.1 s (Unbound), 1.9 s (BIND) and 0.7 s (Knot
+Resolver).
 
 Thus a failure of service gives an estimate of about 2 to 4 minutes for
 most clients, and a node down less. About 2 % of resolvers keep an old
@@ -973,8 +999,10 @@ maintainer to accept this note.
 - **DNS failover is slow at its best.** About 2 % of resolvers keep an
   old answer after a change, and browsers keep an answer for 60 s. In
   section 10 J, only the DNS server terms are measured.
-- **SERVFAIL in the gap of a move** can be kept by resolvers for up to
-  5 minutes (section 7). The real test measures it.
+- **SERVFAIL in the gap of a move.** RFC 2308 permits a resolver to keep
+  it for up to 5 minutes. The variant A test measured at most 5.1 s.
+  Knot Resolver in forwarder mode can give a client SERVFAIL while
+  another server gives the primary (section 7, known limit).
 - **The private DNSSEC keys are on four servers.** A server that is
   broken into gives the keys of each zone. The replication uses TLS, and
   the backup is encrypted (0037).
@@ -993,31 +1021,32 @@ maintainer to accept this note.
 ## Open points
 
 No question is open for the maintainer. The answer when no address is
-up was decided on 2026-11-23: SERVFAIL (section 7, variant A), with
-pass conditions for the real test.
+up is decided: SERVFAIL (section 7, variant A), chosen on 2026-11-23
+and kept on 2026-11-24 after the variant A test, with the result of Knot
+Resolver in forwarder mode as a known limit.
 
 **Open:** the acceptance of this note by the maintainer, with the items
 marked proposed.
 
-**Still to be tested** (the laboratory test proved the build on trixie,
-PowerDNS on hot standbys, the packet cache, redirects, the cold start
-with variant B, and the check through a TCP proxy):
+**Still to be tested before the note can be accepted** (the two
+laboratory tests proved the build on trixie, PowerDNS on hot standbys,
+the packet cache, redirects, the cold start, the check through a TCP
+proxy, variant A with `minimumFailures=1`, and its pass conditions with
+Unbound and BIND):
 
-1. Variant A of section 7 with its pass conditions, and
-   `minimumFailures=1`.
-2. Resolver and client caches, with netem at the profiles of 0050.
-3. A real Keel pair in `cloud_advanced`, with the check address of
-   `keel` and the etcd witness, and a gap with no primary (section
-   10 K, case 15).
-4. The PostgreSQL replication with TLS, over a real link between sites.
-5. The Keel `postgresql` image with one writer and several standbys.
-6. A ZSK and a KSK roll with their waits, a standby that lags during a
+1. A real Keel pair in `cloud_advanced`, with the check address of
+   `keel`, the etcd witness and a real gap of a move (section 10 K).
+2. The PostgreSQL replication with TLS, over a real link between sites,
+   on the Keel `postgresql` image with one writer and several standbys.
+3. A ZSK and a KSK roll with their waits, a standby that lags during a
    roll, and the import of keys from another server.
-7. TLS that ends on a proxy (outside version 1).
-8. A certificate renewal on the primary that reaches the replica
+4. A certificate renewal on the primary that reaches the replica
    (section 12).
-9. The zone cache choice of section 4.
-10. The real tests of sections 10 K and 11.
+5. The zone cache choice of section 4.
+6. Knot Resolver in iterating mode (pass condition 2 of section 7).
+7. Later, not a condition of acceptance: TLS that ends on a proxy
+   (outside version 1), and the real tests of section 11 and section
+   10 K at each netem profile of 0050.
 
 ## What changed in the second round
 
@@ -1043,7 +1072,11 @@ with variant B, and the check through a TCP proxy):
 - **The laboratory test:** the measured values replace the estimates of
   sections 1, 3, 6, 7 and 10 J. The maintainer decided the answer when
   no address is up on 2026-11-23: SERVFAIL (variant A), with pass
-  conditions for the real test.
+  conditions.
+- **The variant A test:** the results of the pass conditions, the known
+  limit of Knot Resolver in forwarder mode, accepted by the maintainer
+  on 2026-11-24, the warm-up query and the restart one server at a
+  time, and the switch time with `minimumFailures=1`.
 - **Production facts** are not in this note. It states only general
   rules for an edge.
 

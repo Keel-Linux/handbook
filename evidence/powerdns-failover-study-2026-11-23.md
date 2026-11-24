@@ -4,7 +4,7 @@ Date: 2026-11-23. Site: none. Status: study, for decision 0045 (second
 round). No real-platform test is in this file. No guest, container or DNS
 server was made or changed. A laboratory test later measured many items
 of this file: `evidence/2026-11-23-powerdns-5.1-standby-and-failover-record.md`
-(in PR 205 until merged; "the laboratory test" below). The section
+("the laboratory test" below). The section
 "Not verified" gives the result for each item.
 
 ## Question
