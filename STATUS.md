@@ -3711,3 +3711,38 @@ mariadb, redis and postgresql were copied by hand into the release
 directory.
 
 The evidence is `evidence/2026-11-13-release-2026-11-12.md`.
+
+## 2026-11-24: release 2026-11-19, Nextcloud 19.0-4 at the testing level
+
+Release 2026-11-19 revision 1 is signed and published. It holds Keel
+Nextcloud 19.0-4 (keel 0.23.97, pool `stable-6`). It is a pre-release at
+the testing level (decision 0072): no channel pointer names it, it is not
+in the Proxmox index, and it has no application page. Image 19.0-3 is
+superseded and is not signed.
+
+- The 8 commissioning passes of 2026-11-19 passed on BR1 and BR2. The gate
+  passed for the template and the ISO at the signature.
+- The publication used apt#124 (the layer half of apt#112): core, web and
+  lnmp of this release are published under their sha256 names, and the
+  plain names stay on the layers the other applications use. Only additions
+  were made on the mirror. The published release directories, the channels
+  and the Proxmox index did not change.
+- keel-nextcloud has a boot test of the published layer now
+  (keel-nextcloud#6), a tag `19.0-4` and a Forgejo pre-release with 6
+  assets.
+
+Limit: the template and the ISO install normally. `keel pull nextcloud`
+needs keel 0.23.98 or later, which is not in an APT suite yet. A node with
+keel 0.23.97 cannot pull this release: `--release 2026-11-19 --rev 1`
+needs a signed `revision` file that the mirror writes only for a release
+that a channel names, and the flat layout does not find the lnmp parent
+by its sha256 name. The command list expected the `--release` pull to
+work; it did not, and the check stopped the procedure until the
+maintainer accepted the flat pull with keel 0.23.98 as the check.
+
+Follow-ups: keel 0.23.98 to `trixie-testing`, then to `trixie` after the
+upgrade test of decision 0090; the channel half of apt#112; a signed
+`revision` file for a release with no channel (needs the maintainer's
+word); M1 and M2 of the apt#124 review.
+
+The evidence is `evidence/2026-11-24-release-2026-11-19.md`.
