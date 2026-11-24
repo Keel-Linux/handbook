@@ -81,12 +81,12 @@ they run again after a reboot; no manifest declares them.
 | Item | Result | Key facts |
 | --- | --- | --- |
 | 1. Enforce node, undeclared listener, file empty, cut or missing | **PASS** | The node closed by itself in each of 9 cases; no apply by a person. Watch only: check sound again 19 to 31 s after the break, the listener never reachable. Table also deleted: listener reachable 19 to 26 s, then closed by the watch. Reboot: the boot unit writes the file again before the network; the listener never reachable. SSH reachable in every case except while the CT was down |
-| 2. Closed fallback | **FAIL** in part | The fallback works: by the watch (23 s) and at boot; only loopback, established, ICMPv6, DHCP client and sshd's ports pass (2222 when sshd listens there); unit failed, node degraded. A pair node in the fallback keeps WireGuard, etcd (3 voters), replication and Syncthing; the failover to it took 22.4 s, with its HTTP and HTTPS closed. But: a spec that does not parse disables the repair and the fallback: with a missing file the node is **open and silent after a reboot**; with an empty file it is loud but open. After a boot in the fallback, the apply restores the ruleset but **`keel-firewall.service` stays failed** and the node degraded until a reboot |
+| 2. Closed fallback | **FAIL** in part | The fallback works: by the watch (23 s) and at boot; only loopback, established, ICMPv6, IPv4 echo request, DHCP client and sshd's ports pass (2222 when sshd listens there); unit failed, node degraded. A pair node in the fallback keeps WireGuard, etcd (3 voters), replication and Syncthing; the failover to it took 22.4 s, with its HTTP and HTTPS closed. But: a spec that does not parse disables the repair and the fallback: with a missing file the node is **open and silent after a reboot**; with an empty file it is loud but open. After a boot in the fallback, the apply restores the ruleset but **`keel-firewall.service` stays failed** and the node degraded until a reboot or a `systemctl reset-failed` by hand |
 | 3. File and record lost, table loaded | **PASS**, with a note | Check exit 14. The watch does not fail: it repairs in enforce from the loaded table (31 s). The apply keeps enforce and writes the record; drop never became accept. All three lost by a reboot: NOT APPLIED, open, check exit 0, no line: the documented limit. The next apply goes to report by rule B |
 | 4. No-evidence node | **PASS** | Upgrade from 0.23.97 (1 simple, 2 cloud_simple, 3 cloud_advanced) and a new node's first boot: never degraded, no failed unit, no rule, 0 keel lines from the firewall units in 18 to 35 min with reboots, check `NOT APPLIED`, exit 0. The restart list is the list of tests 3 and 4. Rule B decides the first apply (report with the listener, enforce without), also in the first-boot scripts |
 | 5. Record hygiene | **PASS**, with a finding | Symlink, wrong owner, mode 0666 or 0620, directory 0777: no record, a warning in the plan, written again by a rename; the link target never changed; a linked directory refuses the write (exit 16). `apt remove` keeps the record, `apt purge` removes it. Finding: a directory owned by another user is never corrected, and with it an empty file at boot moves an enforce node to report |
 | 6. Regression | **PASS** | Enforce with no `firewall:` key on 1 simple, 2 cloud_simple, 3 cloud_advanced nodes; the probe table as in test 3; failover with the VIP 33.4 s after the shutdown started; mesh joins under enforce (9.3 s, 7 s); a busy invite stays valid and the same line joins on retry; watch CPU on 1 core: 32 to 48 ms a run (shell path), 0.88 to 1.03 s (repair) |
-| One more way | **found** | A spec that does not parse (item 2), and the text `state: off` anywhere in the spec, a comment included, which makes the watch skip a missing file (open and silent, 6 min, until a reboot) |
+| One more way | **found** | A spec that does not parse (item 2); the text `state: off` anywhere in the spec, a comment included, which makes the watch skip a missing file (open and silent for the 2 min observed; a reboot would repair it, read from the code); an untrusted record directory and an empty file at boot (item 5: enforce to report) |
 
 ## Item 1: enforce node with an undeclared listener, file broken (PASS)
 
@@ -135,7 +135,7 @@ the step fail while the spec and the record are sound.
 | --- | --- |
 | 2a. The directory, watch only | Fallback loaded 23 s later. The watch: `Error: ... cannot be read: Is a directory; derived.firewall: enforce, as keel's record says ...`, exit 14, `keel-firewall-watch.service: Failed`; node `degraded`. The table: `comment "keel-fallback"`, `policy drop`, `iif "lo" accept`, `ct state established,related accept`, `ct state invalid drop`, `meta l4proto ipv6-icmp accept`, `icmp type echo-request accept`, `ip6 saddr fe80::/10 udp dport 546 accept`, `udp dport 68 accept`, `tcp dport 22 accept`. From CT 9400 and the VM, both families: TCP 22 `open`; TCP and UDP 9999, TCP 80, 443, 12321 `timeout` |
 | 2b. The directory kept, `pct reboot` | `keel-firewall.service`: `write ... not done: Is a directory; the node keeps the firewall it had`, `the node was in enforce and ... cannot be written again: the closed fallback table is loaded (drop; sshd's ports 22); the node stays degraded until keel spec apply --system`, exit 16, `Failed`. Node `degraded`, `keel-firewall.service` and `keel-firewall-watch.service` failed. `fastprobe` through the reboot: 9999 never reachable; 22 `open` again about 18 s after the reboot started |
-| 2c. The directory removed, then `keel spec apply --system` | `enforce, as keel's record says ...`, `write ... (enforce) ...: done`, `load it ...: done`; check `table inet keel is the one ... says`. `keel-firewall-watch.service` is `inactive` again. But `keel-firewall.service` stays **failed** and the node stays **degraded** (35 s and again 2 min after the apply). Only the next reboot cleared it |
+| 2c. The directory removed, then `keel spec apply --system` | `enforce, as keel's record says ...`, `write ... (enforce) ...: done`, `load it ...: done`; check `table inet keel is the one ... says`. `keel-firewall-watch.service` is `inactive` again. But `keel-firewall.service` stays **failed** and the node stays **degraded** (35 s and again 2 min after the apply). It stayed failed until a `systemctl reset-failed` by hand (at the start of 2e, log 22) |
 
 ### SSH on a port that is not 22, and sshd's ports unknown
 
@@ -228,7 +228,7 @@ and the cloud_simple pair 9430 and 9431 (logs 10, 11, 21).
 | Runs triggered | none | `keel-database-follow.service`, `keel-database-watch.service` | the same, `keel-vip-check.service`; on 9420 also `keel-mesh-etcd.service`, `keel-mesh-sync.service` |
 | MariaDB, etcd, Syncthing, wg-quick, nginx | not restarted | not restarted | not restarted |
 
-The list is the list of the third and fourth tests. `keel diff` exit
+The restart list is the list of the third and fourth tests. The runs that the restarts triggered differ a little (here `keel-database-position.service` started on both cloud_simple nodes, in the fourth test only on 9431; `keel-mesh-sync.service` ran on 9420), as the timers fall. `keel diff` exit
 changes from 0 to 14 (the firewall drift until the first apply), as the
 PR says.
 
@@ -242,7 +242,7 @@ systemd's, the tables, `keel firewall check`.
 | --- | --- | --- | --- | --- | --- | --- |
 | 9401 simple | 20 min after the install, no reboot (watch timer not started) | `running` | 0 | 0 | `inet filter` | `NOT APPLIED: ... is not there, and nothing says this node had a firewall of keel's; keel spec apply --system writes it`, exit 0 |
 | 9401 simple | then `pct reboot`; 15 min with the timer running (about 30 runs) | `running` | 0 | 0 | `inet filter` | the same |
-| 9420 to 9422, 9430, 9431 | 18 min after the install | `running` | 0 | 0 | `inet filter` and CrowdSec's | the same |
+| 9420 to 9422, 9430, 9431 | about 18 min after the install (not 20) | `running` | 0 | 0 | `inet filter` and CrowdSec's | the same |
 | 9421, 9431 | `pct reboot` at 18 min, 3 min with the timer running | `running` | 0 | 0 | the same | the same |
 | 9405 new node | the first boot with the test package, before any apply (below), 20 min | `running` | 0 | 0 | `inet filter` | the same |
 
@@ -378,12 +378,17 @@ Two ways were found, and one method that did not work.
    `# old note: firewall state: off was the choice before 0097` added
    (`keel spec validate` exit 0), the file removed and the table deleted:
    `keel firewall check` exit 14, but the watch script exit 0 with no
-   line; 90 s and 6 min later the node was still `running`, no failed
-   unit, no table, TCP 9999 `open` and UDP 9999 `reply` from CT 9400. No
-   Monit check names `keel-firewall` on this node (nothing under
-   `/etc/monit`). The next boot would repair it (the boot unit parses the
-   spec); the watch does not. With the comment removed, the watch wrote
-   the file again within 40 s.
+   line; 90 s later the node was still `running`, no failed unit, no
+   table, TCP 9999 `open` and UDP 9999 `reply` from CT 9400. At 03:37:41,
+   2 min after the break, the comment was removed; the watch then wrote
+   the file again within 40 s. Nothing under `/etc/monit` names
+   `keel-firewall`: keel writes Monit's `keel-firewall` check into
+   `/etc/keel/monit/keel-manifest.conf`, which Monit includes only while
+   `monitor.enabled` is true (`keel/system/appliance.py`, read from the
+   code); the test specs have no `monitor:` section, so no Monit check ran.
+   The next boot would repair the node, because the boot unit parses the
+   spec (read from the code, not tested). (Log 80 says "6 min after the
+   break" at 03:37:41; that is wrong, it was 2 min.)
 3. Also found: an untrusted record (directory owner wrong, which the apply
    does not correct) and an empty file at boot move the node from enforce
    to report (item 5).
@@ -405,7 +410,8 @@ Two ways were found, and one method that did not work.
 - The ISO, two sites with netem, image builds, the other images.
 - The fallback when sshd's ports are truly unknown (no running sshd and an
   unreadable configuration).
-- Monit's `keel-firewall` check (not present on the tested nodes).
+- Monit's `keel-firewall` check (included only with `monitor.enabled`; the test specs had no `monitor:` section).
+- The window with no apply on the cloud nodes was about 18 min, not 20 (install at 03:15, last reading at 03:33:50).
 - The pair under writes during the upgrade.
 
 ## Logs
