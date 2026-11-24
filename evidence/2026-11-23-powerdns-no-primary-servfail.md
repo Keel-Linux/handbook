@@ -35,7 +35,7 @@ file states each change.
 | Pass condition of section 7 | Result |
 | --- | --- |
 | 1. SERVFAIL when no address is up, and the addresses that are up in all other cases | **PASS.** 504 answers in 14 states: 168 SERVFAIL, each in a state with no address up. 336 NOERROR answers with the correct addresses, and `delv` gave "fully validated" for all 336. A, AAAA, the apex and `www`. |
-| 2. While at least one DNS server gives the primary, the resolver gives an answer, not SERVFAIL (case 7) | **Unbound: PASS. BIND: PASS. Knot Resolver: FAIL.** Unbound gave no SERVFAIL. It gave no reply to 1 to 11 of each 128 fresh queries, because of its `discard-timeout` (1900 ms). BIND answered all 1250 queries of this case. Knot Resolver 5.7.5 (forward mode) gave SERVFAIL in 7 of 9 runs, to 1.6 % to 6.3 % of the queries of a phase. |
+| 2. While at least one DNS server gives the primary, the resolver gives an answer, not SERVFAIL (case 7) | **Unbound: PASS. BIND: PASS. Knot Resolver: FAIL.** Unbound gave no SERVFAIL. It gave no reply to 0 to 11 of about 128 fresh queries per run, because of its `discard-timeout` (1900 ms). BIND answered all 1250 queries of this case. Knot Resolver 5.7.5 (forward mode) gave SERVFAIL in 6 of 8 runs, to 1.6 % to 6.3 % of the queries of a phase. |
 | 3. After the gap of a move, the resolver gives the new primary no later than 60 s after the first DNS server gives it (case 15) | **PASS** for all 3 resolvers, in 7 runs. The worst time was 39.3 s, from the positive cache of the old address (TTL 60 s). The SERVFAIL hold was at most 5.1 s (Unbound), 1.9 s (BIND) and 0.7 s (Knot Resolver). |
 
 - **Item 2.** With `minimumFailures=1`, each server gave the new primary
@@ -56,8 +56,8 @@ file states each change.
     is the age of the last check result.
 - **Item 4.** After a `pdns` restart, the query that starts the checks
   gets SERVFAIL. The next query, 0.13 s to 0.17 s later, got the
-  correct answer in 8 of 10 cases. In 2 of 10 cases (the same restart,
-  A and AAAA, with one candidate powered off), the server gave
+  correct answer in 8 of 10 restarts. In 2 of 10 restarts (one for A,
+  one for AAAA, with one candidate powered off), the server gave
   SERVFAIL for 5.3 s. Through the 3 resolvers at 250 ms, a restart of
   one server or of all 3 servers gave no SERVFAIL to the client
   (378 queries). On the first query after setup, with all 3 servers
@@ -300,18 +300,23 @@ Thus each query is a new resolution, as after the end of the TTL.
 
 Each count is the number of answers with web-a. Each answer had the AD
 flag, except in cond2-loss1, where the AD flag was not recorded (a
-parser defect, corrected for the later runs).
+parser defect, corrected for the later runs). kdiag recorded only the
+rcode.
 
 - **Unbound gave no SERVFAIL.** It gave no reply to some queries. The
   cause is `discard-timeout` (default 1900 ms): Unbound drops the reply
   to a client that waits longer, and the resolution continues. With the
   setting at 0, the same case gave 120/120, and the slowest answer took
   3.7 s. Phase 0 had no drop. Thus the servers that answer SERVFAIL
-  make the resolution slower than 1.9 s: Unbound asks them again
-  (`outbound-msg-retry`, default 5) before it asks the good server. A
-  stub that waits 5 s and asks again (`+time=5 +tries=2`) got 120/120.
+  make the resolution slower than 1.9 s. The probable cause is that
+  Unbound asks them again (`outbound-msg-retry`, default 5) before it
+  asks the good server. The trace was not read. In the run with
+  `+time=5 +tries=2`, no Unbound answer took more than 2.1 s, so the
+  stub did not ask again. A stub that asks again after 5 s is expected
+  to get the answer from the cache, because the slowest resolution took
+  3.7 s.
 - **BIND answered every query** of this case (1250 queries).
-- **Knot Resolver gave SERVFAIL** in 7 of 9 runs, to 1.6 % to 6.3 % of
+- **Knot Resolver gave SERVFAIL** in 6 of 8 runs, to 1.6 % to 6.3 % of
   the queries of a phase. Its debug log shows one such query: SERVFAIL from dns3, SERVFAIL
   from dns3 again, a timeout from dns2 (a lost packet), SERVFAIL from
   dns3, and then the end of the request with state FAIL. In forward
@@ -341,8 +346,8 @@ direct probe gave the time when the first DNS server gave web-b.
 
 The resolver columns give the time from the first server with web-b to
 the first answer of the resolver with web-b. After that answer, each
-resolver gave web-b at each query. Each answer had the AD flag, except
-in gap20-loss1-r1 (not recorded).
+resolver gave web-b at each query. Each NOERROR answer had the AD flag,
+except in gap20-loss1-r1 (not recorded).
 
 - **All servers answered SERVFAIL** from 4.0 s to 7.4 s after web-a
   failed, until the end of the gap.
@@ -369,7 +374,7 @@ loopback every 0.1 s):
 | --- | --- | --- |
 | web-a 200, web-b 404 | 3 x (A, AAAA) | 1 SERVFAIL (the first query, 0.16 s to 1.25 s after the restart), then web-a 0.13 s to 0.17 s later |
 | web-a powered off, web-b 200 | run 1, A and AAAA | 1 SERVFAIL, then web-b 0.13 s later |
-| web-a powered off, web-b 200 | run 2, A and AAAA | SERVFAIL for 5.3 s (30 and 32 answers), then web-b |
+| web-a powered off, web-b 200 | run 2, A and AAAA (2 restarts) | SERVFAIL for 5.3 s (32 answers for A, 30 for AAAA), then web-b |
 
 - The first query starts the checks of its name and type, and gets
   SERVFAIL (`failOnIncompleteCheck`). With variant A, an address with
@@ -394,8 +399,8 @@ not checked `www` yet. The first query to Unbound, with no netem, got
 SERVFAIL: "all the configured stub or forward servers failed". Each
 server answered SERVFAIL to the query that started its checks. The
 query to BIND 1 s later got web-a. With 250 ms between the resolver and
-the servers, the checks ended before the retries, and no client got
-SERVFAIL.
+the servers, no client got SERVFAIL. The probable cause is that the
+checks ended before the retries of the resolver.
 
 **What this means for variant A.** One cold server costs nothing: the
 resolver asks another server. All servers cold for one name at the same
@@ -412,7 +417,7 @@ condition 2. Thus the choice goes back to the maintainer. The facts:
 
 | Fact | Variant A (measured here) | Variant B (run 1) |
 | --- | --- | --- |
-| A server with no path to the nodes (case 7) | SERVFAIL. Unbound and BIND gave the correct answer. Knot Resolver (forward) gave SERVFAIL to up to 6.3 % of the queries of a phase. Unbound gave no reply within 1.9 s to up to 8.6 % (`discard-timeout`). | Both addresses, fast. A client can get the replica. |
+| A server with no path to the nodes (case 7) | SERVFAIL. Unbound and BIND gave no SERVFAIL. Knot Resolver (forward) gave SERVFAIL to up to 6.3 % of the queries of a phase. Unbound gave no reply within 1.9 s to up to 8.6 % (`discard-timeout`). | Both addresses, fast. A client can get the replica. |
 | No primary at all (the gap) | SERVFAIL. Each resolver gave the new primary 0.1 s to 5.1 s after the first server. | Both addresses. A client can get the replica, which refuses writes. |
 | The old address after a switch | Up to 9.5 s, the age of the last check | The same |
 | A cold server | SERVFAIL until the first results | Both addresses for about 5 s (with `minimumFailures=2`) |
@@ -517,29 +522,30 @@ the test.
 
 On 2026-11-24 the test destroyed its 8 CTs (`pct destroy --purge`). It
 removed its files from the VM, the template that it had downloaded, and
-the 3 netem modules (`rmmod`). The VM state after the cleanup is the
-same as before the test, except the date. The output after the cleanup:
+the 3 netem modules (`rmmod sch_netem cls_u32 sch_prio`). A `diff` of
+the VM state after the cleanup against the state before the test found
+no difference, except the date. The state covers `pct list`, `qm list`,
+`/etc/pve/lxc`, the template cache, `/root`, `lsmod`, the `local`
+storage and the network links. The output after the cleanup, condensed
+(the commands print no headers, and the storage lines are shortened):
 
 ```
-== pct list
-== qm list
-== /etc/pve/lxc
-== template cache
+pct list, qm list, /etc/pve/lxc: (empty)
+template cache:
 debian-13-keel-core_19.0-13_amd64.tar.zst
 debian-13-keel-nextcloud_19.0-3_amd64.tar.zst
 debian-13-keel-nextcloud_19.0-4_amd64.tar.zst
-== lsmod netem, prio, u32
-no-netem-module
-no-prio-u32
-== storage
+lsmod: no-netem-module, no-prio-u32
+local storage:
 local:iso/debian-13-keel-nextcloud_19.0-3_amd64.iso
 local:iso/debian-13-keel-nextcloud_19.0-4_amd64.iso
 local:vztmpl/debian-13-keel-core_19.0-13_amd64.tar.zst
 local:vztmpl/debian-13-keel-nextcloud_19.0-3_amd64.tar.zst
 local:vztmpl/debian-13-keel-nextcloud_19.0-4_amd64.tar.zst
-== links
-lo, eth0, vmbr0
+links: lo, eth0, vmbr0
 ```
 
-The 3 Keel images and the 2 ISO files were there before the test. The
-test changed no firewall, bridge, storage or cluster setting of the VM.
+The 3 Keel images and the 2 ISO files were there before the test. One
+change stays: `pveam update` refreshed the appliance index of the VM
+(`/var/lib/pve-manager/apl-info/`), as in run 1. The test changed no
+firewall, bridge, storage or cluster setting of the VM.
