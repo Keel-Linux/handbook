@@ -508,8 +508,15 @@ them.
   end), transition step 6 (DBeaver connects through the access network),
   and "The WireGuard access peer: a later step" (it is now this note).
 - **0097**: decision 1.3 (a forward drop for the access interface), the
-  allow list of decision 2 (a new `access` class), and section 3
-  (answer 6, B).
+  allow list of decision 2 (a new `access` class), the `report` state
+  (the drop of the access interface and the forward drop are in
+  `report` too: the interface is new, so nothing that worked stops),
+  and section 3 (answer 6, B). As rule B does for `enforce`, only an
+  apply that a person runs first closes 22 on IPv4; after that, the
+  file of keel is the record, and `keel mesh` keeps it. 22 closes on
+  IPv4 on each node with a global IPv6 address and an IPv6 default
+  route, also with no access network. `firewall.allow` with port 22 and
+  a source prefix opens it again for that prefix.
 - **0049**: the text "SSH tunnel, for now" for a workstation (lines 180,
   416, 562, 582) ends.
 - **0041**: the manifest gets the exposure class `access`.
