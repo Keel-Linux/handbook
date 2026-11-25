@@ -2,8 +2,10 @@
 
 Date: 2026-11-25
 Status: **proposed.** The maintainer gave the direction on 2026-11-25
-(see "What was asked"). The questions under "Questions for the
-maintainer" are open. Nothing in this note is built or tested.
+(see "What was asked"). On 2026-11-25 he answered the 11 questions, each
+with the recommendation (see "Questions for the maintainer, answered").
+The note stays proposed until the 11 real tests pass. Nothing in this
+note is tested.
 
 Sources. Each repository path was read on its default branch after
 `git fetch` on 2026-11-25: `keel` `bece037` (main), `common` `18522b4`
@@ -154,11 +156,11 @@ mesh port and no WireGuard port (`firewall.py:135-140`).
 2. An access peer has no etcd certificate, no Syncthing device and no
    right on the mesh.
 3. The access peer is on its own interface, the **access interface**
-   (question 1). Its default name is `keel-access`.
+   (answer 1, A). Its default name is `keel-access`.
 4. keel declares the access network in a new spec section,
-   `network.access` (names to confirm in the keel design):
+   `network.access`:
    - `interface`, default `keel-access`.
-   - `listen_port`, the UDP port (question 2).
+   - `listen_port`, the UDP port, default 51822 (answer 2, A).
    - `address`, the address of the node on the access network.
    - `private_key.file`, default `/etc/wireguard/keel-access.key`, made
      on the node as `wgkeys.py` makes the mesh key. It is a different
@@ -172,7 +174,7 @@ mesh port and no WireGuard port (`firewall.py:135-140`).
 ### 2. Address plan
 
 1. Each node makes its own random unique local /64 for the access
-   network at its first enrolment (question 3). The node is `::1`.
+   network at its first enrolment (answer 3, A). The node is `::1`.
    Each computer gets a random free address in the same /64.
 2. keel refuses an access prefix that overlaps the mesh prefix, a
    region, the VIP range, `network.interfaces` or a peer endpoint, as
@@ -190,19 +192,20 @@ mesh port and no WireGuard port (`firewall.py:135-140`).
    item "Add a computer". He types a name for the computer. For the
    first computer, he reaches confconsole by SSH over IPv6 or on the
    console of the host.
-2. confconsole calls `keel access invite --name <name>` (name to confirm
-   in the keel design). keel makes an enrolment token and opens the
+2. confconsole calls `keel access invite --name <name>`. keel makes an enrolment token and opens the
    enrolment port in a timed nftables set, as `mesh_invites` does
    (`firewall.py:155`).
-3. The token is valid once and for 15 minutes by default. It holds the
+3. The token is valid once and for 15 minutes by default. The spec can
+   set from 5 to 60 minutes (answer 10, A). It holds the
    public key of the node on the access network, the node endpoint, the
    fingerprint of a certificate for the enrolment, a one-use secret and
    the expiry. keel stores only a key derived from the secret, as
    `keel/mesh/invites.py` does.
 4. confconsole shows one command. The administrator pastes it in a
    terminal on his computer. The command gets the enrolment script from
-   the node over HTTPS and pins the certificate fingerprint
-   (question 4).
+   the node over HTTPS and pins the public key of the certificate with
+   `curl --pinnedpubkey` (answer 4, A). The node serves the script
+   itself, on the enrolment port.
 5. The script makes the key pair on the computer with `wg genkey`. It
    sends only the public key and a proof of the secret to the node. The
    node never has the private key.
@@ -231,10 +234,10 @@ handshake, so a computer behind NAT works with no change on the node.
 
    | Port | Service | Note |
    | --- | --- | --- |
-   | TCP 22 | SSH | Open already on every interface by 0097 section 3. If question 6 is B, 22 is also an `access` port, so that the access interface keeps it |
+   | TCP 22 | SSH | Also an `access` port, so that the access interface keeps it when 22 closes on IPv4 (answer 6, B) |
    | TCP 12321 | Webmin, until 0094 removes it | The `webmin` process in `keel-core/packages/keel-core/manifest.yaml:27` changes from `public` to `access`. Thus 12321 closes on the public address |
-   | TCP 3306 | MariaDB, images with MariaDB | Through a local relay (question 5) |
-   | TCP 5432 | PostgreSQL, images with PostgreSQL | Through a local relay (question 5) |
+   | TCP 3306 | MariaDB, images with MariaDB | Through a local relay, `systemd-socket-proxyd` to the loopback (answer 5, A) |
+   | TCP 5432 | PostgreSQL, images with PostgreSQL | Through a local relay, `systemd-socket-proxyd` to the loopback (answer 5, A) |
 
 3. TCP 12320 (the web shell) and TCP 12322 are in no Keel manifest.
    12320 is only in the `WEBMIN_FW_TCP_INCOMING` list of the `Makefile`
@@ -257,7 +260,10 @@ handshake, so a computer behind NAT works with no change on the node.
 
 1. `AllowTcpForwarding` stays `no`. Keel adds no `Match` block for
    forwarding. 0094 design rule 4 and its work items 2 and 5 end.
-2. SSH on the public IPv4 address: question 6.
+2. TCP 22 opens on IPv6 and on the access interface only (answer 6,
+   B). keel refuses to close 22 on IPv4 on a node that has no global
+   IPv6 address: 22 then stays open on both families, and the plan says
+   so. Thus the node is never closed.
 3. The root login over IPv6 stays as it is.
 
 ### 6. Modes
@@ -268,8 +274,8 @@ handshake, so a computer behind NAT works with no change on the node.
 | `cloud_simple` | One access interface on each node, independent of `wg0` |
 | `cloud_advanced` | The same. The etcd witness of 0057 has no database and no Webmin, so it gets an access network only if the administrator asks for one |
 
-A pair: question 7. The VIP is not on the access network in each option
-of question 7. DBeaver connects to the access address of the primary.
+A pair: one enrolment for each node, two tunnels, no VIP on the access
+network (answer 7, A). DBeaver connects to the access address of the primary.
 confconsole shows the role of each node, and the guide tells the
 administrator to connect to the primary for a write. On a replica, the
 database refuses writes (`dbreadonly.py`).
@@ -284,15 +290,42 @@ database refuses writes (`dbreadonly.py`).
    each packet from that key at once.
 3. Item "Waiting enrolments" lists each token that is not used and not
    expired, and can cancel it.
-4. A removal on one node does not remove the peer on another node.
-   Question 7 says how a pair handles it.
+4. A removal on one node does not remove the peer on another node. In
+   a pair, the administrator removes the computer on each node (answer
+   7, A).
 5. `keel diff` reports a peer on the access interface that the spec does
    not declare.
 
-## Questions for the maintainer
+## Questions for the maintainer, answered
 
-Each question has a recommendation: the option with the least power,
-strict over comfortable.
+The maintainer answered on 2026-11-25. Each answer is the
+recommendation:
+
+1. **A**: a separate interface, `keel-access`, with its own key and UDP
+   port. Not `wg0`.
+2. **A**: UDP 51822 by default, which the spec can change.
+3. **A**: a random unique local /64 for each node, the node at `::1`.
+4. **A**: the node serves the enrolment script on the enrolment port.
+   The command pins the public key of the certificate of the node
+   (`curl --pinnedpubkey`).
+5. **A**: a local relay (`systemd-socket-proxyd`) from the access
+   address to the database on the loopback. The binds and the accounts
+   of the database do not change.
+6. **B**: TCP 22 only on IPv6 and on the access interface. keel refuses
+   this on a node that has no global IPv6 address.
+7. **A**: in a pair, one enrolment for each node, two tunnels, no VIP.
+8. **A**: behind a shared IPv4 address, IPv6 only for now.
+9. **A**: Linux and macOS first.
+10. **A**: the token is valid 15 minutes. The spec can set 5 to 60.
+11. **A**: 12321 closes on the public address at the first apply after
+    the upgrade of `keel-core` that moves it to `access`.
+
+Rules from the maintainer, with the answers: Keel never uses SSH
+tunnels or TCP forwarding (`AllowTcpForwarding` stays `no`). The access
+peer is a restricted peer with no operator right, never a mesh member.
+Strict over comfortable.
+
+The questions as they were asked:
 
 1. **Which interface does the access peer use?**
    - A. A separate interface, `keel-access`, with its own key and UDP
@@ -427,7 +460,7 @@ strict over comfortable.
 
 Each test writes an evidence file (0053). The tests run in the test VM
 of each site (not on the cluster), at 250 ms RTT with 2 % loss by
-netem, on IPv6, and on IPv4 where option 8B applies.
+netem, on IPv6 (answer 8, A).
 
 1. **Enrolment.** confconsole makes a token, the command enrols a Linux
    computer and a macOS computer, and SSH works on the access address.
@@ -449,18 +482,20 @@ netem, on IPv6, and on IPv4 where option 8B applies.
    address, until the removal act of 0094.
 7. **Revocation.** After "Remove a computer", the next packet from that
    computer gets no answer, and the list no longer shows it.
-8. **Pair.** The test of the option that question 7 chooses, with a
+8. **Pair.** One enrolment for each node (answer 7, A), with a
    failover between the 2 sites. The guide steps work after the
    failover.
 9. **Reboot and upgrade.** After a reboot, the access interface and the
    rules come back. The 0090 upgrade test on a published image shows
-   the option of question 11. With A: after the upgrade and the next
+   answer 11, A: after the upgrade and the next
    apply, 12321 is closed on the public address, SSH works, and an
    enrolment makes 12321 answer on the access address.
 10. **CrowdSec.** Failed SSH logins from the access address do not ban
     it, after the fix of keel#303.
-11. **SSH on IPv4.** If question 6 is B: the refusal on a node with no
-    global IPv6 address, and the session that runs the apply stays open.
+11. **SSH on IPv4.** TCP 22 does not answer on the public IPv4 address
+    of a node with a global IPv6 address. On a node with no global IPv6
+    address, keel refuses to close 22 on IPv4, says so, and the session
+    that runs the apply stays open (answer 6, B).
 
 ## What this amends
 
@@ -468,13 +503,13 @@ This note changes these notes when it is accepted. It does not edit
 them.
 
 - **0094**: decision 3 (DBeaver through the access network, not an SSH
-  tunnel), decision 4 (one new UDP port, if question 2 is A), design
+  tunnel), decision 4 (one new UDP port, answer 2), design
   rule 4 (no `Match` block, no forwarding), work items 2 and 5 (they
   end), transition step 6 (DBeaver connects through the access network),
   and "The WireGuard access peer: a later step" (it is now this note).
 - **0097**: decision 1.3 (a forward drop for the access interface), the
-  allow list of decision 2 (a new `access` class), and section 3 if
-  question 6 is B.
+  allow list of decision 2 (a new `access` class), and section 3
+  (answer 6, B).
 - **0049**: the text "SSH tunnel, for now" for a workstation (lines 180,
   416, 562, 582) ends.
 - **0041**: the manifest gets the exposure class `access`.
@@ -485,9 +520,9 @@ The index row of each amended note will say "amended by 0098".
 
 ## Work list
 
-In order. Nothing is started.
+In order.
 
-1. The real test of the relay of question 5 and of `pg_hba.conf` on TCP
+1. The real test of the relay of answer 5 and of `pg_hba.conf` on TCP
    loopback, by hand, before the design. Evidence file.
 2. keel: `network.access` in the spec, its validation and its render.
 3. keel: the `access` exposure class and the forward rule in
