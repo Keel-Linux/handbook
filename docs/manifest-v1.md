@@ -447,7 +447,7 @@ kind: overlay
 name: wireguard
 title: WireGuard
 summary: The mesh overlay (0024); the interface itself is the spec's (0018, 0020)
-screen: /usr/lib/confconsole/plugins.d/Networking/wireguard.py
+screen: /usr/lib/confconsole/plugins.d/Instance/Overlay_network.py
 ```
 
 It declares no process and no check, on purpose. The interface, its unit
@@ -487,7 +487,6 @@ kind: overlay
 name: crowdsec
 title: CrowdSec
 summary: Bans first, before anything else sees the request (0029, 0030)
-screen: /usr/lib/confconsole/plugins.d/Security/crowdsec.py
 processes:
   - name: crowdsec
     unit: crowdsec.service
