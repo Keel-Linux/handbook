@@ -1,11 +1,14 @@
 # 0098: Administrator access goes through a Keel WireGuard network
 
 Date: 2026-11-25
-Status: **proposed.** The maintainer gave the direction on 2026-11-25
-(see "What was asked"). On 2026-11-25 he answered the 11 questions, each
+Status: **accepted, 2026-11-27.** The maintainer gave the direction on
+2026-11-25 (see "What was asked") and answered the 11 questions, each
 with the recommendation (see "Questions for the maintainer, answered").
-The note stays proposed until the 11 real tests pass. Nothing in this
-note is tested.
+The real tests passed in two rounds (handbook evidence pull requests 220
+and 222), except the macOS client, which is not tested. The code is in
+keel 0.23.104 to 0.23.118, confconsole 2.2.3+keel28 and keel-core 0.1.5,
+all in the stable suite `trixie` since 2026-11-27 (apt pull request 134).
+The maintainer accepted the note on 2026-11-27.
 
 Sources. Each repository path was read on its default branch after
 `git fetch` on 2026-11-25: `keel` `bece037` (main), `common` `18522b4`
