@@ -1,10 +1,13 @@
 # 0099: the QEMU guest agent of a Keel machine accepts only an allow-list of commands
 
 Date: 2026-11-26
-Status: **proposed.** The maintainer gave the direction on 2026-11-26:
-restrict the agent, strict before comfortable. The code is in `common`
-pull request 87 (branch `feat/qemu-ga-allow-list`), not merged and not
-tested on a real node.
+Status: **accepted, 2026-11-27.** The maintainer gave the direction on
+2026-11-26: restrict the agent, strict before comfortable. The code is
+merged (`common` pull request 87). A test machine built from the boot
+layer passed on a real node (handbook evidence pull request 222): the
+IP addresses show in Proxmox, `qm guest exec` and `qm guest passwd` are
+refused, a backup with freeze and a shutdown from Proxmox work. The
+maintainer accepted the note on 2026-11-27.
 
 Sources, read on 2026-11-26: `common` branch `19.x` (`plans/keel-boot`),
 `buildtasks` branch `19.x` (`products/boot/Makefile`), `keel`
